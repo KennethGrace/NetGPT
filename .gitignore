@@ -1,0 +1,14 @@
+# Developer Settings
+.vscode
+.idea
+
+# Development Environment
+venv
+node_modules
+
+# Python bytecode (compiled)
+*.pyc
+__pycache__/
+
+# React builds
+dist/

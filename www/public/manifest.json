@@ -1,0 +1,18 @@
+{
+  "short_name": "NetGPT",
+  "name": "NetGPT - Networking AI Assistant",
+  "description": "An AI Assistant for Network Engineers.",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ],
+  "id": "/",
+  "start_url": ".",
+  "scope": "/",
+  "display": "fullscreen",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+}

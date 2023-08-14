@@ -1,0 +1,28 @@
+{
+  "messages": [
+    {
+      "sender": "You",
+      "sections": [
+        {
+          "messageType": "text",
+          "content": "Hello, NetGPT!"
+        }
+      ],
+      "timestamp": 100
+    },
+    {
+      "sender": "NetGPT",
+      "sections": [
+        {
+          "messageType": "text",
+          "content": "Hello, User!"
+        },
+        {
+          "messageType": "code",
+          "content": "To get started, please review your `Server Settings` in the upper left corner."
+        }
+      ],
+      "timestamp": 200
+    }
+  ]
+}

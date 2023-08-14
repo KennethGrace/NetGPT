@@ -1,0 +1,35 @@
+---
+version: "3.7"
+name: netgpt
+services:
+  webui:
+    domainname: www.netgpt.local
+    build:
+      tags:
+        - kennethgrace/netgpt-webui
+      context: ./www
+      dockerfile: Dockerfile
+    ports:
+      - "80:8080"
+    depends_on:
+      - api
+    x-develop:
+      watch:
+        - action: rebuild
+          path: ./www
+  api:
+    domainname: api.netgpt.local
+    build:
+      tags:
+        - kennethgrace/netgpt-api
+      context: ./api
+      dockerfile: Dockerfile
+    ports:
+      - "49488:49488"
+    x-develop:
+      watch:
+        - action: rebuild
+          path: ./api
+
+
+          
