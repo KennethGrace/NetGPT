@@ -12,7 +12,7 @@ the API are containerized using [Docker](https://www.docker.com/).
 The easiest way to run NetGPT is using Docker. The Docker images are available on [Docker Hub](https://hub.docker.com/u/kennethgrace). The application is available as `kennethgrace/netgpt-webui` and the API is available as `kennethgrace/netgpt-api`. The images are built automatically from the `main` branch of this repository. To run the application, use the following command:
 
 ```bash
-docker run -d -p 80:80 kennethgrace/netgpt-webui
+docker run -d -p 80:8080 kennethgrace/netgpt-webui
 ```
 
 To run the API, use the following command:
@@ -20,6 +20,8 @@ To run the API, use the following command:
 ```bash
 docker run -d -p 49488:49488 kennethgrace/netgpt-api
 ```
+
+The application will be available at `http://localhost` and the API will be available at `http://localhost:49488`. This is the default server url for the application, if you have separate servers for the application and the API, you can change the server url in the application settings of the web UI.
 
 ### Docker Compose
 

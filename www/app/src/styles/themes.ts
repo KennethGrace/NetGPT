@@ -19,13 +19,13 @@ export const getDesign = (mode: PaletteMode) => ({
       ? {
           // palette values for light mode
           primary: {
-            main: "#FFBF00",
+            main: "#FF9B00",
           },
           secondary: {
-            main: "#B9CBFF",
+            main: "#77B8F9",
           },
           tertiary: {
-            main: "#ecf1ff",
+            main: "#C6CDE4",
           },
           code: {
             main: "#efefef",

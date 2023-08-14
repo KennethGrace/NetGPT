@@ -41,10 +41,10 @@ export const Notification: FC<NotifyProps> = ({
         <Snackbar
             open={isOpen}
             autoHideDuration={6000}
-            onClose={onClose}
             anchorOrigin={{ vertical: "top", horizontal: "center" }}
+            onClose={onClose}
         >
-            <Alert icon={icon} severity={severity} onClose={onClose}>
+            <Alert icon={icon} severity={severity}>
                 <AlertTitle>{severityTitles[severity]}</AlertTitle>
                 {message}
             </Alert>

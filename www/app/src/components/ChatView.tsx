@@ -41,8 +41,43 @@ const ChatMessageSection: FC<{
       return {
         maxHeight: "160px",
         overflow: "auto",
+        border: "1px solid",
+      };
+    }
+  }, [messageType]);
+  const finalContent = useMemo(() => {
+    if (messageType === "code") {
+      try {
+        // Attempt to format the code as JSON, then parse the JSON into
+        // a well-formatted string. The data may have values which are not well-formatted strings,
+        // so we should clean up the line breaks.
+        let formattedContent: string[]; // Formatted content is an array of lines
+        let data: {
+          [label: string]:
+            | string
+            | {
+                [label: string]: string;
+              };
+        } = JSON.parse(content);
+        formattedContent = Object.entries(data).map(([key, value]) => {
+          if (typeof value === "object") {
+            return [
+              key,
+              Object.entries(value)
+                .map(([key, value]) => {
+                  return [key.toUpperCase(), value].join("\n");
+                })
+                .join("\n"),
+            ].join("\n");
+          }
+          return [key.toUpperCase(), value].join("\n");
+        });
+        return formattedContent.join("\n");
+      } catch (error) {
+        return content;
       }
     }
+    return content;
   }, [messageType]);
   const messageColor = useMemo(() => {
     if (senderType === "You") {
@@ -61,22 +96,33 @@ const ChatMessageSection: FC<{
       }
     }
   }, [messageType, theme.palette]);
+  const [copiedMessage, setCopiedMessage] = useState<string>("");
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(finalContent);
+    setCopiedMessage("Copied to clipboard!");
+  };
+
   return (
     <Paper
       elevation={8}
+      square={messageType === "code"}
+      onClick={messageType === "code" ? copyToClipboard : undefined}
       sx={{
         width: "fit-content",
         background: messageColor,
         ...messageAttrs,
       }}
     >
+      <Notification
+        isOpen={copiedMessage !== ""}
+        onClose={() => setCopiedMessage("")}
+        severity="success"
+        message={copiedMessage}
+      />
       <Stack direction={"column"} sx={{ padding: "8px" }} spacing={1}>
-        {content.split("\n").map((line, index) => (
-          <Typography
-            variant="body1"
-            align={justification}
-            key={index}
-          >
+        {finalContent.split("\n").map((line, index) => (
+          <Typography variant="body1" align={justification} key={index}>
             {line}
           </Typography>
         ))}

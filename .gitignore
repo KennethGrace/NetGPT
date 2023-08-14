@@ -1,3 +1,6 @@
+# Machine specific files
+.DS_Store
+
 # Developer Settings
 .vscode
 .idea
