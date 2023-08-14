@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import List
 
 from netmiko import ConnectHandler
+from netmiko.exceptions import NetmikoTimeoutException
 from napalm import get_network_driver
 from napalm.ios import IOSDriver
 
@@ -23,7 +24,7 @@ class CiscoIOSDeviceHandler(NetworkDevice):
 
 
 @CiscoIOSDeviceHandler.register_capability(
-    description="Execute a CLI \"show\" command on Cisco IOS devices.",
+    description='Execute a CLI "show" command on Cisco IOS devices.',
     properties={
         "hostnames": Property(
             type="array",
@@ -42,21 +43,37 @@ def execute_command(
     """
     The execute_command function executes the specified command on the device.
     """
+    if not command.startswith("show"):
+        raise Exception("Only show commands are supported.")
     device_outputs = {}
-    connect_handlers = [
-        ConnectHandler(
-            device_type="cisco_ios",
-            host=host,
-            username=self.connectionParameters.username,
-            password=self.connectionParameters.password,
-        )
-        for host in hostnames
-    ]
-    for connect_handler in connect_handlers:
-        with connect_handler as device:
-            device.enable()
-            output = device.send_command(command)
-            device_outputs.update({connect_handler.host: output.replace("\\n", "\n")})
+    for host in hostnames:
+        try:
+            with ConnectHandler(
+                device_type="cisco_ios",
+                host=host,
+                username=self.connectionParameters.username,
+                password=self.connectionParameters.password,
+            ) as device:
+                device.enable()
+                output = device.send_command(command)
+                if not output:
+                    output = "No output from command."
+                device_outputs.update(
+                    {
+                        host: {
+                            "command": command,
+                            "output": output,
+                        }
+                    }
+                )
+        except NetmikoTimeoutException as e:
+            device_outputs.update(
+                {
+                    host: {
+                        "error connecting": str(e),
+                    }
+                }
+            )
     return device_outputs
 
 
