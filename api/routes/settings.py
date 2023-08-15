@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from interfaces.lang import LanguageSettings
-from interfaces.client import NetworkDevice
+from clients.client import NetworkDevice
 
 from utils.networking import getNetworkDevices
 from utils.language import getAllLanguages

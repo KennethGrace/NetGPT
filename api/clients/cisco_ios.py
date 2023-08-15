@@ -10,7 +10,7 @@ from netmiko.exceptions import NetmikoTimeoutException
 from napalm import get_network_driver
 from napalm.ios import IOSDriver
 
-from interfaces.client import NetworkDevice, ConnectionParameters, Property
+from clients.client import NetworkDevice, ConnectionParameters, Property
 
 
 class CiscoIOSDeviceHandler(NetworkDevice):

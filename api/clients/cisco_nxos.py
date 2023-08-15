@@ -8,7 +8,7 @@ from netmiko import ConnectHandler
 from napalm import get_network_driver
 import json
 
-from interfaces.client import NetworkDevice, ConnectionParameters, DeviceCapability, Property
+from clients.client import NetworkDevice, ConnectionParameters, DeviceCapability, Property
 
 class CiscoNXOSDeviceHandler(NetworkDevice):
 

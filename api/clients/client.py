@@ -3,13 +3,14 @@ The Libraries module defines the interface for connecting to and
 discovering Network Infrastructure devices.
 """
 from __future__ import annotations
-from collections import namedtuple
 
 from dataclasses import dataclass
 from typing import Any, Callable, List, Generic, Type, TypeVar
 from abc import ABC, abstractmethod
 from pydantic import BaseModel
 import json
+
+from interfaces import Capability, Property
 
 
 @dataclass
@@ -33,7 +34,7 @@ class ConnectionParameters(BaseModel):
 
 
 @dataclass
-class DeviceCapability:
+class DeviceCapability(Capability):
     """
     DeviceCapability defines a model for a capability that a device
     can support. Capabilities are used to determine which interactions
@@ -42,16 +43,21 @@ class DeviceCapability:
     a device.
     """
 
-    @property
-    def name(self) -> str:
-        return self.capability.__name__
-
-    capability: Callable[[NetworkDevice], Any]
+    name: str
     description: str
+    capability: Callable[[NetworkDevice], Any]
     properties: dict[str, Property] = None
 
     def __call__(self, nd: NetworkDevice, *args: Any, **kwds: Any) -> Any:
         return self.capability(nd, *args, **kwds)
+    
+    def wrap(self, nd: NetworkDevice, func: Callable[[NetworkDevice], Any]):
+        """
+        wrap is a function that wraps a function with a DeviceCapability
+        and returns a DeviceCapability.
+        """
+        self.capability = lambda *args, **kwds: func(nd, *args, **kwds)
+        return self
 
 
 class NetworkDevice(ABC):
@@ -83,8 +89,8 @@ class NetworkDevice(ABC):
 
     @classmethod
     def register_capability(
-        cls, *, description: str = None, properties: dict[str, Property] = None
-    ) -> Callable[[Callable[[NetworkDevice], dict]], Callable[[NetworkDevice], dict]]:
+        cls, description: str = None, properties: dict[str, Property] = None
+    ) -> Callable[[NetworkDevice], Any]:
         """
         register_capability is a decorator that is applied to a function
         that performs an interaction with a device. The decorator adds
@@ -92,9 +98,10 @@ class NetworkDevice(ABC):
         allowing the function to be called by a LanguageFlow.
         """
 
-        def func_wrapper(callable: Callable[[NetworkDevice], dict]):
+        def func_wrapper(callable: Callable[[NetworkDevice], Any]):
             cls.capabilities.append(
                 DeviceCapability(
+                    name=callable.__name__,
                     capability=callable,
                     description=description,
                     properties=properties,

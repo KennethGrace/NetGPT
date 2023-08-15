@@ -20,7 +20,7 @@ from pydantic import BaseModel
 logger = logging.getLogger("uvicorn")
 
 from interfaces.chat import Message, BotMessage, MessageType
-from interfaces.client import ConnectionParameters
+from clients.client import ConnectionParameters
 from interfaces.lang import (
     LanguageSettings,
     LanguageFunction,
@@ -61,10 +61,10 @@ def receive_message(message: UserMessage):
         settings=message.languageSettings,
         availableFunctions=[
             LanguageFunction(
-                deviceCapability=capability,
-                networkDevice=networkDeviceType(
+                capability=capability,
+                arguments=networkDeviceType(
                     connectionParameters=message.connectionParameters
-                ),
+                )
             )
             for capability in networkDeviceType.get_capabilities()
         ],

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, TypeVar
+from typing import Any, Callable, List, TypeVar
 from pydantic import BaseModel, Field
 from abc import ABC, abstractmethod
 
+from interfaces import Capability, Property
 from interfaces.chat import Message, BotMessage
-from interfaces.client import DeviceCapability, NetworkDevice
+from clients.client import DeviceCapability, NetworkDevice
 
 
 class LanguageException(Exception):
@@ -22,9 +23,37 @@ class LanguageException(Exception):
     ...
 
 
-CLASS = TypeVar("CLASS")
-OUTPUT = TypeVar("OUTPUT")
-INPUT = TypeVar("INPUT")
+@dataclass
+class LanguageCapability(Capability):
+    """
+    The LanguageCapability class defines a model for a capability that a
+    language flow can support. Capabilities are used to determine which
+    interactions can be performed.
+    """
+
+    capability: Callable[[NaturalLanguageProcessor, Any], Any]
+
+    def __call__(self, nlp: NaturalLanguageProcessor, *args: Any, **kwds: Any) -> Any:
+        return self.capability(nlp, *args, **kwds)
+
+
+def languageCapability(description: str, properties: dict[str, Property] = None):
+    """
+    The languageCapability decorator is used to decorate a function that
+    performs an interaction with a language flow.
+    """
+
+    def decorator(func: Callable[[NaturalLanguageProcessor, Any], Any]):
+        func.__annotations__["description"] = description
+        func.__annotations__["properties"] = properties
+        return LanguageCapability(
+            name=func.__name__,
+            description=description,
+            properties=properties,
+            capability=func,
+        )
+
+    return decorator
 
 
 def getApproximateType(value: str) -> str:
@@ -99,13 +128,17 @@ class LanguageFunction:
 
     def __init__(
         self,
-        deviceCapability: DeviceCapability,
-        networkDevice: NetworkDevice,
+        capability: Capability,
+        arguments: Any,
     ):
-        self.name = deviceCapability.name
-        self.description = deviceCapability.description
-        self.deviceCapability = deviceCapability
-        self.networkDevice = networkDevice
+        self.name = capability.name
+        self.description = capability.description
+        self.capability = capability
+        self.arguments = arguments
+
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        return self.capability.capability(self.arguments, *args, **kwds)
+        
 
     @property
     def parameters(self) -> LanguageFunctionParameters:
@@ -124,7 +157,7 @@ class LanguageFunction:
                     items=property.items,
                     enum=property.enum,
                 )
-                for name, property in self.deviceCapability.properties.items()
+                for name, property in self.capability.properties.items()
             ],
         )
 
@@ -192,13 +225,6 @@ class NaturalLanguageProcessor(ABC):
         """
         The getHostnames method returns a list of hostnames that
         can be extracted from the language flow.
-        """
-        ...
-
-    @abstractmethod
-    def receiveMessage(self, message: str):
-        """
-        The receiveMessage method receives a message from the user.
         """
         ...
 

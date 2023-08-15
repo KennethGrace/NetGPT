@@ -1,7 +1,7 @@
 from typing import List, Type
 from clients import cisco_ios, cisco_nxos
 
-from interfaces.client import NetworkDevice
+from clients.client import NetworkDevice
 
 NetworkDevices: List[Type[NetworkDevice]] = [
     cisco_ios.CiscoIOSDeviceHandler,
