@@ -8,10 +8,10 @@ import { useState, useEffect } from 'react';
 * @returns A tuple containing the style to apply to the element and a function to call to start the fade-in.
 *
 * @example
-* const fadeIn = useFadeIn();
+* const fadeIn, setFadeIn = useFadeIn();
 */
 export const useFadeIn = () => {
-    const [fadeIn, setFadeIn] = useState(true);
+    const [fadeIn, setFadeIn] = useState(false);
 
     useEffect(() => {
         if (fadeIn) {
@@ -25,5 +25,5 @@ export const useFadeIn = () => {
         }
     }, [fadeIn]);
 
-    return fadeIn;
+    return [fadeIn, setFadeIn] as const;
 }
