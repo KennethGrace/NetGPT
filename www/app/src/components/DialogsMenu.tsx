@@ -1,6 +1,6 @@
 import React, { FC, LazyExoticComponent, lazy } from "react";
 
-import { Box, IconButton, Menu, MenuItem } from "@mui/material";
+import { Box, IconButton, Menu, MenuItem, useTheme } from "@mui/material";
 
 import { Settings as SettingsIcon } from "@mui/icons-material";
 
@@ -25,6 +25,7 @@ export interface SettingsMenuProps {
 }
 
 const DialogsMenu: FC<SettingsMenuProps> = ({ setOpenConfigDialog }) => {
+  const theme = useTheme();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const isOpen = Boolean(anchorEl);
   const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -37,7 +38,7 @@ const DialogsMenu: FC<SettingsMenuProps> = ({ setOpenConfigDialog }) => {
   return (
     <Box>
       <IconButton size="medium" aria-label="Settings" onClick={handleClick}>
-        <SettingsIcon />
+        <SettingsIcon htmlColor={theme.palette.primary.contrastText}/>
       </IconButton>
       <Menu anchorEl={anchorEl} open={isOpen} onClose={handleClose}>
         {Object.keys(ConfigDialogs).map((label) => {

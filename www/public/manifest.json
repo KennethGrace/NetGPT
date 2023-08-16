@@ -2,6 +2,8 @@
   "short_name": "NetGPT",
   "name": "NetGPT - Networking AI Assistant",
   "description": "An AI Assistant for Network Engineers.",
+  "github_url": "https://github.com/kennethgrace/netgpt",
+  "license_url": "https://mit-license.org/",
   "icons": [
     {
       "src": "favicon.ico",

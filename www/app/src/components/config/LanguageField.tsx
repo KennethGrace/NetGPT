@@ -50,9 +50,6 @@ export const LanguageField: FC<LanguageFieldProps> = ({
 
   // Use an effect to update the Language Settings on state change
   useEffect(() => {
-    console.log("LanguageField: useEffect");
-    console.log("LanguageField: languageChoice: ", languageChoice);
-    console.log("LanguageField: fieldValues: ", fieldValues);
     setSelection({
       name: languageChoice,
       description: selectedLanguage?.description ?? "",

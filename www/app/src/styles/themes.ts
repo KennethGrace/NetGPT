@@ -22,25 +22,29 @@ export const getDesign = (mode: PaletteMode) => ({
             main: "#FF9B00",
           },
           secondary: {
-            main: "#77B8F9",
+            main: "#71B5F9",
           },
           tertiary: {
-            main: "#C6CDE4",
+            main: "#F9B571",
           },
           code: {
             main: "#efefef",
+          },
+          background: {
+            paper: "#fff",
+            default: "#e0e0e0",
           },
         }
       : {
           // palette values for dark mode
           primary: {
-            main: "#ce6b00",
+            main: "#CD6200",
           },
           secondary: {
-            main: "#4764A9",
+            main: "#092A57",
           },
           tertiary: {
-            main: "#092A57",
+            main: "#573609",
           },
           code: {
             main: "#212121",

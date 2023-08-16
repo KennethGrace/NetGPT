@@ -1,0 +1,19 @@
+.paper-container {
+  transform: translateY(-50%);
+  transition: transform 0.5s ease;
+}
+
+/* By default, hide the paper by positioning it offscreen */
+.paper-container.hide.left {
+  transform: translateY(-50%) translateX(-100%);
+}
+
+.paper-container.hide.right {
+  transform: translateY(-50%) translateX(100%);
+}
+
+/* When showing the paper, translate it to its original position */
+.paper-container.show.left,
+.paper-container.show.right {
+  transform: translateY(-50%) translateX(0);
+}

@@ -103,7 +103,6 @@ const InputBox: FC<InputBoxProps> = ({
         display: "flex",
         width: "100%",
         height: "fit-content",
-        backgroundColor: "primary.main",
         padding: 2,
       }}
     >
@@ -127,7 +126,6 @@ const InputBox: FC<InputBoxProps> = ({
             sx={{
               overflow: "auto",
               wordWrap: "break-word",
-              backgroundColor: "background.paper",
             }}
             disabled={!isConfigured}
           />
