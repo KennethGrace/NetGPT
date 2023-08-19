@@ -3,12 +3,11 @@ The NetGPT Service serves natural language processing for IT operations.
 """
 
 import sys
-import os
 import fastapi
 from fastapi.middleware.cors import CORSMiddleware
 
 from routes.chat import ChatRouter
-from routes.settings import SettingsRouter
+from routes.setting import SettingsRouter
 
 import logging
 
@@ -33,4 +32,3 @@ application.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-

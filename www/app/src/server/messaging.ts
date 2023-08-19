@@ -4,6 +4,7 @@ import {
   NetworkSettings,
   Aliases,
   LanguageSettings,
+  PluginSettings
 } from "../common/configuration";
 
 export type SenderType = "NetGPT" | "You";
@@ -33,11 +34,13 @@ export interface BotMessage extends Message {
 
 export interface UserMessage {
   // The message history of the user
-  messageHistory: Message[];
+  message_history: Message[];
   // The credentials of the user
-  connectionParameters: NetworkSettings;
+  network_settings: NetworkSettings;
   // The server to connect to for the backend and the settings to use
-  languageSettings: LanguageSettings;
+  language_settings: LanguageSettings;
+  // The plugin list to use TODO: Add this to the configuration
+  plugin_list?: PluginSettings[];
   // The aliases to use, if any are defined
   aliases?: Aliases;
 }
@@ -49,7 +52,7 @@ export const sendMessage = async (
   console.log("Sending message to server");
   console.log(userMessage);
   // Strip the userMessage history of all "code" message sections
-  userMessage.messageHistory = userMessage.messageHistory.map((message) => {
+  userMessage.message_history = userMessage.message_history.map((message) => {
     return {
       ...message,
       sections: message.sections.filter(

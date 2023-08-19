@@ -122,9 +122,9 @@ const Viewport: FC = () => {
       return;
     }
     const botMessage = sendMessage(serverUrl, {
-      messageHistory: [...chatHistory, message],
-      connectionParameters: networkSettings,
-      languageSettings: languageSettings,
+      message_history: [...chatHistory, message],
+      network_settings: networkSettings,
+      language_settings: languageSettings,
     }).catch((error) => {
       console.log(error);
       if (axios.isAxiosError(error)) {

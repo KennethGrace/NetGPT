@@ -20,6 +20,15 @@ export type LanguageSettings = {
   };
 };
 
+export type PluginSettings = {
+    name : string;
+    description : string;
+    fields : {
+      [label: string]: string;
+    };
+    enabled : boolean;
+}
+
 export type Aliases = {
   [label: string]: string;
 };
