@@ -112,6 +112,7 @@ const ChatMessageSection: FC<{
         onClick={messageType === "code" ? copyToClipboard : undefined}
         sx={{
           width: "fit-content",
+          maxWidth: "60vw",
           background: messageColor,
           zIndex: 1,
           ...messageAttrs,
@@ -125,7 +126,7 @@ const ChatMessageSection: FC<{
         />
         <Stack direction={"column"} sx={{ padding: "8px" }} spacing={1}>
           {finalContent.split("\n").map((line, index) => (
-            <Typography variant="body1" align={justification} key={index}>
+            <Typography variant="body1" align={"left"} key={index}>
               {line}
             </Typography>
           ))}
