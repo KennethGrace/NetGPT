@@ -1,12 +1,31 @@
-"""
-The Plugin module defines a Plugins operations. A Plugin
-is similar to a "clients", but the Plugin has a more dynamic
-structure.
-"""
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import List
+
+from pydantic import BaseModel, Field
 
 from capabilities import Capability
-from schema import PluginSettings
+
+
+class PluginList(BaseModel):
+    """
+    The PluginList class defines a model for a list of plugins.
+    This is necessary because more than one plugin can be enabled
+    at a time.
+    """
+    plugins: List[PluginSettings]
+
+
+class PluginSettings(BaseModel):
+    """
+    The PluginSettings
+    """
+
+    name: str
+    description: str
+    fields: dict[str, str] = Field(default_factory=dict)
+    enabled: bool = False
 
 
 class Plugin(ABC):
@@ -39,5 +58,3 @@ class Plugin(ABC):
             for method in dir(cls)
             if isinstance(getattr(cls, method), Capability)
         ]
-
-

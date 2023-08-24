@@ -11,7 +11,7 @@ import {
   AccordionDetails,
   Tooltip,
 } from "@mui/material";
-import { LanguageSettings, useConfiguration } from "../../common/configuration";
+import { LanguageSettings, useConfiguration } from "../../context/configuration";
 
 export interface LanguageFieldProps {
   title: string;

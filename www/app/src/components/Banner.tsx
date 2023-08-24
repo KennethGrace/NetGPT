@@ -12,7 +12,7 @@ import {
 } from "@mui/material";
 
 import { Copyright, GitHub } from "@mui/icons-material";
-import { useConfiguration } from "../common/configuration";
+import { useConfiguration } from "../context/configuration";
 
 const DialogsMenu = lazy(async () => {
   await new Promise((resolve) => setTimeout(resolve, 2000));

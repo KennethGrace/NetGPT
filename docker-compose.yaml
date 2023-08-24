@@ -2,34 +2,72 @@
 version: "3.7"
 name: netgpt
 services:
+  cache:
+    domainname: cache.netgpt.local
+    image: redis
+    expose:
+      - "6379"
+    networks:
+      - backend
+  auth:
+    # The Authentication service is keycloak, by default.
+    # When deployed with docker-compose, it is started in dev mode
+    domainname: auth.netgpt.local
+    image: quay.io/keycloak/keycloak
+    command:
+      - "start-dev"
+    environment:
+      - KEYCLOAK_ADMIN=admin # Change this to your desired admin username
+      - KEYCLOAK_ADMIN_PASSWORD=keycloak # Change this to your desired admin password
+    ports:
+      - "7080:8080"
+      - "7443:8443"
+    networks:
+      - netgpt
   webui:
     domainname: www.netgpt.local
     build:
-      tags:
-        - kennethgrace/netgpt-webui
       context: ./www
       dockerfile: Dockerfile
     ports:
       - "80:8080"
+      - "443:8443"
     depends_on:
       - api
     x-develop:
       watch:
         - action: rebuild
           path: ./www
+    networks:
+      - netgpt
   api:
     domainname: api.netgpt.local
     build:
-      tags:
-        - kennethgrace/netgpt-api
       context: ./api
       dockerfile: Dockerfile
     ports:
       - "49488:49488"
+    environment:
+      - REDIS_HOST=cache.netgpt.local
+      - REDIS_PORT=6379
+    depends_on:
+      - auth
+      - redis
     x-develop:
       watch:
         - action: rebuild
           path: ./api
+    networks:
+      - netgpt
+      - backend
+networks:
+  frontend:
+    name: netgpt
+    driver: bridge
+  backend:
+    name: backend
+    driver: bridge
+
 
 
           

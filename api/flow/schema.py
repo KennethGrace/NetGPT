@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from abc import ABC, abstractmethod
 from enum import Enum
 from pathlib import Path
 from typing import List
@@ -8,7 +9,9 @@ from typing import List
 from pydantic import BaseModel, Field
 from yaml import safe_load
 
-from clients.client import NetworkSettings
+from capabilities import CapabilityRunner
+from clients.schema import NetworkSettings
+from plugins.schema import PluginList, PluginSettings
 
 
 class SenderType(str, Enum):
@@ -38,6 +41,9 @@ class BotMessage(Message):
 
     @classmethod
     def quick(cls, messageType: MessageType, content: str, **kwargs):
+        """
+        The quick method creates a BotMessage with a single section.
+        """
         return cls(
             sender=SenderType.NetGPT,
             timestamp=int(datetime.datetime.now().timestamp()),
@@ -52,6 +58,9 @@ class BotMessage(Message):
 
     @classmethod
     def filled(cls, sections: list[MessageSection], **kwargs):
+        """
+        The filled method creates a BotMessage with the specified sections.
+        """
         return cls(
             sender=SenderType.NetGPT,
             timestamp=int(datetime.datetime.now().timestamp()),
@@ -83,26 +92,6 @@ class ChatConfiguration(BaseModel):
             return cls(**config)
 
 
-class PluginList(BaseModel):
-    """
-    The PluginList class defines a model for a list of plugins.
-    This is necessary because more than one plugin can be enabled
-    at a time.
-    """
-    plugins: List[PluginSettings]
-
-
-class PluginSettings(BaseModel):
-    """
-    The PluginSettings
-    """
-
-    name: str
-    description: str
-    fields: dict[str, str] = Field(default_factory=dict)
-    enabled: bool = False
-
-
 class LanguageSettings(BaseModel):
     """
     The Settings class defines a model for the settings parameters for
@@ -121,25 +110,6 @@ class LanguageSettings(BaseModel):
     fields: dict[str, str] = Field(default_factory=dict)
 
 
-class Alias(BaseModel):
-    name: str
-    value: str
-
-
-class Options(BaseModel):
-    """
-    The StringOptions class defines the data model for a string option.
-    """
-    options: List[str]
-
-
-class LanguageSettingsBatch(BaseModel):
-    """
-    A LanguageSettingsBatch is a list of PluginSettings models.
-    """
-    settings: List[LanguageSettings]
-
-
 class UserMessage(BaseModel):
     """
     The UserMessage class defines a model for a message that is received from
@@ -150,3 +120,77 @@ class UserMessage(BaseModel):
     network_settings: NetworkSettings
     language_settings: LanguageSettings
     plugin_list: PluginList = None
+
+
+class Alias(BaseModel):
+    name: str
+    value: str
+
+
+class LanguageSettingsBatch(BaseModel):
+    """
+    A LanguageSettingsBatch is a list of PluginSettings models.
+    """
+    settings: List[LanguageSettings]
+
+
+def get_approximate_type(value: str) -> str:
+    """
+    The getApproximateType function returns an approximate type mapping
+    for the specified value.
+    """
+    if value.isnumeric():
+        return "integer"
+    elif value.lower() == "true" or value.lower() == "false":
+        return "boolean"
+    elif (value.startswith("[") and value.endswith("]")) or value.startswith("list"):
+        return "array"
+    elif value.startswith("{") and value.endswith("}"):
+        return "object"
+    else:
+        return "string"
+
+
+class NaturalLanguageProcessor(ABC):
+    """
+    The NaturalLanguageProcessor class defines the interface for communicating with
+    the natural language processing models used by the NetGPT Service.
+
+    It defines a common set of capabilities that are implemented by the
+    various NLP models.
+    """
+    settings: LanguageSettings
+    aliases: List[Alias]
+    runners: List[CapabilityRunner]
+
+    def __init__(
+            self,
+            settings: LanguageSettings,
+            configuration: ChatConfiguration,
+            aliases: List[Alias] = None,
+            runners: List[CapabilityRunner] = None
+    ):
+        if aliases is None:
+            aliases = []
+        if runners is None:
+            runners = []
+        self.settings = settings
+        self.configuration = configuration
+        self.aliases = aliases
+        self.runners = runners
+
+    @classmethod
+    @abstractmethod
+    def get_settings(cls) -> LanguageSettings:
+        """
+        The getSettings method returns the settings model for the
+        LanguageFlow.
+        """
+        ...
+
+    @abstractmethod
+    def request_response(self, message: UserMessage) -> BotMessage:
+        """
+        The requestMessage method requests a message from the AI.
+        """
+        ...

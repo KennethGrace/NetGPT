@@ -5,7 +5,7 @@ discovering Juniper JunOS devices.
 
 from netmiko import ConnectHandler
 from napalm import get_network_driver
-from clients.client import NetworkDevicePlatform, NetworkSettings
+from clients.schema import NetworkSettings, NetworkDevicePlatform
 
 
 class JuniperJunOSDeviceHandlerPlatform(NetworkDevicePlatform):

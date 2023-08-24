@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import List, Type
 
-from flow.flow import NaturalLanguageProcessor
+from flow.schema import NaturalLanguageProcessor
 
 from flow.open_ai import OpenAIFlow
 

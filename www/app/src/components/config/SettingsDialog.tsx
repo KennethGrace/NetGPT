@@ -22,7 +22,7 @@ import {
   useConfiguration,
   LanguageSettings,
   NetworkSettings,
-} from "../../common/configuration";
+} from "../../context/configuration";
 
 import { Notification } from "../../common/Notify";
 
@@ -36,68 +36,22 @@ import {
 import {
   saveServerUrl,
   saveNetworkSettings,
-  saveLanguageSettings
+  saveLanguageSettings,
 } from "../../data/browserCache";
 
 // Lazy Load the LanguageField component
 const LanguageField = lazy(() => import("./LanguageField"));
 const NetworkField = lazy(() => import("./NetworkField"));
 
-const ServerField: FC<{
-  serverEntry: string;
-  setEntry: (entry: string) => void;
-  updateSettings: () => void;
-}> = ({ serverEntry, setEntry, updateSettings }) => {
-  const { serverUrl } = useConfiguration();
-  const [lastRefresh, setLastRefresh] = useState<string>(serverUrl);
-
-  const isRefreshable: boolean = useMemo(() => {
-    return serverEntry.length > 0 && serverEntry !== lastRefresh;
-  }, [serverEntry, lastRefresh]);
-
-  const handleRefresh = () => {
-    updateSettings();
-    setLastRefresh(serverEntry);
-  };
-
-  return (
-    <Box>
-      <Stack direction={"row"} spacing={1} alignItems={"center"}>
-        <TextField
-          autoFocus
-          margin="dense"
-          id="serverURL"
-          placeholder="http://"
-          label="Server URL"
-          defaultValue={serverUrl}
-          type="text"
-          fullWidth
-          variant="standard"
-          onChange={(e) => {
-            setEntry(e.target.value);
-          }}
-        />
-        <Box>
-          <IconButton
-            onClick={handleRefresh}
-            color="primary"
-            disabled={!isRefreshable}
-          >
-            <Refresh />
-          </IconButton>
-        </Box>
-      </Stack>
-    </Box>
-  );
-};
-
 const Transition = React.forwardRef(function Transition(
   props: TransitionProps & {
     children: React.ReactElement<any, any>;
   },
-  ref: React.Ref<unknown>
+  ref: React.Ref<unknown>,
 ) {
-  return <Slide direction="up" ref={ref} {...props} />;
+  return (
+    <Slide direction="up" ref={ref} {...props} children={props.children} />
+  );
 });
 
 export interface SettingsDialogProps {
@@ -109,13 +63,10 @@ export const SettingsDialog: FC<SettingsDialogProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { serverUrl, setServerUrl, setNetworkSettings, setLanguageSettings } =
+  const { serverUrl, setNetworkSettings, setLanguageSettings } =
     useConfiguration();
   // State variables for UI
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // State Variables for Form Fields
-  const [server, setServer] = useState<string>(serverUrl);
   const [network, setNetwork] = useState<NetworkSettings>({
     username: "",
     password: "",
@@ -137,10 +88,6 @@ export const SettingsDialog: FC<SettingsDialogProps> = ({
 
   // Use a memo to check if the form is valid before enabling the save button
   const isValid: boolean = useMemo(() => {
-    // Check if the server is a valid URL using a regex
-    if (!server.match(/^(http):\/\/[^ "]+$/)) {
-      return false;
-    }
     // Check if the username and password are greater than 0 characters
     if (network.username.length === 0 || network.password.length === 0) {
       return false;
@@ -154,18 +101,18 @@ export const SettingsDialog: FC<SettingsDialogProps> = ({
       return false;
     }
     // Check that all the language fields are filled out
-    if (Object.entries(language.fields).some(([_, value]) => !(value.length > 0))) {
+    if (
+      Object.entries(language.fields).some(([_, value]) => !(value.length > 0))
+    ) {
       console.log("Invalid Language Fields");
-      console.log(language.fields)
+      console.log(language.fields);
       return false;
     }
     return true;
-  }, [server, network, language]);
+  }, [network, language]);
 
   const saveAndClose = () => {
     if (isValid) {
-      saveServerUrl(server);
-      setServerUrl(server);
       saveLanguageSettings(language);
       setLanguageSettings(language);
       saveNetworkSettings(network);
@@ -175,14 +122,18 @@ export const SettingsDialog: FC<SettingsDialogProps> = ({
   };
 
   const updateSettings = () => {
-    fetchDeviceOptions(server)
+    if (serverUrl === undefined) {
+      setErrorMessage("Please configure the server.");
+      return;
+    }
+    fetchDeviceOptions(serverUrl)
       .then((options) => {
         setDeviceTypeOptions(options);
       })
       .catch((error) => {
         setErrorMessage(error.message);
       });
-    fetchLanguageSettingsList(server)
+    fetchLanguageSettingsList(serverUrl)
       .then((options) => {
         setLanguageOptions(options);
       })
@@ -215,7 +166,6 @@ export const SettingsDialog: FC<SettingsDialogProps> = ({
       <DialogTitle id="settings-dialog-title">Server Settings</DialogTitle>
       <DialogContent>
         <Stack direction={"column"} spacing={1}>
-          <ServerField serverEntry={server} setEntry={setServer} updateSettings={updateSettings} />
           <Suspense fallback={<LinearProgress color="primary" />}>
             <NetworkField
               title="Network Administration Settings"

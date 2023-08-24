@@ -13,7 +13,7 @@ import {
 
 import { Send, Refresh, Clear } from "@mui/icons-material";
 
-import { useConfiguration } from "../common/configuration";
+import { useConfiguration } from "../context/configuration";
 import { Message } from "../server/messaging";
 
 const NewMessage: (text: string) => Message = (text) => ({

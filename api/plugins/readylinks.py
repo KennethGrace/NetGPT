@@ -4,8 +4,8 @@ The ReadyLinksPlugin module defines the ReadyLinksPlugin plugin for the API.
 
 from __future__ import annotations
 
-from plugins.plugin import Plugin
-from schema import PluginSettings
+from plugins import Plugin
+from plugins.schema import PluginSettings
 
 
 class ReadyLinksSettings(PluginSettings):

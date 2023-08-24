@@ -14,8 +14,8 @@ from fastapi import APIRouter
 
 import logging
 
-from schema import BotMessage, UserMessage
-from core.core import ChatCore
+from core.chat import ChatCore
+from flow.schema import BotMessage, UserMessage
 
 logger = logging.getLogger("uvicorn")
 

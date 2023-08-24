@@ -1,4 +1,4 @@
-import { NetworkSettings, LanguageSettings } from '../common/configuration';
+import { NetworkSettings, LanguageSettings } from '../context/configuration';
 
 export const saveServerUrl = (serverUrl: string) => {
     localStorage.setItem('serverUrl', serverUrl);

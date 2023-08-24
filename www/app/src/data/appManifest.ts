@@ -8,6 +8,7 @@ export interface ManifestFile {
     description: string;
     github_url: string;
     license_url: string;
+    client_id: string;
 }
 
 

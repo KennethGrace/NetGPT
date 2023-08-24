@@ -4,29 +4,27 @@ discovering Network Infrastructure devices.
 """
 from __future__ import annotations
 
-from typing import List, Type
+from typing import Dict, Type
+
 from clients import cisco_ios, cisco_nxos
+from clients.schema import DeviceType, NetworkDevicePlatform
 
-from clients.client import NetworkDevicePlatform
-
-# Official list of supported network device platforms. This is used to
-# control the available options in the UI.
-_network_devices: List[Type[NetworkDevicePlatform]] = [
-    cisco_ios.CiscoIOSPlatform,
-    cisco_nxos.CiscoNXOSPlatform,
-]
+_network_devices: Dict[DeviceType, Type[NetworkDevicePlatform]] = {
+    DeviceType.CISCO_IOS: cisco_ios.CiscoIOSPlatform,
+    DeviceType.CISCO_NXOS: cisco_nxos.CiscoNXOSPlatform,
+}
 
 
-def get_network_device_platforms() -> List[Type[NetworkDevicePlatform]]:
+def get_network_device_platforms() -> Dict[DeviceType, Type[NetworkDevicePlatform]]:
     """
     The getNetworkDevices function returns a list of all supported network device handlers.
     """
     return _network_devices
 
 
-def get_network_device_platform(deviceType: str) -> Type[NetworkDevicePlatform] | None:
+def get_network_device_platform(deviceType: DeviceType) -> Type[NetworkDevicePlatform] | None:
     """
     The get_network_device_platform function returns the first device handler that matches the
     specified device type string.
     """
-    return next((device for device in _network_devices if device.vendor == deviceType), None)
+    return _network_devices.get(deviceType)

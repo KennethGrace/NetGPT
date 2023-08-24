@@ -12,8 +12,8 @@ import logging
 import icmplib
 
 from capabilities import Property, Capability
-from plugins.plugin import Plugin
-from schema import PluginSettings
+from plugins import Plugin
+from plugins.schema import PluginSettings
 
 logger = logging.getLogger("uvicorn")
 

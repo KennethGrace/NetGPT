@@ -9,18 +9,19 @@ import logging
 from pathlib import Path
 
 from capabilities import CapabilityRunner
+from clients.schema import NetworkSettings
 from clients import get_network_device_platform
-from clients.client import NetworkSettings
 from flow import get_language
-from flow.flow import (
+from flow.exceptions import (
     LanguageException
 )
 from plugins import get_plugins, get_all_plugins
-from schema import MessageType, BotMessage, ChatConfiguration, LanguageSettings, UserMessage, PluginList
+from plugins.schema import PluginList
+from flow.schema import LanguageSettings, ChatConfiguration, UserMessage, BotMessage, MessageType
 
 logger = logging.getLogger("uvicorn")
 
-CONFIGURATION_FILE = Path("config.yml")
+CONFIGURATION_FILE = Path("config/netgpt.yml")
 
 
 class ChatCore:

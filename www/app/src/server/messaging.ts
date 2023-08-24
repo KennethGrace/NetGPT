@@ -5,7 +5,7 @@ import {
   Aliases,
   LanguageSettings,
   PluginSettings
-} from "../common/configuration";
+} from "../context/configuration";
 
 export type SenderType = "NetGPT" | "You";
 
@@ -49,8 +49,6 @@ export const sendMessage = async (
   serverURL: string,
   userMessage: UserMessage
 ): Promise<BotMessage | undefined> => {
-  console.log("Sending message to server");
-  console.log(userMessage);
   // Strip the userMessage history of all "code" message sections
   userMessage.message_history = userMessage.message_history.map((message) => {
     return {
@@ -64,6 +62,7 @@ export const sendMessage = async (
     .post<BotMessage>(`${serverURL}/chat/message`, userMessage, {
       headers: {
         "Content-Type": "application/json",
+        "Authorization": "Bearer " + localStorage.getItem("token") || "",
       },
       timeout: 60000,
     }).then((response) => {

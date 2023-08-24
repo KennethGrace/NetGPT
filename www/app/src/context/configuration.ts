@@ -21,13 +21,13 @@ export type LanguageSettings = {
 };
 
 export type PluginSettings = {
-    name : string;
-    description : string;
-    fields : {
-      [label: string]: string;
-    };
-    enabled : boolean;
-}
+  name: string;
+  description: string;
+  fields: {
+    [label: string]: string;
+  };
+  enabled: boolean;
+};
 
 export type Aliases = {
   [label: string]: string;
@@ -36,7 +36,7 @@ export type Aliases = {
 // The Application Configuration
 export interface Configuration {
   // The server url
-  serverUrl: string;
+  serverUrl?: string;
   // Set the server url
   setServerUrl: (serverUrl: string) => void;
   // The credentials of the user
@@ -58,8 +58,8 @@ export const DefaultConfiguration = {
   aliases: {},
 };
 
-export const ConfigurationContext: React.Context<Configuration> = createContext(
-  DefaultConfiguration as Configuration
+export const ConfigurationContext = createContext<Configuration>(
+  DefaultConfiguration as Configuration,
 );
 
 export const useConfiguration = () => useContext(ConfigurationContext);

@@ -1,30 +1,19 @@
-import React, { useState, FC, lazy, Suspense, useMemo } from "react";
+import React, { FC, lazy, useMemo, useState } from "react";
 
 import {
-  Box,
   Container,
-  List,
-  ListItem,
-  Typography,
-  Paper,
-  Stack,
-  useTheme,
   Divider,
   LinearProgress,
+  Paper,
+  Stack,
+  Typography,
 } from "@mui/material";
 
-import {
-  UserMessage,
-  Message,
-  sendMessage,
-  BotMessage,
-  MessageType,
-  SenderType,
-} from "../server/messaging";
+import { Message, sendMessage } from "../server/messaging";
 import { Notification } from "../common/Notify";
 
 import defaultMessages from "../json/defaultMessages.json";
-import { useConfiguration } from "../common/configuration";
+import { useConfiguration } from "../context/configuration";
 import axios from "axios";
 
 const InputBox = lazy(() => import("./InputBox"));
@@ -108,7 +97,7 @@ const Viewport: FC = () => {
   const [waitingForResponse, setWaitingForResponse] = useState<boolean>(false);
   const { serverUrl, networkSettings, languageSettings } = useConfiguration();
   const [chatHistory, setChatHistory] = useState<Message[]>(
-    defaultMessages.messages as Message[]
+    defaultMessages.messages as Message[],
   );
   const [errorMessage, setErrorMessage] = useState<string>("");
 
@@ -117,11 +106,15 @@ const Viewport: FC = () => {
   };
 
   const handleSendNewMessage = async (message: Message) => {
-    if (networkSettings === undefined || languageSettings === undefined) {
-      setErrorMessage("Please configure the network and language settings.");
+    if (
+      serverUrl === undefined ||
+      networkSettings === undefined ||
+      languageSettings === undefined
+    ) {
+      setErrorMessage("Please configure the server.");
       return;
     }
-    const botMessage = sendMessage(serverUrl, {
+    return sendMessage(serverUrl, {
       message_history: [...chatHistory, message],
       network_settings: networkSettings,
       language_settings: languageSettings,
@@ -132,7 +125,6 @@ const Viewport: FC = () => {
       }
       return undefined;
     });
-    return botMessage;
   };
 
   const MessageHistory = useMemo(() => {

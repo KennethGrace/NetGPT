@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routes.chat import ChatRouter
 from routes.setting import SettingsRouter
+from routes.security import AuthRouter
 
 import logging
 
@@ -18,6 +19,7 @@ application = fastapi.FastAPI()
 
 application.include_router(ChatRouter)
 application.include_router(SettingsRouter)
+application.include_router(AuthRouter)
 
 origins = [
     "http://localhost",

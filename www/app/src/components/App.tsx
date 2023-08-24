@@ -8,18 +8,7 @@ import React, {
   useState,
 } from "react";
 
-import {
-  AppBar,
-  Box,
-  Divider,
-  IconButton,
-  Paper,
-  Stack,
-  Toolbar,
-  Typography,
-} from "@mui/material";
-
-import { GitHub } from "@mui/icons-material";
+import { Box } from "@mui/material";
 
 import { LoadingIndicatorWithBackdrop } from "../common/Loader";
 
@@ -29,8 +18,14 @@ import {
   Aliases,
   LanguageSettings,
   DefaultConfiguration,
-  useConfiguration,
-} from "../common/configuration";
+  Configuration,
+} from "../context/configuration";
+
+import {
+  AuthenticationServerInformation,
+  Authentication,
+  AuthenticationContext,
+} from "../context/authentication";
 
 import {
   loadServerUrl,
@@ -43,6 +38,7 @@ import { getManifest, ManifestFile } from "../data/appManifest";
 
 import "../styles/fading.css";
 
+const Login = lazy(() => import("./Login"));
 const ChatView = lazy(() => import("./Viewport"));
 const Banner = lazy(() => import("./Banner"));
 
@@ -70,14 +66,28 @@ export const App: FC = () => {
 
   // Setup Configuration Context
   const [serverUrl, setServerUrl] = useState<string>(
-    DefaultConfiguration.serverUrl
+    DefaultConfiguration.serverUrl,
   );
   const [networkSettings, setNetworkSettings] = useState<NetworkSettings>();
   const [languageSettings, setLanguageSettings] = useState<LanguageSettings>();
   const [aliases, setAliases] = useState<Aliases>(DefaultConfiguration.aliases);
+
+  // Setup Authentication Context
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [authServer, setAuthServer] =
+    useState<AuthenticationServerInformation>();
+
+  const authContext: Authentication = {
+    authServer,
+    setAuthServer,
+    isAuthenticated,
+    setIsAuthenticated,
+  };
+
+  // Setup Application Manifest
   const [manifest, setManifest] = useState<ManifestFile>();
 
-  const configContext = {
+  const configContext: Configuration = {
     serverUrl,
     setServerUrl,
     networkSettings,
@@ -110,38 +120,44 @@ export const App: FC = () => {
 
   return (
     <ConfigurationContext.Provider value={configContext}>
-      {manifest ? (
-        <Box className={fadeIn ? "fade-in" : ""}>
-          <MidScreenLogo />
-          <Box
-            component="main"
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              width: "100vw",
-              height: "100vh",
-            }}
-          >
-            <Banner
-              title={manifest.short_name}
-              github_url={manifest.github_url}
-              license_url={manifest.license_url}
-              setOpenConfigDialog={(dialog) => {
-                setOpenConfigDialog(dialog);
-                setDialogOpen(true);
+      <AuthenticationContext.Provider value={authContext}>
+        {manifest ? (
+          <Box className={fadeIn ? "fade-in" : ""}>
+            <MidScreenLogo />
+            <Box
+              component="main"
+              sx={{
+                display: "flex",
+                flexDirection: "column",
+                width: "100vw",
+                height: "100vh",
               }}
-            />
-            <Suspense fallback={<LoadingIndicatorWithBackdrop />}>
-            {OpenConfigDialog && (
-              <OpenConfigDialog isOpen={dialogOpen} onClose={setDialogOpen} />
-            )}
-            </Suspense>
-            <ChatView />
+            >
+              <Banner
+                title={manifest.short_name}
+                github_url={manifest.github_url}
+                license_url={manifest.license_url}
+                setOpenConfigDialog={(dialog) => {
+                  setOpenConfigDialog(dialog);
+                  setDialogOpen(true);
+                }}
+              />
+              <Suspense fallback={<LoadingIndicatorWithBackdrop />}>
+                <Login isOpen={!isAuthenticated} />
+                {OpenConfigDialog && (
+                  <OpenConfigDialog
+                    isOpen={dialogOpen}
+                    onClose={setDialogOpen}
+                  />
+                )}
+              </Suspense>
+              <ChatView />
+            </Box>
           </Box>
-        </Box>
-      ) : (
-        <LoadingIndicatorWithBackdrop label="Waiting for Application Manifest" />
-      )}
+        ) : (
+          <LoadingIndicatorWithBackdrop label="Waiting for Application Manifest" />
+        )}
+      </AuthenticationContext.Provider>
     </ConfigurationContext.Provider>
   );
 };
