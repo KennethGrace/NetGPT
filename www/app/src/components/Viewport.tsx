@@ -9,12 +9,14 @@ import {
   Typography,
 } from "@mui/material";
 
-import { Message, sendMessage } from "../server/messaging";
 import { Notification } from "../common/Notify";
 
-import defaultMessages from "../json/defaultMessages.json";
 import { useConfiguration } from "../context/configuration";
-import axios from "axios";
+import { Message, sendMessage } from "../server/messaging";
+
+import defaultMessages from "../json/defaultMessages.json";
+import { useAuthentication } from "../context/authentication";
+import { AuthenticationHandler } from "../server/authenticating";
 
 const InputBox = lazy(() => import("./InputBox"));
 const ChatMessage = lazy(() => import("./ChatMessage"));
@@ -49,9 +51,11 @@ const ViewportHeader: FC<{
 }> = ({ showLoading = false }) => {
   const { networkSettings, languageSettings } = useConfiguration();
 
-  const DeviceType = useMemo(() => {
+  const Platform = useMemo(() => {
     if (networkSettings?.deviceType) {
-      return <ConfigBadge label="Device" value={networkSettings.deviceType} />;
+      return (
+        <ConfigBadge label="Platform" value={networkSettings.deviceType} />
+      );
     }
     return null;
   }, [networkSettings]);
@@ -77,7 +81,7 @@ const ViewportHeader: FC<{
       alignItems={"center"}
       spacing={1}
     >
-      {DeviceType}
+      {Platform}
       <Divider orientation="vertical" flexItem />
       <LinearProgress
         sx={{
@@ -96,10 +100,11 @@ const ViewportHeader: FC<{
 const Viewport: FC = () => {
   const [waitingForResponse, setWaitingForResponse] = useState<boolean>(false);
   const { serverUrl, networkSettings, languageSettings } = useConfiguration();
+  const { authServer } = useAuthentication();
   const [chatHistory, setChatHistory] = useState<Message[]>(
     defaultMessages.messages as Message[],
   );
-  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const addMessages = (messages: Message[]) => {
     setChatHistory(chatHistory.concat(messages));
@@ -107,24 +112,33 @@ const Viewport: FC = () => {
 
   const handleSendNewMessage = async (message: Message) => {
     if (
+      authServer === undefined ||
       serverUrl === undefined ||
       networkSettings === undefined ||
       languageSettings === undefined
     ) {
-      setErrorMessage("Please configure the server.");
-      return;
-    }
-    return sendMessage(serverUrl, {
-      message_history: [...chatHistory, message],
-      network_settings: networkSettings,
-      language_settings: languageSettings,
-    }).catch((error) => {
-      console.log(error);
-      if (axios.isAxiosError(error)) {
-        setErrorMessage(error.message);
-      }
+      setErrorMessage("Please configure the server settings.");
       return undefined;
-    });
+    }
+    const token = await AuthenticationHandler.getToken();
+    if (token) {
+      return await sendMessage(
+        serverUrl,
+        {
+          message_history: [...chatHistory, message],
+          network_settings: networkSettings,
+          language_settings: languageSettings,
+        },
+        token,
+      ).catch((error) => {
+        setErrorMessage(error);
+        console.log(error);
+        return undefined;
+      });
+    } else {
+      setErrorMessage("Please log in to the server.");
+      return undefined;
+    }
   };
 
   const MessageHistory = useMemo(() => {
@@ -144,10 +158,10 @@ const Viewport: FC = () => {
       }}
     >
       <Notification
-        isOpen={errorMessage !== ""}
-        onClose={() => setErrorMessage("")}
+        isOpen={errorMessage !== null}
+        onClose={() => setErrorMessage(null)}
         severity="error"
-        message={errorMessage}
+        message={errorMessage ?? "An unknown error occurred."}
       />
       <Stack direction={"column"} spacing={1} height={"100%"}>
         <ViewportHeader showLoading={waitingForResponse} />
@@ -166,17 +180,22 @@ const Viewport: FC = () => {
         </Paper>
         <InputBox
           onClearMessages={() => setChatHistory([])}
-          onSendMessage={async (message) => {
+          onSendMessage={(message) => {
             addMessages([message]);
             setWaitingForResponse(true);
-            let botMessage = await handleSendNewMessage(message);
-            if (botMessage !== undefined) {
-              addMessages([message, botMessage]);
-            }
-            setWaitingForResponse(false);
-          }}
-          onInternalMessage={(m) => {
-            addMessages([m]);
+            handleSendNewMessage(message)
+              .catch((error) => {
+                setErrorMessage(error);
+                return undefined;
+              })
+              .then((response) => {
+                if (response) {
+                  addMessages([message, response]);
+                }
+              })
+              .finally(() => {
+                setWaitingForResponse(false);
+              });
           }}
         />
       </Stack>

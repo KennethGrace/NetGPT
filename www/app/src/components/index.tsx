@@ -11,12 +11,30 @@ import { LoadingIndicator } from "../common/Loader";
 
 const app = document.getElementById("app");
 const Application = lazy(() => {
+  let Application = import("./App");
   // Wait for 3 seconds before loading the application
   // to give the user a chance to see the logo.
-  return new Promise((resolve) => setTimeout(resolve, 2000)).then(
-    () => import("./App")
+  return new Promise((resolve) => setTimeout(resolve, 3000)).then(
+    () => Application,
   );
 });
+
+const MidScreenLogo = () => {
+  return (
+    <Box
+      sx={{
+        position: "fixed",
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        opacity: 0.4,
+        zIndex: 0,
+      }}
+    >
+      <img alt="logo" aria-label="logo" src="/logo256x256.png" />
+    </Box>
+  );
+};
 
 const Index: FC<any> = (props: any) => {
   const prefersDarkMode = useMediaQuery("(prefers-color-scheme: dark)");
@@ -27,17 +45,7 @@ const Index: FC<any> = (props: any) => {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box
-        sx={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          opacity: 0.4,
-        }}
-      >
-        <img alt="logo" aria-label="logo" src="/logo256x256.png" />
-      </Box>
+      <MidScreenLogo />
       <Suspense fallback={<LoadingIndicator label="Loading NetGPT" />}>
         <Application />
       </Suspense>
@@ -50,5 +58,5 @@ ReactDOM.render(
     <CssBaseline />
     <Index />
   </React.StrictMode>,
-  app
+  app,
 );

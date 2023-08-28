@@ -9,15 +9,15 @@ import logging
 from pathlib import Path
 
 from capabilities import CapabilityRunner
-from clients.schema import NetworkSettings
 from clients import get_network_device_platform
+from clients.schema import NetworkSettings
 from flow import get_language
 from flow.exceptions import (
     LanguageException
 )
+from flow.schema import LanguageSettings, ChatConfiguration, UserMessage, BotMessage, MessageType
 from plugins import get_plugins, get_all_plugins
 from plugins.schema import PluginList
-from flow.schema import LanguageSettings, ChatConfiguration, UserMessage, BotMessage, MessageType
 
 logger = logging.getLogger("uvicorn")
 
@@ -91,6 +91,6 @@ class ChatCore:
             return self.language.request_response(message)
         except LanguageException as e:
             return BotMessage.quick(
-                messageType=MessageType.error,
+                message_type=MessageType.error,
                 content=str(e),
             )

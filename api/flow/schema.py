@@ -11,7 +11,7 @@ from yaml import safe_load
 
 from capabilities import CapabilityRunner
 from clients.schema import NetworkSettings
-from plugins.schema import PluginList, PluginSettings
+from plugins.schema import PluginList
 
 
 class SenderType(str, Enum):
@@ -34,39 +34,6 @@ class MessageType(str, Enum):
     text = "text"
     code = "code"
     error = "error"
-
-
-class BotMessage(Message):
-    caption: str = None
-
-    @classmethod
-    def quick(cls, messageType: MessageType, content: str, **kwargs):
-        """
-        The quick method creates a BotMessage with a single section.
-        """
-        return cls(
-            sender=SenderType.NetGPT,
-            timestamp=int(datetime.datetime.now().timestamp()),
-            sections=[
-                MessageSection(
-                    messageType=messageType,
-                    content=content,
-                )
-            ],
-            **kwargs,
-        )
-
-    @classmethod
-    def filled(cls, sections: list[MessageSection], **kwargs):
-        """
-        The filled method creates a BotMessage with the specified sections.
-        """
-        return cls(
-            sender=SenderType.NetGPT,
-            timestamp=int(datetime.datetime.now().timestamp()),
-            sections=sections,
-            **kwargs,
-        )
 
 
 class ChatConfiguration(BaseModel):
@@ -120,6 +87,39 @@ class UserMessage(BaseModel):
     network_settings: NetworkSettings
     language_settings: LanguageSettings
     plugin_list: PluginList = None
+
+
+class BotMessage(Message):
+    caption: str = None
+
+    @classmethod
+    def quick(cls, message_type: MessageType, content: str, **kwargs):
+        """
+        The quick method creates a BotMessage with a single section.
+        """
+        return cls(
+            sender=SenderType.NetGPT,
+            timestamp=int(datetime.datetime.now().timestamp()),
+            sections=[
+                MessageSection(
+                    messageType=message_type,
+                    content=content,
+                )
+            ],
+            **kwargs,
+        )
+
+    @classmethod
+    def filled(cls, sections: list[MessageSection], **kwargs):
+        """
+        The filled method creates a BotMessage with the specified sections.
+        """
+        return cls(
+            sender=SenderType.NetGPT,
+            timestamp=int(datetime.datetime.now().timestamp()),
+            sections=sections,
+            **kwargs,
+        )
 
 
 class Alias(BaseModel):

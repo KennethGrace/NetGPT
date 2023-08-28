@@ -12,12 +12,8 @@ export interface ConfigDialogProps {
 const ConfigDialogs: {
   [label: string]: LazyExoticComponent<FC<ConfigDialogProps>>;
 } = {
-  "Server Settings": lazy(() => {
-    return new Promise((resolve) => setTimeout(resolve, 2000)).then(
-      () => import("./config/SettingsDialog")
-    );
-  }),
-  "Configure Aliases": lazy(() => import("./config/AliasDialog")),
+  Settings: lazy(() => import("./config/SettingsDialog")),
+  Aliases: lazy(() => import("./config/AliasDialog")),
 };
 
 export interface SettingsMenuProps {
@@ -38,7 +34,7 @@ const DialogsMenu: FC<SettingsMenuProps> = ({ setOpenConfigDialog }) => {
   return (
     <Box>
       <IconButton size="medium" aria-label="Settings" onClick={handleClick}>
-        <SettingsIcon htmlColor={theme.palette.primary.contrastText}/>
+        <SettingsIcon />
       </IconButton>
       <Menu anchorEl={anchorEl} open={isOpen} onClose={handleClose}>
         {Object.keys(ConfigDialogs).map((label) => {

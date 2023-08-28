@@ -1,11 +1,12 @@
-import axios, { AxiosError, AxiosResponse } from "axios";
+import axios from "axios";
 
 import {
-  NetworkSettings,
   Aliases,
   LanguageSettings,
-  PluginSettings
+  NetworkSettings,
+  PluginSettings,
 } from "../context/configuration";
+import { AxiosError } from "axios/index";
 
 export type SenderType = "NetGPT" | "You";
 
@@ -45,16 +46,20 @@ export interface UserMessage {
   aliases?: Aliases;
 }
 
+// sendMessage will reformat the userMessage and send it to the Server URL with
+// the provided auth token. It will return the response from the server.
+// If the response is undefined, then the server did not respond.
 export const sendMessage = async (
   serverURL: string,
-  userMessage: UserMessage
+  userMessage: UserMessage,
+  authToken: string,
 ): Promise<BotMessage | undefined> => {
   // Strip the userMessage history of all "code" message sections
   userMessage.message_history = userMessage.message_history.map((message) => {
     return {
       ...message,
       sections: message.sections.filter(
-        (section) => section.messageType !== "code"
+        (section) => section.messageType !== "code",
       ),
     };
   });
@@ -62,14 +67,51 @@ export const sendMessage = async (
     .post<BotMessage>(`${serverURL}/chat/message`, userMessage, {
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + localStorage.getItem("token") || "",
+        Authorization: "Bearer " + authToken,
       },
       timeout: 60000,
-    }).then((response) => {
+    })
+    .catch((error) => {
+      if (axios.isAxiosError(error)) {
+        const axiosError = error as AxiosError;
+        if (axiosError.response) {
+          // The request was made, but the server responded with a status code outside the 2xx range
+          throw new Error(axiosError.response.statusText);
+        }
+      }
+      return undefined;
+    })
+    .then((response) => {
+      if (response) {
+        try {
+          return response.data as BotMessage;
+        } catch (error) {
+          console.error(error);
+        }
+        return undefined;
+      }
+    });
+  console.log("Received response from server");
+  return response;
+};
+
+export const getGreeting = async (
+  serverURL: string,
+  authToken: string,
+): Promise<BotMessage | null> => {
+  const response = await axios
+    .get<BotMessage>(`${serverURL}/chat/greeting`, {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + authToken,
+      },
+      timeout: 60000,
+    })
+    .then((response) => {
       if (response) {
         return response.data;
       }
     });
   console.log("Received response from server");
-  return response;
+  return response ?? null;
 };

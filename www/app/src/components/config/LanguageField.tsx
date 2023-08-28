@@ -11,7 +11,10 @@ import {
   AccordionDetails,
   Tooltip,
 } from "@mui/material";
-import { LanguageSettings, useConfiguration } from "../../context/configuration";
+import {
+  LanguageSettings,
+  useConfiguration,
+} from "../../context/configuration";
 
 export interface LanguageFieldProps {
   title: string;
@@ -42,7 +45,8 @@ export const LanguageField: FC<LanguageFieldProps> = ({
   };
   // Form State
   const [languageChoice, setLanguageChoice] = useState<string>(name);
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>(fields);
+  const [fieldValues, setFieldValues] =
+    useState<Record<string, string>>(fields);
 
   const selectedLanguage = useMemo(() => {
     return languages.find((language) => language.name === languageChoice);
@@ -62,25 +66,27 @@ export const LanguageField: FC<LanguageFieldProps> = ({
 
   // Update the fieldComponents based on the selected language
   useEffect(() => {
-    const fields = Object.entries(selectedLanguage?.fields ?? {}).map(([label, _]) => {
-      return (
-        <TextField
-          key={label}
-          margin="dense"
-          id={label}
-          label={label}
-          type="text"
-          fullWidth
-          variant="filled"
-          onChange={(event) => {
-            setFieldValues((prev) => {
-              prev[label] = event.target.value;
-              return {...prev};
-            });
-          }}
-        />
-      );
-    });
+    const fields = Object.entries(selectedLanguage?.fields ?? {}).map(
+      ([label, _]) => {
+        return (
+          <TextField
+            key={label}
+            margin="dense"
+            id={label}
+            label={label}
+            type="text"
+            fullWidth
+            variant="filled"
+            onChange={(event) => {
+              setFieldValues((prev) => {
+                prev[label] = event.target.value;
+                return { ...prev };
+              });
+            }}
+          />
+        );
+      },
+    );
     setFieldComponents(fields);
   }, [languageChoice]);
 
@@ -89,7 +95,6 @@ export const LanguageField: FC<LanguageFieldProps> = ({
       <AccordionSummary>
         <Stack
           direction="column"
-          spacing={1}
           sx={{
             width: "100%",
           }}

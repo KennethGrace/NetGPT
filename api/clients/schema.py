@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import List
 
 from pydantic import BaseModel
-from enum import Enum
 
 from capabilities import Capability
 
@@ -52,7 +52,7 @@ class NetworkDevicePlatform(ABC):
 class NetworkSettings(BaseModel):
     username: str
     password: str
-    deviceType: str
+    deviceType: DeviceType
     enablePassword: str = None
 
 
@@ -61,5 +61,3 @@ class DeviceOptions(BaseModel):
     The DeviceOptions class defines the data model for all the available DeviceTypes.
     """
     options: List[DeviceType]
-
-

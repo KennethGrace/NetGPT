@@ -8,15 +8,6 @@ from pydantic import BaseModel, Field
 from capabilities import Capability
 
 
-class PluginList(BaseModel):
-    """
-    The PluginList class defines a model for a list of plugins.
-    This is necessary because more than one plugin can be enabled
-    at a time.
-    """
-    plugins: List[PluginSettings]
-
-
 class PluginSettings(BaseModel):
     """
     The PluginSettings
@@ -26,6 +17,15 @@ class PluginSettings(BaseModel):
     description: str
     fields: dict[str, str] = Field(default_factory=dict)
     enabled: bool = False
+
+
+class PluginList(BaseModel):
+    """
+    The PluginList class defines a model for a list of plugins.
+    This is necessary because more than one plugin can be enabled
+    at a time.
+    """
+    plugins: List[PluginSettings]
 
 
 class Plugin(ABC):

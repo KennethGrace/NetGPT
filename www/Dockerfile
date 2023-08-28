@@ -9,5 +9,6 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 RUN rm -rf /usr/share/nginx/html/*
 COPY public /usr/share/nginx/html
 COPY --from=build-stage /www/app/dist /usr/share/nginx/html/dist
-EXPOSE 8080
-CMD ["nginx", "-g", "daemon off;"]
+VOLUME /etc/nginx/certs
+EXPOSE 8080, 8443
+ENTRYPOINT ["nginx", "-g", "daemon off;"]

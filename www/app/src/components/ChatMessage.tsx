@@ -1,18 +1,10 @@
 import React, { FC, useEffect, useMemo, useState } from "react";
 
-import {
-  Box,
-  ListItem,
-  Typography,
-  Paper,
-  Stack,
-  useTheme,
-  Slide,
-} from "@mui/material";
+import { Box, Paper, Slide, Stack, Typography, useTheme } from "@mui/material";
 
 import {
-  Message,
   BotMessage,
+  Message,
   MessageType,
   SenderType,
 } from "../server/messaging";
@@ -82,7 +74,7 @@ const ChatMessageSection: FC<{
     if (messageType) {
       switch (messageType) {
         case "text":
-          return theme.palette.tertiary.main;
+          return theme.palette.primary.main;
         case "code":
           return theme.palette.code.main;
         case "error":
@@ -96,7 +88,7 @@ const ChatMessageSection: FC<{
   const [showPaper, setShowPaper] = useState<boolean>(false);
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(finalContent);
+    navigator.clipboard.writeText(finalContent).then();
     setCopiedMessage("Copied to clipboard!");
   };
 
@@ -114,7 +106,6 @@ const ChatMessageSection: FC<{
           width: "fit-content",
           maxWidth: "60vw",
           background: messageColor,
-          zIndex: 1,
           ...messageAttrs,
         }}
       >

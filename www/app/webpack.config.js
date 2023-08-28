@@ -1,12 +1,20 @@
 const webpack = require("webpack");
 const glob = require("glob");
 const path = require("path");
+const { https } = require("./https");
 
 module.exports = {
   devServer: {
     static: path.join(__dirname, "..", "public"),
-    compress: true,
-    port: 8080,
+    server: {
+      type: "https",
+      options: {
+        ca: "./certs/root.crt",
+        key: "./certs/www.key",
+        cert: "./certs/www.crt",
+      },
+    },
+    port: 8443,
   },
   entry: {
     // Get each file from the 'components' directory and use its name as the entry point name.

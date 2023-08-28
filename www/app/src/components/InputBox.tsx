@@ -49,16 +49,11 @@ const InputBoxButton: FC<{
 interface InputBoxProps {
   onClearMessages: () => void;
   onSendMessage: (message: Message) => void;
-  onInternalMessage: (message: Message) => void;
 }
 
 // InputBox Component accepts input from the user and implements
 // the logic for submitting a message to the chat.
-const InputBox: FC<InputBoxProps> = ({
-  onClearMessages,
-  onSendMessage,
-  onInternalMessage,
-}) => {
+const InputBox: FC<InputBoxProps> = ({ onClearMessages, onSendMessage }) => {
   const { languageSettings, networkSettings } = useConfiguration();
   const [inputText, setInputText] = useState<string>("");
 
@@ -81,7 +76,6 @@ const InputBox: FC<InputBoxProps> = ({
     }
     const message: Message = NewMessage(inputText);
     onSendMessage(message);
-    // TODO: Send the authenticated message to the server.
     setInputText("");
   };
 

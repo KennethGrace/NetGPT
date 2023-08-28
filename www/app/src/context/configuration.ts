@@ -54,7 +54,6 @@ export interface Configuration {
 }
 
 export const DefaultConfiguration = {
-  serverUrl: "http://localhost:49488",
   aliases: {},
 };
 

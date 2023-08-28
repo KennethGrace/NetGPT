@@ -6,16 +6,20 @@ ability to authenticate users.
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
-from yaml import safe_load
 
-from security.schema import AuthenticationServerInformation
+import httpx
+from fastapi import Depends
+from fastapi.security import OpenIdConnect
+from jose import jwt
+
+from environment import AuthenticationServerInformation
 
 logger = logging.getLogger("uvicorn")
 
-CONFIG_FILE_PATH = os.getenv("CONFIG_FILE_PATH", "config/default_config.yml")
-CONFIGURATION_FILE = Path(CONFIG_FILE_PATH)
+AUTH_SERVER_INFO = AuthenticationServerInformation.load()
+
+OIDC_URL = f'{AUTH_SERVER_INFO.server}/auth/realms/{AUTH_SERVER_INFO.realm}/.well-known/openid-configuration'
+OIDC = OpenIdConnect(openIdConnectUrl=OIDC_URL, scheme_name="Bearer")
 
 
 class SecurityCore:
@@ -27,17 +31,52 @@ class SecurityCore:
     perform the authentication, but rather provides the information needed to perform the authentication.
     """
 
-    def __init__(self):
+    def __init__(self, auth_server: AuthenticationServerInformation):
         """
         The constructor for the SecurityCore class loads the configuration file
         and sets the authentication server url.
         """
-        with open(CONFIGURATION_FILE, "r") as f:
-            self.authentication_config = safe_load(f)["authentication"]
+        domain_url = f'{auth_server.server}/realms/{auth_server.realm}'
+        response = httpx.get(f"{domain_url}/.well-known/openid-configuration", verify=False)
+        response.raise_for_status()
+        oidc_config = response.json()
+        self.jwks = httpx.get(oidc_config["jwks_uri"], verify=False).json()
+        self.client_id = auth_server.clientId
+        self.oidc = OpenIdConnect(openIdConnectUrl=f"{domain_url}/.well-known/openid-configuration",
+                                  scheme_name="Bearer")
 
-    def get_server_info(self) -> AuthenticationServerInformation:
+    @classmethod
+    def from_config(cls):
         """
-        The get_authentication_server_url method returns the authentication
-        server url.
+        The from_config method returns an instance of the SecurityCore class
+        with the configuration file.
         """
-        return AuthenticationServerInformation(**self.authentication_config)
+        return cls(auth_server=AuthenticationServerInformation.load())
+
+    def get_token_verifier(self):
+        """
+        The get_token_verifier method returns the token verifier dependency.
+        """
+
+        def verify_token(token: str = Depends(self.oidc)) -> dict:
+            """
+            The verify_token method verifies the user's token.
+            """
+            # If the token is a bearer token, remove the bearer prefix.
+            token = token.replace("Bearer ", "")
+            try:
+                logger.info(f"Encoded Token: {token}")
+                options = {"verify_signature": False, "verify_aud": False}
+                payload = jwt.decode(
+                    token,
+                    self.jwks,
+                    algorithms=["RS256"],
+                    audience=self.client_id,
+                    options=options,
+                )
+                logger.info(f"Decoded Token: {payload}")
+                return payload
+            except Exception as e:
+                logger.error(e)
+
+        return verify_token

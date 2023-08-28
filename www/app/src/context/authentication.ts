@@ -14,20 +14,19 @@ export type AuthenticationServerInformation = {
 
 // The interface for the authentication context
 export interface Authentication {
+  // The authentication status
+  isAuthenticated: boolean;
+  // The user login information
+  setIsAuthenticated: (isAuthenticated: boolean) => void;
   // The server information
   authServer?: AuthenticationServerInformation;
   // Set the server information
   setAuthServer: (authServer: AuthenticationServerInformation) => void;
-  // The authentication status
-  isAuthenticated: boolean;
-  // Set the authentication status
-  setIsAuthenticated: (isAuthenticated: boolean) => void;
 }
 
 // The authentication context
 export const AuthenticationContext = createContext<Authentication>({
   authServer: undefined,
-  isAuthenticated: false,
 } as Authentication);
 
 // The authentication context provider

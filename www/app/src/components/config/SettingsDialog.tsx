@@ -156,6 +156,7 @@ export const SettingsDialog: FC<SettingsDialogProps> = ({
       aria-describedby="settings-dialog-description"
       fullWidth
       maxWidth="xs"
+      keepMounted
     >
       <Notification
         isOpen={errorMessage !== null}
@@ -163,7 +164,7 @@ export const SettingsDialog: FC<SettingsDialogProps> = ({
         severity="error"
         message={errorMessage ?? "An unknown error occurred."}
       />
-      <DialogTitle id="settings-dialog-title">Server Settings</DialogTitle>
+      <DialogTitle id="settings-dialog-title">Settings</DialogTitle>
       <DialogContent>
         <Stack direction={"column"} spacing={1}>
           <Suspense fallback={<LinearProgress color="primary" />}>

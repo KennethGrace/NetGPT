@@ -16,33 +16,20 @@ the authentication service's URL and the available authentication domains.
 
 from __future__ import annotations
 
-import os
-from pydantic import BaseModel
+import logging
 
 from fastapi import APIRouter
 
-import logging
-
-from core.security import SecurityCore
+from environment import AuthenticationServerInformation
 
 logger = logging.getLogger("uvicorn")
 
 AuthRouter = APIRouter(prefix="/security")
 
 
-@AuthRouter.get("/validate")
-def validate_token(token: str):
-    """
-    Validate the user's token.
-    """
-    pass
-
-
-@AuthRouter.get("/server")
+@AuthRouter.get("/server", response_model=AuthenticationServerInformation)
 def get_auth_server_info():
     """
     Get the authentication server info.
     """
-    auth = SecurityCore()
-    return auth.get_server_info()
-
+    return AuthenticationServerInformation.load()
