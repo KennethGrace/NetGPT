@@ -9,9 +9,69 @@ import {
   SenderType,
 } from "../server/messaging";
 
-import { Notification } from "../common/Notify";
-
 type Justification = "right" | "left";
+
+const TextMessage: FC<{
+  content: string;
+  color?: string;
+}> = ({ content, color }) => {
+  const theme = useTheme();
+
+  return (
+    <Paper
+      elevation={8}
+      sx={{
+        width: "fit-content",
+        maxWidth: "60vw",
+        background: color ?? theme.palette.secondary.main,
+      }}
+    >
+      <Stack direction={"column"} sx={{ padding: "8px" }} spacing={1}>
+        {content.split("\n").map((line, index) => (
+          <Typography variant="body1" align={"left"} key={index}>
+            {line}
+          </Typography>
+        ))}
+      </Stack>
+    </Paper>
+  );
+};
+
+const CodeMessage: FC<{
+  content: string;
+}> = ({ content }) => {
+  const theme = useTheme();
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(content).then();
+    setCopiedMessage("Copied to clipboard!");
+  };
+
+  const [copiedMessage, setCopiedMessage] = useState<string>("");
+
+  return (
+    <Paper
+      elevation={8}
+      square
+      sx={{
+        width: "fit-content",
+        maxWidth: "60vw",
+        background: theme.palette.code.main,
+        maxHeight: "20vh",
+        overflow: "auto",
+        border: "1px solid",
+      }}
+    >
+      <Stack direction={"column"} sx={{ padding: "8px" }} spacing={1}>
+        {content.split("\n").map((line, index) => (
+          <Typography variant="body1" align={"left"} key={index}>
+            {line}
+          </Typography>
+        ))}
+      </Stack>
+    </Paper>
+  );
+};
 
 const ChatMessageSection: FC<{
   senderType: SenderType;
@@ -21,108 +81,43 @@ const ChatMessageSection: FC<{
   justification: Justification;
 }> = ({ senderType, messageType, content, caption, justification }) => {
   const theme = useTheme();
-  const messageAttrs = useMemo(() => {
-    if (messageType === "code") {
-      return {
-        maxHeight: "160px",
-        overflow: "auto",
-        border: "1px solid",
-      };
-    }
-  }, [messageType]);
-  const finalContent = useMemo(() => {
-    if (messageType === "text") {
-      return content;
-    }
-    if (messageType === "code") {
-      try {
-        // Attempt to format the code as JSON, then parse the JSON into
-        // a well-formatted string. The data may have values which are not well-formatted strings,
-        // so we should clean up the line breaks.
-        let formattedContent: string[]; // Formatted content is an array of lines
-        let data: {
-          [label: string]:
-            | string
-            | {
-                [label: string]: string;
-              };
-        } = JSON.parse(content);
-        formattedContent = Object.entries(data).map(([key, value]) => {
-          if (typeof value === "object") {
-            return [
-              key,
-              Object.entries(value)
-                .map(([key, value]) => {
-                  return [key.toUpperCase(), value].join("\n");
-                })
-                .join("\n"),
-            ].join("\n");
-          }
-          return [key.toUpperCase(), value].join("\n");
-        });
-        return formattedContent.join("\n");
-      } catch (error) {
-        return content;
-      }
-    }
-    return content;
-  }, [messageType]);
-  const messageColor = useMemo(() => {
-    if (senderType === "You") {
-      return theme.palette.secondary.main;
-    }
-    if (messageType) {
-      switch (messageType) {
-        case "text":
-          return theme.palette.primary.main;
-        case "code":
-          return theme.palette.code.main;
-        case "error":
-          return theme.palette.error.main;
-        default:
-          return theme.palette.error.main;
-      }
-    }
-  }, [messageType, theme.palette]);
-  const [copiedMessage, setCopiedMessage] = useState<string>("");
   const [showPaper, setShowPaper] = useState<boolean>(false);
-
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(finalContent).then();
-    setCopiedMessage("Copied to clipboard!");
-  };
 
   useEffect(() => {
     setShowPaper(true);
   }, []);
 
+  const Content = useMemo(() => {
+    switch (messageType) {
+      case "text":
+        const color =
+          senderType === "You" ? theme.palette.primary.main : undefined;
+        return <TextMessage content={content} color={color} />;
+      case "code":
+        return <CodeMessage content={content} />;
+      default:
+        return null;
+    }
+  }, [messageType, content, justification]);
+
   return (
     <Slide in={showPaper} direction={justification} mountOnEnter unmountOnExit>
-      <Paper
-        elevation={8}
-        square={messageType === "code"}
-        onClick={messageType === "code" ? copyToClipboard : undefined}
+      <Box
         sx={{
-          width: "fit-content",
-          maxWidth: "60vw",
-          background: messageColor,
-          ...messageAttrs,
+          display: "flex",
+          width: "100%",
+          justifyContent: justification,
         }}
       >
-        <Notification
-          isOpen={copiedMessage !== ""}
-          onClose={() => setCopiedMessage("")}
-          severity="success"
-          message={copiedMessage}
-        />
-        <Stack direction={"column"} sx={{ padding: "8px" }} spacing={1}>
-          {finalContent.split("\n").map((line, index) => (
-            <Typography variant="body1" align={"left"} key={index}>
-              {line}
+        <Stack direction={"column"} spacing={1}>
+          {Content}
+          {caption && (
+            <Typography variant="caption" align={justification}>
+              {caption}
             </Typography>
-          ))}
+          )}
         </Stack>
-      </Paper>
+      </Box>
     </Slide>
   );
 };

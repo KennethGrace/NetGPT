@@ -18,12 +18,12 @@ fi
 # Prompt for variable confirmation
 
 echo "Generating certificates with the following variables:"
-echo "C: $1"
-echo "ST: $2"
-echo "L: $3"
-echo "O: $4"
-echo "OU: $5"
-echo "CN: $6"
+echo "Country: $1"
+echo "State: $2"
+echo "Local: $3"
+echo "Organization: $4"
+echo "Organizational Unit: $5"
+echo "Common Name: $6"
 echo "Is this correct? (y/n)"
 read -r confirmation
 
@@ -40,6 +40,7 @@ root_subject="/C=$1/ST=$2/L=$3/O=$4/OU=$5/CN=$6"
 api_subject="/C=$1/ST=$2/L=$3/O=$4/OU=$5/CN=api.$6"
 www_subject="/C=$1/ST=$2/L=$3/O=$4/OU=$5/CN=www.$6"
 auth_subject="/C=$1/ST=$2/L=$3/O=$4/OU=$5/CN=auth.$6"
+db_subject="/C=$1/ST=$2/L=$3/O=$4/OU=$5/CN=db.$6"
 
 # Step 1: Generate the root certificate and key
 openssl req -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out root.crt \
@@ -52,6 +53,8 @@ openssl req -newkey rsa:4096 -nodes -out www.csr -keyout www.key -subj "$www_sub
   -addext "subjectAltName = DNS:$6"
 openssl req -newkey rsa:4096 -nodes -out auth.csr -keyout auth.key -subj "$auth_subject" \
   -addext "subjectAltName = DNS:$6"
+openssl req -newkey rsa:4096 -nodes -out db.csr -keyout db.key -subj "$db_subject" \
+  -addext "subjectAltName = DNS:$6"
 
 # Step 3: Use the root key to sign the certificate signing requests
 openssl x509 -req -in api.csr -CA root.crt -CAkey root.key -CAcreateserial -out api.crt -days 365 -sha256 \
@@ -59,6 +62,8 @@ openssl x509 -req -in api.csr -CA root.crt -CAkey root.key -CAcreateserial -out 
 openssl x509 -req -in www.csr -CA root.crt -CAkey root.key -CAcreateserial -out www.crt -days 365 -sha256 \
   -extensions v3_req -extfile <(printf "[v3_req]\nsubjectAltName = DNS:$6")
 openssl x509 -req -in auth.csr -CA root.crt -CAkey root.key -CAcreateserial -out auth.crt -days 365 -sha256 \
+  -extensions v3_req -extfile <(printf "[v3_req]\nsubjectAltName = DNS:$6")
+openssl x509 -req -in db.csr -CA root.crt -CAkey root.key -CAcreateserial -out db.crt -days 365 -sha256 \
   -extensions v3_req -extfile <(printf "[v3_req]\nsubjectAltName = DNS:$6")
 
 # Step 4: Move the certificates to the 'certs' directory, creating it if necessary
@@ -91,12 +96,14 @@ echo "Certificates generated. Would you like to display them? (y/n)"
 read -r display
 
 if [ "$display" == "y" ]; then
-    echo "Root certificate:"
+    echo "----- Root certificate -----"
     openssl x509 -in certs/root.crt -text -noout
-    echo "API certificate:"
+    echo "----- API certificate -----"
     openssl x509 -in certs/api.crt -text -noout
-    echo "WWW certificate:"
+    echo "----- WWW certificate -----"
     openssl x509 -in certs/www.crt -text -noout
-    echo "Auth certificate:"
+    echo "----- Auth certificate -----"
     openssl x509 -in certs/auth.crt -text -noout
+    echo "----- DB certificate -----"
+    openssl x509 -in certs/db.crt -text -noout
 fi

@@ -1,6 +1,6 @@
 // The Login component is used to allow users to log in to the application.
 
-import React, { FC, useMemo } from "react";
+import React, { FC, useEffect, useMemo } from "react";
 
 import {
   Button,
@@ -63,8 +63,8 @@ const Login: FC<{
   const [loginEnabled, setLoginEnabled] = React.useState<boolean>(false);
 
   // use Effect to attempt a login if the serverUrl is already set
-  React.useEffect(() => {
-    if (serverUrl && authServer) {
+  useEffect(() => {
+    if (serverUrl) {
       handleConnect(serverUrl).then(setIsAuthenticated);
     }
     setLoginEnabled(true);

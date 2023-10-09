@@ -16,21 +16,22 @@ from fastapi import APIRouter, Depends, HTTPException
 from jose import JWTError
 
 from core.chat import ChatCore
-from core.security import SecurityCore
+from core.security import SecurityCore as SC
 from flow.schema import BotMessage, UserMessage, MessageType
 
 logger = logging.getLogger("uvicorn")
 
 ChatRouter = APIRouter(prefix="/chat")
 
+SecurityCore = SC.from_config()
+
 
 def get_user():
     """
     The get_user method returns a dependency that verifies the user's token.
     """
-    security_core = SecurityCore.from_config()
 
-    async def user_dependency(token: str = Depends(security_core.get_token_verifier())):
+    async def user_dependency(token: str = Depends(SecurityCore.get_token_verifier())):
         return token
 
     return user_dependency
@@ -62,7 +63,6 @@ async def get_greeting(token: str = Depends(get_user())):
     Get a greeting message from the bot.
     """
     logger.info(f"Received greeting request")
-    security_core = SecurityCore.from_config()
     try:
         logger.info(f"Token: {token}")
         message = BotMessage.quick(

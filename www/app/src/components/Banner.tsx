@@ -21,8 +21,18 @@ import { Api, GitHub } from "@mui/icons-material";
 import { useConfiguration } from "../context/configuration";
 import { getManifest, ManifestFile } from "../data/appManifest";
 import { useAuthentication } from "../context/authentication";
+import Pulse from "../common/Pulse";
 
 const DialogsMenu = lazy(() => import("./DialogsMenu"));
+
+const truncateUrl = (url: string) => {
+  // Remove the protocol
+  const noProtocol = url.replace("https://", "");
+  // Remove the port
+  const noPort = noProtocol.replace(/:\d+/, "");
+  // Return the first 20 characters
+  return noPort.substring(0, 20);
+};
 
 interface BannerProps {
   openServerUrlDialog: () => void;
@@ -46,28 +56,26 @@ const Banner: FC<BannerProps> = ({
     getManifest().then((manifest) => setManifest(manifest));
   }, []);
 
-  const urlButtonColor = useMemo(() => {
-    if (serverUrl) {
-      return isAuthenticated ? "primary" : "warning";
-    }
-    return "inherit";
-  }, [serverUrl, isAuthenticated]);
-
   const ServerURLButton = useMemo(() => {
     if (serverUrl) {
+      const urlButtonColor = isAuthenticated ? "primary" : "warning";
       return () => (
         <Tooltip title={"Edit the Server URL"} arrow>
-          <Button
-            variant="contained"
-            endIcon={<Api />}
-            onClick={() => {
-              openServerUrlDialog();
-            }}
-            aria-label="set-server-url"
-            color={urlButtonColor}
-          >
-            {serverUrl}
-          </Button>
+          <div>
+            <Pulse disabled={isAuthenticated}>
+              <Button
+                variant="contained"
+                endIcon={<Api />}
+                onClick={() => {
+                  openServerUrlDialog();
+                }}
+                aria-label="set-server-url"
+                color={urlButtonColor}
+              >
+                {isAuthenticated ? truncateUrl(serverUrl) : "Not Connected"}
+              </Button>
+            </Pulse>
+          </div>
         </Tooltip>
       );
     }
@@ -82,7 +90,7 @@ const Banner: FC<BannerProps> = ({
         </IconButton>
       </Tooltip>
     );
-  }, [serverUrl, urlButtonColor]);
+  }, [serverUrl, isAuthenticated]);
 
   return (
     <AppBar

@@ -1,4 +1,4 @@
-import { PaletteMode, createTheme } from "@mui/material";
+import { createTheme, PaletteMode } from "@mui/material";
 
 declare module "@mui/material/styles" {
   interface Palette {
@@ -43,7 +43,7 @@ export const getDesign = (mode: PaletteMode) => ({
             main: "#573609",
           },
           code: {
-            main: "#212121",
+            main: "#0c0c0c",
           },
         }),
   },

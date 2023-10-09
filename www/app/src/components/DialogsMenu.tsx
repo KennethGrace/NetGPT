@@ -1,8 +1,9 @@
-import React, { FC, LazyExoticComponent, lazy } from "react";
+import React, { FC, lazy, LazyExoticComponent } from "react";
 
 import { Box, IconButton, Menu, MenuItem, useTheme } from "@mui/material";
 
 import { Settings as SettingsIcon } from "@mui/icons-material";
+import { useAuthentication } from "../context/authentication";
 
 export interface ConfigDialogProps {
   isOpen: boolean;
@@ -22,18 +23,26 @@ export interface SettingsMenuProps {
 
 const DialogsMenu: FC<SettingsMenuProps> = ({ setOpenConfigDialog }) => {
   const theme = useTheme();
+  const { isAuthenticated } = useAuthentication();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const isOpen = Boolean(anchorEl);
+
   const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     setAnchorEl(event.currentTarget);
   };
+
   const handleClose = () => {
     setAnchorEl(null);
   };
 
   return (
     <Box>
-      <IconButton size="medium" aria-label="Settings" onClick={handleClick}>
+      <IconButton
+        size="medium"
+        aria-label="Settings"
+        onClick={handleClick}
+        disabled={!isAuthenticated}
+      >
         <SettingsIcon />
       </IconButton>
       <Menu anchorEl={anchorEl} open={isOpen} onClose={handleClose}>
