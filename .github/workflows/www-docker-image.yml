@@ -1,4 +1,4 @@
-name: Docker Image CI for API
+name: Docker Image CI for WWW
 
 on:
   push:
@@ -42,7 +42,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
-      - name: Build and push the API
+      - name: Build and push the Web App
         uses: docker/build-push-action@44ea916f6c540f9302d50c2b1e5a8dc071f15cdf
         with:
           context: ./www
