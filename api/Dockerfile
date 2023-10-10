@@ -13,7 +13,7 @@ VOLUME /app/certs
 EXPOSE 49488
 
 # Install requirements without any cache
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 # Run uvicorn server
 ENTRYPOINT [ "uvicorn", "netgpt:application", "--host", "0.0.0.0", "--port", "49488", "--ssl-keyfile", "/app/certs/api.key", "--ssl-certfile", "/app/certs/api.crt" ]
