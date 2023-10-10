@@ -1,4 +1,4 @@
-FROM python:slim-bullseye
+FROM python:3.11.6-alpine3.18
 
 # Copy all files from current directory to /app inside container
 COPY . /app

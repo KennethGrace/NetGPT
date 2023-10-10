@@ -1,7 +1,6 @@
 fastapi>=0.102.0
 uvicorn>=0.23.1
 openai==0.28.1
-netmiko>=4.2.0
 napalm>=4.1.0
 python-jose>=3.3.0
 httpx>=0.24.1
