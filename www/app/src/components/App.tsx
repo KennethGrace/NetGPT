@@ -77,6 +77,16 @@ export const App: FC = () => {
 
   useEffect(() => {
     setFadeIn(true);
+    // Test localStorage for configuration settings
+    const serverUrl = loadServerUrl();
+    const networkSettings = loadNetworkSettings();
+    const languageSettings = loadLanguageSettings();
+    const authServer = loadServerInformation();
+    // Set the configuration context if the settings are defined.
+    if (serverUrl !== undefined) setServerUrl(serverUrl);
+    if (networkSettings !== undefined) setNetworkSettings(networkSettings);
+    if (languageSettings !== undefined) setLanguageSettings(languageSettings);
+    if (authServer !== undefined) setAuthServer(authServer);
   }, []);
 
   return (

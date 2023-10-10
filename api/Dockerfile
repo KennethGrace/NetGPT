@@ -17,5 +17,4 @@ RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
 # Run uvicorn server
-ENTRYPOINT [ "uvicorn", "netgpt:application", "--host", "0.0.0.0", "--port", "49488",
-    "--ssl-keyfile", "/app/certs/api.key", "--ssl-certfile", "/app/certs/api.crt" ]
+ENTRYPOINT [ "uvicorn", "netgpt:application", "--host", "0.0.0.0", "--port", "49488", "--ssl-keyfile", "/app/certs/api.key", "--ssl-certfile", "/app/certs/api.crt" ]

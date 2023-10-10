@@ -4,10 +4,9 @@ at scale to a list of IP addresses.
 """
 from __future__ import annotations
 
-import asyncio
 import ipaddress
-from typing import List, Any
 import logging
+from typing import List, Any
 
 import icmplib
 
@@ -74,9 +73,7 @@ class PingsPlugin(Plugin):
         count = int(self.settings.fields['Count'])
         timeout = int(self.settings.fields['Timeout'])
         # Send ICMP echo requests to all hosts in the network
-        hosts = asyncio.run(
-            ping_network(net, count=count, timeout=timeout)
-        )
+        hosts = ping_network(net, count=count, timeout=timeout)
         active_hosts = {
             host.address: {
                 "rtt_avg": host.avg_rtt if host.is_alive else None,

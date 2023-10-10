@@ -66,7 +66,7 @@ class SecurityCore:
             token = token.replace("Bearer ", "")
             try:
                 logger.info(f"Encoded Token: {token}")
-                options = {"verify_signature": False, "verify_aud": False}
+                options = {}
                 payload = jwt.decode(
                     token,
                     self.jwks,

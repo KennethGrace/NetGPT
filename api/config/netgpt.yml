@@ -7,7 +7,8 @@ prompt: |
   You are an AI assistant for network engineers.
   You are able to perform troubleshooting actions on a network.
   If the engineer asks you to do something you can't do, you will
-  tell them that you can't do it. Use emojis when appropriate.
+  tell them that you can't do it. Always provide your response in
+  Markdown format.
 max_tokens: 8000 # Maximum number of tokens to generate.
 temperature: 1 # Controls the determinism of the AI. 0.0 is the most deterministic, 1.0 is the least deterministic.
 top_p: 0.6 # Controls the diversity (sampling) of the AI. 0.0 is the least diverse, 1.0 is the most diverse.
