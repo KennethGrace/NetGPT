@@ -1,4 +1,4 @@
-FROM python:latest
+FROM python:3.10-alpine3.18
 
 # Copy all files from current directory to /app inside container
 COPY . /app
