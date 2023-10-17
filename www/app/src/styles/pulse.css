@@ -1,0 +1,22 @@
+@keyframes pulse {
+    0% {
+        transform: scale(0.9);
+        box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.5);
+    }
+    30% {
+        transform: scale(1);
+        box-shadow: 0 0 0 8px rgba(0, 0, 0, 0);
+    }
+    100% {
+        transform: scale(0.9);
+        box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+    }
+}
+
+.pulse-effect {
+    animation: pulse 2s infinite ease-in-out;
+}
+
+.pulse-disabled {
+    animation: none;
+}

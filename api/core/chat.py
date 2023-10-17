@@ -10,17 +10,18 @@ from pathlib import Path
 
 from capabilities import CapabilityRunner
 from clients import get_network_device_platform
-from clients.client import NetworkSettings
+from clients.schema import NetworkSettings
 from flow import get_language
-from flow.flow import (
+from flow.exceptions import (
     LanguageException
 )
+from flow.schema import LanguageSettings, ChatConfiguration, UserMessage, BotMessage, MessageType
 from plugins import get_plugins, get_all_plugins
-from schema import MessageType, BotMessage, ChatConfiguration, LanguageSettings, UserMessage, PluginList
+from plugins.schema import PluginList
 
 logger = logging.getLogger("uvicorn")
 
-CONFIGURATION_FILE = Path("config.yml")
+CONFIGURATION_FILE = Path("config/netgpt.yml")
 
 
 class ChatCore:
@@ -90,6 +91,6 @@ class ChatCore:
             return self.language.request_response(message)
         except LanguageException as e:
             return BotMessage.quick(
-                messageType=MessageType.error,
+                message_type=MessageType.error,
                 content=str(e),
             )

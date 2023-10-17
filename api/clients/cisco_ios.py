@@ -10,7 +10,7 @@ from netmiko import ConnectHandler
 from netmiko.exceptions import NetmikoTimeoutException
 from napalm import get_network_driver
 
-from clients.client import NetworkDevicePlatform, NetworkSettings
+from clients.schema import NetworkSettings, NetworkDevicePlatform
 from capabilities import Capability, Property
 
 

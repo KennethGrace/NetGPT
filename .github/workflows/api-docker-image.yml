@@ -4,11 +4,11 @@ on:
   push:
     branches: [ "main" ]
     paths:
-    - 'api/**'
+      - 'api/**'
   pull_request:
     branches: [ "main" ]
     paths:
-    - 'api/**'
+      - 'api/**'
 
 env:
   IMAGE_NAME: kennethgrace/netgpt-api
@@ -23,7 +23,7 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7
-        
+
       - name: Docker Metadata action
         id: meta
         uses: docker/metadata-action@2c0bd771b40637d97bf205cbccdd294a32112176
@@ -47,7 +47,7 @@ jobs:
         with:
           context: ./api
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
     

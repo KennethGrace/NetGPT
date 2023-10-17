@@ -1,14 +1,14 @@
 """
-The Plugins module defines the interfaces for extended functionality
-beyond the core capabilities of NetGPT to manipulate network devices.
-This is typically used to pull in a 3rd party library that provides
-additional functionality.
+The plugins package defines the interfaces for extended functionality beyond the core capabilities of NetGPT to
+manipulate network devices. This is typically used to pull in a 3rd party library that provides additional
+functionality. A plugin should always be implemented as a subclass of the Plugin class defined in schema.py.
 """
+
 from __future__ import annotations
 
 from typing import List, Type
 
-from plugins.plugin import Plugin
+from plugins.schema import Plugin
 from plugins.pings import PingsPlugin
 
 # Official list of supported plugins.

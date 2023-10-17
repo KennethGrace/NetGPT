@@ -4,80 +4,67 @@ import React, {
   LazyExoticComponent,
   Suspense,
   useEffect,
-  useMemo,
   useState,
 } from "react";
 
-import {
-  AppBar,
-  Box,
-  Divider,
-  IconButton,
-  Paper,
-  Stack,
-  Toolbar,
-  Typography,
-} from "@mui/material";
-
-import { GitHub } from "@mui/icons-material";
+import { Box } from "@mui/material";
 
 import { LoadingIndicatorWithBackdrop } from "../common/Loader";
 
 import {
-  ConfigurationContext,
-  NetworkSettings,
   Aliases,
-  LanguageSettings,
+  Configuration,
+  ConfigurationContext,
   DefaultConfiguration,
-  useConfiguration,
-} from "../common/configuration";
+} from "../context/configuration";
 
 import {
-  loadServerUrl,
-  loadNetworkSettings,
+  Authentication,
+  AuthenticationContext,
+} from "../context/authentication";
+
+import {
   loadLanguageSettings,
+  loadNetworkSettings,
+  loadServerInformation,
+  loadServerUrl,
 } from "../data/browserCache";
 
 import { useFadeIn } from "../styles/effects";
-import { getManifest, ManifestFile } from "../data/appManifest";
 
 import "../styles/fading.css";
 
+const Login = lazy(() => import("./Login"));
 const ChatView = lazy(() => import("./Viewport"));
 const Banner = lazy(() => import("./Banner"));
 
-const MidScreenLogo = () => {
-  return (
-    <Box
-      sx={{
-        position: "fixed",
-        top: "50%",
-        left: "50%",
-        transform: "translate(-50%, -50%)",
-        opacity: 0.4,
-      }}
-    >
-      <img alt="logo" aria-label="logo" src="/logo256x256.png" />
-    </Box>
-  );
-};
-
 export const App: FC = () => {
   const [fadeIn, setFadeIn] = useFadeIn();
-  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [OpenConfigDialog, setOpenConfigDialog] =
     React.useState<LazyExoticComponent<FC<any>>>();
 
   // Setup Configuration Context
-  const [serverUrl, setServerUrl] = useState<string>(
-    DefaultConfiguration.serverUrl
+  const [serverUrl, setServerUrl] = useState(loadServerUrl());
+  const [networkSettings, setNetworkSettings] = useState(loadNetworkSettings());
+  const [languageSettings, setLanguageSettings] = useState(
+    loadLanguageSettings(),
   );
-  const [networkSettings, setNetworkSettings] = useState<NetworkSettings>();
-  const [languageSettings, setLanguageSettings] = useState<LanguageSettings>();
   const [aliases, setAliases] = useState<Aliases>(DefaultConfiguration.aliases);
-  const [manifest, setManifest] = useState<ManifestFile>();
 
-  const configContext = {
+  // Setup Authentication Context
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authServer, setAuthServer] = useState(loadServerInformation());
+
+  const authContext: Authentication = {
+    isAuthenticated,
+    setIsAuthenticated,
+    authServer,
+    setAuthServer,
+  };
+
+  const configContext: Configuration = {
     serverUrl,
     setServerUrl,
     networkSettings,
@@ -89,30 +76,23 @@ export const App: FC = () => {
   };
 
   useEffect(() => {
-    getManifest().then((manifest) => {
-      if (manifest) {
-        setManifest(manifest);
-      }
-    });
     setFadeIn(true);
-  }, []);
-
-  // Check the browser's local storage for a saved configuration on startup
-  useEffect(() => {
+    // Test localStorage for configuration settings
     const serverUrl = loadServerUrl();
     const networkSettings = loadNetworkSettings();
     const languageSettings = loadLanguageSettings();
-
-    setServerUrl(serverUrl ?? DefaultConfiguration.serverUrl);
-    setNetworkSettings(networkSettings);
-    setLanguageSettings(languageSettings);
+    const authServer = loadServerInformation();
+    // Set the configuration context if the settings are defined.
+    if (serverUrl !== undefined) setServerUrl(serverUrl);
+    if (networkSettings !== undefined) setNetworkSettings(networkSettings);
+    if (languageSettings !== undefined) setLanguageSettings(languageSettings);
+    if (authServer !== undefined) setAuthServer(authServer);
   }, []);
 
   return (
     <ConfigurationContext.Provider value={configContext}>
-      {manifest ? (
+      <AuthenticationContext.Provider value={authContext}>
         <Box className={fadeIn ? "fade-in" : ""}>
-          <MidScreenLogo />
           <Box
             component="main"
             sx={{
@@ -123,25 +103,25 @@ export const App: FC = () => {
             }}
           >
             <Banner
-              title={manifest.short_name}
-              github_url={manifest.github_url}
-              license_url={manifest.license_url}
               setOpenConfigDialog={(dialog) => {
                 setOpenConfigDialog(dialog);
                 setDialogOpen(true);
               }}
+              openServerUrlDialog={() => setLoginOpen(true)}
             />
+            <Login isOpen={loginOpen} onClose={() => setLoginOpen(false)} />
             <Suspense fallback={<LoadingIndicatorWithBackdrop />}>
-            {OpenConfigDialog && (
-              <OpenConfigDialog isOpen={dialogOpen} onClose={setDialogOpen} />
-            )}
+              {OpenConfigDialog && (
+                <OpenConfigDialog
+                  isOpen={dialogOpen}
+                  onClose={() => setDialogOpen(false)}
+                />
+              )}
             </Suspense>
             <ChatView />
           </Box>
         </Box>
-      ) : (
-        <LoadingIndicatorWithBackdrop label="Waiting for Application Manifest" />
-      )}
+      </AuthenticationContext.Provider>
     </ConfigurationContext.Provider>
   );
 };

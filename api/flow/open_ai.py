@@ -13,11 +13,11 @@ from typing import Any, Dict, List
 import openai
 
 from capabilities import CapabilityRunner
-from flow.flow import (
-    NaturalLanguageProcessor,
+from flow.exceptions import (
     LanguageException
 )
-from schema import SenderType, MessageSection, Message, MessageType, BotMessage, LanguageSettings, UserMessage
+from flow import NaturalLanguageProcessor
+from flow.schema import LanguageSettings, SenderType, UserMessage, BotMessage, Message, MessageSection, MessageType
 
 logger = logging.getLogger("uvicorn")
 

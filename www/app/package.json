@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "A network configuration manager and automation tool.",
   "scripts": {
-    "debug": "webpack-dev-server --mode development --open --stats-error-details",
+    "debug": "webpack server --server-type https --mode development --open --stats-error-details",
     "build": "webpack --mode production"
   },
   "dependencies": {
@@ -12,6 +12,7 @@
     "@mui/icons-material": "^5.11.16",
     "@mui/material": "^5.13.5",
     "axios": "^1.4.0",
+    "keycloak-js": "^22.0.1",
     "react": "^17.0.2",
     "react-dom": "^17.0.2",
     "reflect-metadata": "^0.1.13"

@@ -15,3 +15,16 @@ __pycache__/
 
 # React builds
 dist/
+
+# Development secrets
+secret
+
+# Any security credentials
+certs
+*.pem
+*.key
+*.pub
+*.p12
+*.pfx
+*.cer
+*.crt

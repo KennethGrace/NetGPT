@@ -3,18 +3,18 @@ import React, { FC, ReactNode, useMemo, useState } from "react";
 import {
   Box,
   Button,
-  TextField,
-  Paper,
-  FormControl,
-  Stack,
   Divider,
   IconButton,
+  Paper,
+  Stack,
+  TextField,
 } from "@mui/material";
 
-import { Send, Refresh, Clear } from "@mui/icons-material";
+import { Clear, Refresh, Send } from "@mui/icons-material";
 
-import { useConfiguration } from "../common/configuration";
+import { useConfiguration } from "../context/configuration";
 import { Message } from "../server/messaging";
+import { useAuthentication } from "../context/authentication";
 
 const NewMessage: (text: string) => Message = (text) => ({
   sender: "You",
@@ -49,30 +49,24 @@ const InputBoxButton: FC<{
 interface InputBoxProps {
   onClearMessages: () => void;
   onSendMessage: (message: Message) => void;
-  onInternalMessage: (message: Message) => void;
 }
 
 // InputBox Component accepts input from the user and implements
 // the logic for submitting a message to the chat.
-const InputBox: FC<InputBoxProps> = ({
-  onClearMessages,
-  onSendMessage,
-  onInternalMessage,
-}) => {
+const InputBox: FC<InputBoxProps> = ({ onClearMessages, onSendMessage }) => {
   const { languageSettings, networkSettings } = useConfiguration();
+  const { isAuthenticated } = useAuthentication();
   const [inputText, setInputText] = useState<string>("");
 
   // useMemo keeps the value of isConfigured cached until the dependencies change.
   // This prevents the value from being recalculated on every render.
   const isConfigured = useMemo(() => {
-    if (languageSettings !== undefined && networkSettings !== undefined) {
-      // If the server settings and connection parameters are defined,
-      // then the server is configured.
-      return true;
-    }
-    // Otherwise, the server is not configured.
-    return false;
-  }, [languageSettings, networkSettings]);
+    return (
+      languageSettings !== undefined &&
+      networkSettings !== undefined &&
+      isAuthenticated
+    );
+  }, [languageSettings, networkSettings, isAuthenticated]);
 
   const sendMessage = (auto: boolean) => {
     // Validate the input text is not empty or all whitespace.
@@ -81,7 +75,6 @@ const InputBox: FC<InputBoxProps> = ({
     }
     const message: Message = NewMessage(inputText);
     onSendMessage(message);
-    // TODO: Send the authenticated message to the server.
     setInputText("");
   };
 

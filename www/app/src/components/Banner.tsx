@@ -1,52 +1,107 @@
-import React, { FC, LazyExoticComponent, lazy, useMemo } from "react";
+import React, {
+  FC,
+  lazy,
+  LazyExoticComponent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import {
   AppBar,
-  Divider,
+  Button,
   IconButton,
-  Paper,
   Stack,
   Toolbar,
-  Typography,
+  Tooltip,
   useTheme,
 } from "@mui/material";
 
-import { Copyright, GitHub } from "@mui/icons-material";
-import { useConfiguration } from "../common/configuration";
+import { Api, GitHub } from "@mui/icons-material";
+import { useConfiguration } from "../context/configuration";
+import { getManifest, ManifestFile } from "../data/appManifest";
+import { useAuthentication } from "../context/authentication";
+import Pulse from "../common/Pulse";
 
-const DialogsMenu = lazy(async () => {
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-  return await import("./DialogsMenu");
-});
+const DialogsMenu = lazy(() => import("./DialogsMenu"));
+
+const truncateUrl = (url: string) => {
+  // Remove the protocol
+  const noProtocol = url.replace("https://", "");
+  // Remove the port
+  const noPort = noProtocol.replace(/:\d+/, "");
+  // Return the first 20 characters
+  return noPort.substring(0, 20);
+};
 
 interface BannerProps {
-  title: string;
-  github_url: string;
-  license_url: string;
+  openServerUrlDialog: () => void;
   setOpenConfigDialog: (dialog: LazyExoticComponent<FC<any>>) => void;
 }
 
 const Banner: FC<BannerProps> = ({
-  title,
-  github_url,
-  license_url,
+  openServerUrlDialog,
   setOpenConfigDialog,
 }) => {
   const theme = useTheme();
+  const [manifest, setManifest] = useState<ManifestFile>();
+  const { serverUrl } = useConfiguration();
+  const { isAuthenticated, authServer } = useAuthentication();
+
   const handleGitHub = () => {
-    window.open(github_url, "_blank");
+    window.open(manifest?.github_url, "_blank");
   };
+
+  useEffect(() => {
+    getManifest().then((manifest) => setManifest(manifest));
+  }, []);
+
+  const ServerURLButton = useMemo(() => {
+    if (serverUrl) {
+      const urlButtonColor = isAuthenticated ? "primary" : "warning";
+      return () => (
+        <Tooltip title={"Edit the Server URL"} arrow>
+          <div>
+            <Pulse disabled={isAuthenticated}>
+              <Button
+                variant="contained"
+                endIcon={<Api />}
+                onClick={() => {
+                  openServerUrlDialog();
+                }}
+                aria-label="set-server-url"
+                color={urlButtonColor}
+              >
+                {isAuthenticated ? truncateUrl(serverUrl) : "Not Connected"}
+              </Button>
+            </Pulse>
+          </div>
+        </Tooltip>
+      );
+    }
+    return () => (
+      <Tooltip title={"Configure the Server URL"} arrow>
+        <IconButton
+          size="medium"
+          aria-label="set-server-url"
+          onClick={openServerUrlDialog}
+        >
+          <Api />
+        </IconButton>
+      </Tooltip>
+    );
+  }, [serverUrl, isAuthenticated]);
 
   return (
     <AppBar
       position="sticky"
       sx={{
-        backgroundColor: "primary.main",
         flexDirection: "row",
         padding: "8px",
-        height: "48px",
+        height: "56px",
         alignItems: "center",
       }}
+      color={"inherit"}
     >
       <Toolbar
         sx={{
@@ -62,10 +117,8 @@ const Banner: FC<BannerProps> = ({
           flexGrow: 1,
         }}
       >
-        <Stack direction="row" spacing={1} alignItems="center">
-          <Typography variant="h5" fontWeight="bold" noWrap>
-            {title}
-          </Typography>
+        <Stack direction="row" spacing={0} alignItems="center">
+          <ServerURLButton />
         </Stack>
       </Toolbar>
 
@@ -75,7 +128,7 @@ const Banner: FC<BannerProps> = ({
         }}
       >
         <IconButton size="medium" aria-label="GitHub" onClick={handleGitHub}>
-          <GitHub htmlColor={theme.palette.primary.contrastText} />
+          <GitHub />
         </IconButton>
       </Toolbar>
     </AppBar>

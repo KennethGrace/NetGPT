@@ -5,7 +5,7 @@ import { Paper, Typography, MenuItem, TextField, Stack } from "@mui/material";
 import {
   NetworkSettings,
   useConfiguration,
-} from "../../common/configuration";
+} from "../../context/configuration";
 
 export interface NetworkFieldProps {
   title: string;

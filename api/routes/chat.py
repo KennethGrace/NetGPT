@@ -10,29 +10,67 @@ settings contain the name of the language and the language settings.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
-
 import logging
 
-from schema import BotMessage, UserMessage
-from core.core import ChatCore
+from fastapi import APIRouter, Depends, HTTPException
+from jose import JWTError
+
+from core.chat import ChatCore
+from core.security import SecurityCore as SC
+from flow.schema import BotMessage, UserMessage, MessageType
 
 logger = logging.getLogger("uvicorn")
 
 ChatRouter = APIRouter(prefix="/chat")
 
+SecurityCore = SC.from_config()
+
+
+def get_user():
+    """
+    The get_user method returns a dependency that verifies the user's token.
+    """
+
+    async def user_dependency(token: str = Depends(SecurityCore.get_token_verifier())):
+        return token
+
+    return user_dependency
+
 
 @ChatRouter.post("/message", response_model=BotMessage)
-def receive_message(message: UserMessage):
+async def receive_message(message: UserMessage, user=Depends(get_user())):
     """
     Receive a message from the user and return a response.
     """
     logger.info(f"Received message: {message}")
-    chat_core = ChatCore(
-        languageSettings=message.language_settings,
-        networkSettings=message.network_settings,
-        pluginList=message.plugin_list,
-    )
-    bot_message = chat_core.process_message(message)
+    try:
+        chat_core = ChatCore(
+            languageSettings=message.language_settings,
+            networkSettings=message.network_settings,
+            pluginList=message.plugin_list,
+        )
+        bot_message = chat_core.process_message(message)
+    except Exception as e:
+        logger.error(f"Error processing message: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing message: {e}")
     logger.info(f"Sending message: {bot_message}")
     return bot_message
+
+
+@ChatRouter.get("/greeting", response_model=BotMessage)
+async def get_greeting(token: str = Depends(get_user())):
+    """
+    Get a greeting message from the bot.
+    """
+    logger.info(f"Received greeting request")
+    try:
+        logger.info(f"Token: {token}")
+        message = BotMessage.quick(
+            message_type=MessageType.text,
+            content="Hello, I am NetGPT. How can I help you today?",
+        )
+        logger.info(f"Sending greeting: {message}")
+        return message
+    except JWTError:
+        logger.error(f"Invalid authentication token")
+        raise HTTPException(status_code=401, detail="Invalid authentication token")

@@ -11,13 +11,12 @@ from netmiko import ConnectHandler
 from napalm import get_network_driver
 
 from capabilities import Capability, Property
-from clients.client import NetworkDevicePlatform, NetworkSettings
+from clients.schema import NetworkSettings, NetworkDevicePlatform
 
 
 class CiscoNXOSPlatform(NetworkDevicePlatform):
     """
-    The CiscoNXOSPlatform class defines the interface for connecting to and
-    troubleshooting Cisco NX-OS devices.
+    The CiscoNXOSPlatform class defines the interface for connecting to and troubleshooting Cisco NX-OS devices.
     """
     vendor = "Cisco NXOS"
 

@@ -2,34 +2,104 @@
 version: "3.7"
 name: netgpt
 services:
+  #  mongo:
+  #    image: mongo
+  #    restart: always
+  #    environment:
+  #      MONGO_INITDB_ROOT_USERNAME: admin # Change this to your desired admin username
+  #      MONGO_INITDB_ROOT_PASSWORD: mongo # Change this to your desired admin password
+  #      MONGODB_CLIENT_EXTRA_FLAGS: "--ssl"
+  #    expose:
+  #      - "27017"
+  #    volumes:
+  #      - ./certs/mongo.key:/ssl/server.pem
+  #      - ./certs/mongo.crt:/ssl/ca.pem
+  #    networks:
+  #      - backend
+  #  mongo-express:
+  #    image: mongo-express
+  #    restart: unless-stopped
+  #    ports:
+  #      - "8081:8081"
+  #    depends_on:
+  #      - mongo
+  #    environment:
+  #      ME_CONFIG_MONGODB_ADMINUSERNAME: admin # Change this to your desired admin username
+  #      ME_CONFIG_MONGODB_ADMINPASSWORD: mongo # Change this to your desired admin password
+  #      ME_CONFIG_MONGODB_URL: mongodb://admin:mongo@mongo:27017/
+  #    networks:
+  #      - backend
+  #      - frontend
+  auth:
+    # The Authentication service is keycloak, by default.
+    # When deployed with docker-compose, it is started in dev mode
+    image: quay.io/keycloak/keycloak
+    restart: always
+    command:
+      - "start-dev" # Change this to "start" to run in production mode
+      - "--https-port=8443"
+      - "--https-certificate-file=/etc/x509/https/tls.crt"
+      - "--https-certificate-key-file=/etc/x509/https/tls.key"
+    environment:
+      - KEYCLOAK_ADMIN=admin # Change this to your desired admin username
+      - KEYCLOAK_ADMIN_PASSWORD=keycloak # Change this to your desired admin password
+    volumes:
+      - ./certs/auth.key:/etc/x509/https/tls.key
+      - ./certs/auth.crt:/etc/x509/https/tls.crt
+    ports:
+      - "8443:8443"
+    networks:
+      - frontend
   webui:
-    domainname: www.netgpt.local
     build:
-      tags:
-        - kennethgrace/netgpt-webui
       context: ./www
       dockerfile: Dockerfile
+    restart: always
     ports:
-      - "80:8080"
+      - "443:8443"
+    volumes:
+      - ./certs/www.key:/etc/nginx/certs/certificate.key
+      - ./certs/www.crt:/etc/nginx/certs/certificate.crt
     depends_on:
       - api
     x-develop:
       watch:
         - action: rebuild
           path: ./www
+    networks:
+      - frontend
   api:
-    domainname: api.netgpt.local
     build:
-      tags:
-        - kennethgrace/netgpt-api
       context: ./api
       dockerfile: Dockerfile
+    restart: always
+    environment:
+      DATABASE_URL: mongodb://admin:mongo@mongo:27017/
     ports:
       - "49488:49488"
+    volumes:
+      - ./certs/api.key:/app/certs/api.key
+      - ./certs/api.crt:/app/certs/api.crt
+      - ./certs/root.crt:/etc/ssl/certs/root.crt
+    depends_on:
+      - auth
+    #      - mongo
     x-develop:
       watch:
         - action: rebuild
           path: ./api
+    networks:
+      - frontend
+      - backend
+
+networks:
+  frontend:
+    name: frontend
+    driver: bridge
+  backend:
+    name: backend
+    driver: bridge
+
 
 
           

@@ -1,22 +1,20 @@
-"""
-The Libraries module defines the interface for connecting to and
-discovering Network Infrastructure devices.
-"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from enum import Enum
+from typing import List
+
 from pydantic import BaseModel
 
 from capabilities import Capability
 
 
-class NetworkSettings(BaseModel):
-    username: str
-    password: str
-    deviceType: str
-    enablePassword: str = None
+class DeviceType(str, Enum):
+    CISCO_IOS = "Cisco IOS"
+    CISCO_NXOS = "Cisco NXOS"
 
 
+# Link the DeviceType enum to the device handlers for each device type.
 class NetworkDevicePlatform(ABC):
     """
     NetworkDevicePlatform defines the interface for connecting to and
@@ -49,3 +47,17 @@ class NetworkDevicePlatform(ABC):
             for method in dir(cls)
             if isinstance(getattr(cls, method), Capability)
         ]
+
+
+class NetworkSettings(BaseModel):
+    username: str
+    password: str
+    deviceType: DeviceType
+    enablePassword: str = None
+
+
+class DeviceOptions(BaseModel):
+    """
+    The DeviceOptions class defines the data model for all the available DeviceTypes.
+    """
+    options: List[DeviceType]

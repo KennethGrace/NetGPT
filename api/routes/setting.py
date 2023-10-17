@@ -1,8 +1,11 @@
 from fastapi import APIRouter
 
-from clients import get_network_device_platforms
 from flow import get_all_languages
-from schema import Options, LanguageSettingsBatch
+from flow.schema import LanguageSettingsBatch
+from clients.schema import DeviceOptions
+from clients import get_network_device_platforms
+from plugins import get_all_plugins
+from plugins.schema import PluginList
 
 SettingsRouter = APIRouter(prefix="/settings")
 
@@ -12,9 +15,7 @@ def get_device_types():
     """
     Return a list of supported device type options as a list of strings.
     """
-    return Options(options=[
-        deviceType.vendor for deviceType in get_network_device_platforms()
-    ])
+    return DeviceOptions(options=get_network_device_platforms().keys())
 
 
 @SettingsRouter.get("/languages")
@@ -32,6 +33,6 @@ def get_plugins():
     """
     Return a list of supported plugins.
     """
-    return Options(options=[
-        plugin.get_settings().name for plugin in get_plugins()
-    ])
+    return PluginList(
+        plugins=[plugin.get_settings() for plugin in get_all_plugins()]
+    )
