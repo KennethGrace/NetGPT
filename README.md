@@ -54,8 +54,8 @@ _For Web UI:_
 
 ```bash
 docker run -d -p 80:8080 -p 443:8443 \
- -v ./certs/www.crt:/etc/nginx/certs/certificate.crt \
- -v ./certs/www.key:/etc/nginx/certs/certificate.key \
+ -v /etc/ca-certificates/certs/www.crt:/etc/nginx/certs/certificate.crt \
+ -v /etc/ca-certificates/certs/www.key:/etc/nginx/certs/certificate.key \
  kennethgrace/netgpt-webui
 ```
 
@@ -63,8 +63,8 @@ _For API:_
 
 ```bash
 docker run -d -p 49488:49488 \
- -v ./certs/api.crt:/app/certs/api.crt \
- -v ./certs/api.key:/app/certs/api.key \
+ -v /etc/ca-certificates/certs/api.crt:/app/certs/api.crt \
+ -v /etc/ca-certificates/certs/api.key:/app/certs/api.key \
  kennethgrace/netgpt-api
 ```
 
@@ -75,8 +75,8 @@ provide the KeyCloak container with certificates using the following command:
 
 ```bash
 docker run -d -p 7080:8080 -p 7443:8443 \
- -v ./certs/auth.crt:/etc/x509/https/tls.crt \
- -v ./certs/auth.key:/etc/x509/https/tls.key \
+ -v /etc/ca-certificates/certs/auth.crt:/etc/x509/https/tls.crt \
+ -v /etc/ca-certificates/certs/auth.key:/etc/x509/https/tls.key \
  quay.io/keycloak/keycloak:latest
 ```
 
