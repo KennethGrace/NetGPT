@@ -130,3 +130,4 @@ The API configuration is provided using environment variables. The following env
 | `AUTH_CLIENT_ID`     | The authentication client.   | `netgpt`                 |
 | `AUTH_CLIENT_SECRET` | The authentication secret.   | `CHANGE_ME`              |
 | `ALLOWED_ORGINS`     | The allowed origins.         | `*`                      |
+| `CONFIG_FILE`        | The configuration file.      | `config/config.yml`      |

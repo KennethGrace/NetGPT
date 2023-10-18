@@ -63,7 +63,7 @@ def get_configuration_file() -> Path:
     The get_configuration_file method returns the configuration file path.
     """
 
-    config_file_path = os.getenv("CONFIG_FILE_PATH", "config/config.yml")
+    config_file_path = os.getenv("CONFIG_FILE", "config/config.yml")
     configuration_file = Path(config_file_path)
     return configuration_file
 
