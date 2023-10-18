@@ -29,8 +29,13 @@ class AuthenticationServerInformation(BaseModel):
         """
         The load method returns an instance of the AuthenticationServerInformation
         """
-        configuration_file = get_configuration_file()
         configuration = load_config_file("authentication")
+        # Override the configuration with environment variables
+        configuration["provider"] = os.getenv("AUTH_PROVIDER", None) or configuration["provider"]
+        configuration["server"] = os.getenv("AUTH_SERVER", None) or configuration["server"]
+        configuration["realm"] = os.getenv("AUTH_REALM", None) or configuration["realm"]
+        configuration["clientId"] = os.getenv("AUTH_CLIENT_ID", None) or configuration["clientId"]
+        configuration["clientSecret"] = os.getenv("AUTH_CLIENT_SECRET", None) or configuration["clientSecret"]
         return cls(**configuration)
 
 
@@ -47,8 +52,9 @@ class NetGPTServerInformation(BaseModel):
         """
         The load method returns an instance of the NetGPTServerInformation
         """
-        configuration_file = get_configuration_file()
         configuration = load_config_file("server")
+        # Override the configuration with environment variables
+        configuration["allowed_origins"] = os.getenv("ALLOWED_ORIGINS", None) or configuration["allowed_origins"]
         return cls(**configuration)
 
 
@@ -57,7 +63,7 @@ def get_configuration_file() -> Path:
     The get_configuration_file method returns the configuration file path.
     """
 
-    config_file_path = os.getenv("CONFIG_FILE_PATH", "config/default_config.yml")
+    config_file_path = os.getenv("CONFIG_FILE", "config/config.yml")
     configuration_file = Path(config_file_path)
     return configuration_file
 
