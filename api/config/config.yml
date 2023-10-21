@@ -3,10 +3,10 @@
 # This file is in YAML format. See http://yaml.org/ for more information.
 server:
   allowed_origins: # List of allowed origins for CORS requests. This should be the URL of the frontends.
-    - https://*
+    - *
 authentication:
   provider: keycloak # Authentication provider to use. Currently only keycloak is supported.
-  server: https://localhost:7443 # URL of the authentication server
+  server: https://localhost:8443 # URL of the authentication server
   realm: netgpt # Name of the authentication realm
   clientId: netgpt # Name of the authentication client
   # The API should receive its client secret from the `AUTH_CLIENT_SECRET` environment variable or a configured secret manager.
