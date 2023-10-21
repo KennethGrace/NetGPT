@@ -54,6 +54,7 @@ _For API:_
 docker run -d -p 49488:49488 --name netgpt-api \
  -v /etc/ca-certificates/certs/api.crt:/app/certs/api.crt \
  -v /etc/ca-certificates/certs/api.key:/app/certs/api.key \
+ -v /etc/ca-certificates/certs/root.crt:/etc/ssl/certs/root.crt \
  kennethgrace/netgpt-api
 ```
 
@@ -64,7 +65,7 @@ If you plan to use KeyCloak authentication, you will need to provide the KeyCloa
 Normally, you would run KeyCloak in production mode on a dedicated node, but for a quick setup, you can run KeyCloak in development mode locally. To run KeyCloak in development mode, use the following command:
 
 ```bash
-docker run -d -p 8080:8443 -p 8443:8443 --name keycloak \
+docker run -d -p 8080:8080 -p 8443:8443 --name keycloak \
  -v /etc/ca-certificates/certs/auth.crt:/etc/x509/https/tls.crt \
  -v /etc/ca-certificates/certs/auth.key:/etc/x509/https/tls.key \
  -e KEYCLOAK_ADMIN=admin -e KEYCLOAK_ADMIN_PASSWORD=keycloak \

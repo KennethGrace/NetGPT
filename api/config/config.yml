@@ -3,7 +3,7 @@
 # This file is in YAML format. See http://yaml.org/ for more information.
 server:
   allowed_origins: # List of allowed origins for CORS requests. This should be the URL of the frontends.
-    - *
+    - "*" # Allow all origins. This is not recommended for production.
 authentication:
   provider: keycloak # Authentication provider to use. Currently only keycloak is supported.
   server: https://localhost:8443 # URL of the authentication server
