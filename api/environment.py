@@ -54,7 +54,8 @@ class NetGPTServerInformation(BaseModel):
         """
         configuration = load_config_file("server")
         # Override the configuration with environment variables
-        environment_origins = os.getenv("ALLOWED_ORIGINS", None).split(",")
+        environment_origins = os.getenv("ALLOWED_ORIGINS", None)
+        environment_origins = environment_origins.split(",") if environment_origins else None
         configuration["allowed_origins"] = environment_origins or configuration["allowed_origins"]
         return cls(**configuration)
 
