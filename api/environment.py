@@ -31,11 +31,11 @@ class AuthenticationServerInformation(BaseModel):
         """
         configuration = load_config_file("authentication")
         # Override the configuration with environment variables
-        configuration["provider"] = os.getenv("AUTH_PROVIDER", None) or configuration["provider"]
-        configuration["server"] = os.getenv("AUTH_SERVER", None) or configuration["server"]
-        configuration["realm"] = os.getenv("AUTH_REALM", None) or configuration["realm"]
-        configuration["clientId"] = os.getenv("AUTH_CLIENT_ID", None) or configuration["clientId"]
-        configuration["clientSecret"] = os.getenv("AUTH_CLIENT_SECRET", None) or configuration["clientSecret"]
+        configuration["provider"] = os.getenv("AUTH_PROVIDER", configuration["provider"])
+        configuration["server"] = os.getenv("AUTH_SERVER", configuration["server"])
+        configuration["realm"] = os.getenv("AUTH_REALM", configuration["realm"])
+        configuration["clientId"] = os.getenv("AUTH_CLIENT_ID", configuration["clientId"])
+        configuration["clientSecret"] = os.getenv("AUTH_CLIENT_SECRET", configuration["clientSecret"])
         return cls(**configuration)
 
 
@@ -45,7 +45,7 @@ class NetGPTServerInformation(BaseModel):
     needed to initialize the NetGPT service.
     """
 
-    allowed_origins: list[str] = ["https://localhost", "https://localhost:8443"]
+    allowed_origins: list[str]
 
     @classmethod
     def load(cls) -> NetGPTServerInformation:
@@ -54,7 +54,8 @@ class NetGPTServerInformation(BaseModel):
         """
         configuration = load_config_file("server")
         # Override the configuration with environment variables
-        configuration["allowed_origins"] = os.getenv("ALLOWED_ORIGINS", None) or configuration["allowed_origins"]
+        environment_origins = os.getenv("ALLOWED_ORIGINS", None).split(",")
+        configuration["allowed_origins"] = environment_origins or configuration["allowed_origins"]
         return cls(**configuration)
 
 

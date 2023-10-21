@@ -1,6 +1,6 @@
 # NetGPT: The Network Engineering GPT
 
-[![License](https://img.shields.io/github/license/kennethgrace/netgpt?color=yellow&style=flat-square)](https://mit-license.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](https://mit-license.org)
 [![Docker Hub](https://img.shields.io/badge/Docker_Hub-NetGPT-blue?style=flat-square)](https://hub.docker.com/r/kennethgrace/netgpt-webui)
 
 ## Introduction
@@ -42,7 +42,7 @@ When using Docker, you can provide the certificates using the following commands
 _For Web UI:_
 
 ```bash
-docker run -d -p 80:8080 -p 443:8443 \
+docker run -d -p 80:8080 -p 443:8443 --name netgpt-webui \
  -v /etc/ca-certificates/certs/www.crt:/etc/nginx/certs/certificate.crt \
  -v /etc/ca-certificates/certs/www.key:/etc/nginx/certs/certificate.key \
  kennethgrace/netgpt-webui
@@ -51,22 +51,26 @@ docker run -d -p 80:8080 -p 443:8443 \
 _For API:_
 
 ```bash
-docker run -d -p 49488:49488 \
+docker run -d -p 49488:49488 --name netgpt-api \
  -v /etc/ca-certificates/certs/api.crt:/app/certs/api.crt \
  -v /etc/ca-certificates/certs/api.key:/app/certs/api.key \
  kennethgrace/netgpt-api
 ```
 
-#### Using KeyCloak
+#### Using a KeyCloak Server
 
-If you plan to use the KeyCloak authentication, you will need to provide the KeyCloak certificate as well. You can
-provide the KeyCloak container with certificates using the following command:
+If you plan to use KeyCloak authentication, you will need to provide the KeyCloak certificate as well. You can provide the KeyCloak container with certificates using the same volume mounting method as for the application and API.
+
+Normally, you would run KeyCloak in production mode on a dedicated node, but for a quick setup, you can run KeyCloak in development mode locally. To run KeyCloak in development mode, use the following command:
 
 ```bash
-docker run -d -p 7080:8080 -p 7443:8443 \
+docker run -d -p 8080:8443 -p 8443:8443 --name keycloak \
  -v /etc/ca-certificates/certs/auth.crt:/etc/x509/https/tls.crt \
  -v /etc/ca-certificates/certs/auth.key:/etc/x509/https/tls.key \
- quay.io/keycloak/keycloak:latest
+ -e KEYCLOAK_ADMIN=admin -e KEYCLOAK_ADMIN_PASSWORD=keycloak \
+  quay.io/keycloak/keycloak:latest start-dev --https-port=8443 \
+ --https-certificate-file=/etc/x509/https/tls.crt \
+ --https-certificate-key-file=/etc/x509/https/tls.key
 ```
 
 ### Docker Compose
