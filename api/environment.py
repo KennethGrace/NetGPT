@@ -22,7 +22,10 @@ class AuthenticationServerInformation(BaseModel):
     server: str
     realm: str
     clientId: str
-    clientSecret: str = os.getenv("AUTH_CLIENT_SECRET", None)  # TODO: Refactor to support secrets managers
+
+    @property
+    def client_secret(self): return os.getenv("AUTH_CLIENT_SECRET",
+                                              None)  # TODO: Refactor to support secrets managers too
 
     @classmethod
     def load(cls) -> AuthenticationServerInformation:
@@ -35,7 +38,6 @@ class AuthenticationServerInformation(BaseModel):
         configuration["server"] = os.getenv("AUTH_SERVER", configuration["server"])
         configuration["realm"] = os.getenv("AUTH_REALM", configuration["realm"])
         configuration["clientId"] = os.getenv("AUTH_CLIENT_ID", configuration["clientId"])
-        configuration["clientSecret"] = os.getenv("AUTH_CLIENT_SECRET", configuration["clientSecret"])
         return cls(**configuration)
 
 

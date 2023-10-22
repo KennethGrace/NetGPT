@@ -38,7 +38,7 @@ def get_user():
 
 
 @ChatRouter.post("/message", response_model=BotMessage)
-async def receive_message(message: UserMessage, user=Depends(get_user())):
+async def receive_message(message: UserMessage, token: str = Depends(get_user())) -> BotMessage:
     """
     Receive a message from the user and return a response.
     """

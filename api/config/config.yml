@@ -9,6 +9,3 @@ authentication:
   server: https://localhost:8443 # URL of the authentication server
   realm: netgpt # Name of the authentication realm
   clientId: netgpt # Name of the authentication client
-  # The API should receive its client secret from the `AUTH_CLIENT_SECRET` environment variable or a configured secret manager.
-  # In development, the client secret is;
-  clientSecret: CHANGE_ME # Client secret of the authentication client

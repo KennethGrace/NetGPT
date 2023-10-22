@@ -21,7 +21,7 @@ const getKeycloak = async (info: AuthenticationServerInformation) => {
       enableLogging: true,
     })
     .catch((error) => {
-      console.log(error);
+      console.log(error.toString());
       return null;
     })
     .then((authenticated) => {
@@ -44,7 +44,7 @@ class Authenticator {
   public async login(information: AuthenticationServerInformation) {
     if (!this.keycloakInstance) {
       this.keycloakInstance = await getKeycloak(information).catch((error) => {
-        console.log(error);
+        console.log(error.toString());
         return null;
       });
       localStorage.setItem("keycloak", JSON.stringify(this.keycloakInstance));
@@ -60,7 +60,7 @@ class Authenticator {
   public async getToken() {
     if (this.keycloakInstance) {
       await this.keycloakInstance.updateToken(5).catch((error) => {
-        console.log(error);
+        console.log(error.toString());
         console.log("Error updating token");
       });
       return this.keycloakInstance.token ?? null;
