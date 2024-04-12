@@ -1,6 +1,6 @@
 # NetGPT: The Network Engineering GPT
 
-> Hello to all interested parties. Unfortunately due to time constraints, I have had to shelve this project for the time being. It needs some significant refactoring to expand funtionality and improve integration of external services. Consider this a WIP for now. My apologize.
+> Hello to all interested parties. Unfortunately due to time constraints, I have had to shelve this project for the time being. It needs some significant refactoring to expand funtionality and improve integration of external services. **Please consider this a WIP for now**.
 
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](https://mit-license.org)
 [![Docker Hub](https://img.shields.io/badge/Docker_Hub-NetGPT-blue?style=flat-square)](https://hub.docker.com/r/kennethgrace/netgpt-webui)
