@@ -36,11 +36,6 @@ def replay(fixtures: dict[str, str]) -> tuple[httpx.MockTransport, list[str]]:
     return httpx.MockTransport(handler), requests
 
 
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
 @pytest.fixture(autouse=True)
 def lab_password(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NETGPT_TEST_PASSWORD", "not-used-by-the-mock")

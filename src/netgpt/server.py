@@ -18,12 +18,13 @@ import os
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TypeVar
+from typing import Annotated, TypeVar
 
 import icmplib
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
+from pydantic import BeforeValidator
 
 from netgpt import __version__
 from netgpt.guard import GuardError
@@ -59,6 +60,10 @@ EXPECTED_ERRORS = (InventoryError, GuardError, PlatformError)
 MAX_SWEEP_ADDRESSES = 1024
 
 PrimitiveT = TypeVar("PrimitiveT")
+
+# Small models often pass one device name where the schema asks for a list. Accept
+# it rather than spend a round trip on a validation error; the schema stays a list.
+DeviceNames = Annotated[list[str] | None, BeforeValidator(lambda value: [value] if isinstance(value, str) else value)]
 
 
 def build_server(inventory: Inventory, platforms: dict[str, type[Platform]] = PLATFORMS) -> MCPServer:
@@ -123,25 +128,25 @@ def build_server(inventory: Inventory, platforms: dict[str, type[Platform]] = PL
             raise ToolError(str(error)) from error
 
     @server.tool(annotations=READ_ONLY)
-    async def lldp_neighbors(devices: list[str] | None = None) -> Collection[LldpNeighbor]:
+    async def lldp_neighbors(devices: DeviceNames = None) -> Collection[LldpNeighbor]:
         """Return LLDP adjacencies: which interface is cabled to which remote system and port. Omit devices to query all of them."""
         items, errors = await collect(devices, lambda platform: platform.lldp_neighbors())
         return Collection[LldpNeighbor](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
-    async def mac_table(devices: list[str] | None = None) -> Collection[MacEntry]:
+    async def mac_table(devices: DeviceNames = None) -> Collection[MacEntry]:
         """Return layer 2 forwarding (MAC table) entries. Omit devices to query all of them."""
         items, errors = await collect(devices, lambda platform: platform.mac_table())
         return Collection[MacEntry](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
-    async def arp_table(devices: list[str] | None = None) -> Collection[ArpEntry]:
+    async def arp_table(devices: DeviceNames = None) -> Collection[ArpEntry]:
         """Return ARP bindings of IPv4 addresses to MAC addresses. Omit devices to query all of them."""
         items, errors = await collect(devices, lambda platform: platform.arp_table())
         return Collection[ArpEntry](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
-    async def routes(devices: list[str] | None = None, network_instance: str = "default") -> Collection[Route]:
+    async def routes(devices: DeviceNames = None, network_instance: str = "default") -> Collection[Route]:
         """Return the IPv4 routing table of one network instance (VRF). Omit devices to query all of them."""
         items, errors = await collect(devices, lambda platform: platform.routes(network_instance))
         return Collection[Route](items=items, errors=errors)

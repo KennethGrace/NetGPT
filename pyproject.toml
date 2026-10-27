@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
     "icmplib>=3.0.4",
+    "prompt_toolkit>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,7 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 netgpt-mcp = "netgpt.server:main"
+netgpt-chat = "netgpt.chat:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/netgpt"]

@@ -1,6 +1,7 @@
 """
-Tests for the MCP server, driven through an in-process MCP client against a fake
-platform, so the protocol layer is exercised without any devices.
+Tests for the MCP server, driven through an in-process MCP client against the
+fake platform in conftest.py, so the protocol layer is exercised without any
+devices.
 """
 
 from __future__ import annotations
@@ -10,57 +11,7 @@ from pathlib import Path
 import pytest
 from mcp import Client
 
-from netgpt.guard import NOKIA_SRLINUX
 from netgpt.inventory import Inventory, InventoryError
-from netgpt.platforms import Platform, PlatformError
-from netgpt.primitives import LldpNeighbor
-from netgpt.server import build_server
-
-
-class FakePlatform(Platform):
-    """Answers from canned data; a device named 'broken' fails like an unreachable device."""
-
-    policy = NOKIA_SRLINUX
-    commands_run: list[str] = []
-
-    async def _run_checked_cli(self, command: str) -> str:
-        FakePlatform.commands_run.append(command)
-        return f"{self.device.name}: ran {command}"
-
-    async def lldp_neighbors(self) -> list[LldpNeighbor]:
-        if self.device.name == "broken":
-            raise PlatformError("broken: connection refused")
-        return [LldpNeighbor(device=self.device.name, interface="ethernet-1/49", neighbor="spine1")]
-
-
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.fixture
-def inventory(tmp_path: Path) -> Inventory:
-    password_file = tmp_path / "password"
-    password_file.write_text("NotARealPassword\n")
-    password_file.chmod(0o600)
-    return Inventory.model_validate(
-        {
-            "credentials": {"lab": {"username": "admin", "password_file": str(password_file)}},
-            "devices": [
-                {"name": "leaf1", "host": "192.0.2.21", "platform": "fake", "credentials": "lab", "role": "leaf"},
-                {"name": "leaf2", "host": "192.0.2.22", "platform": "fake", "credentials": "lab", "role": "leaf"},
-                {"name": "broken", "host": "192.0.2.99", "platform": "fake", "credentials": "lab"},
-                {"name": "mystery", "host": "192.0.2.98", "platform": "juniper_junos", "credentials": "lab"},
-            ],
-            "sweep_networks": ["192.0.2.0/24", "198.18.0.0/15"],
-        }
-    )
-
-
-@pytest.fixture
-def client(inventory: Inventory) -> Client:
-    FakePlatform.commands_run = []
-    return Client(build_server(inventory, platforms={"fake": FakePlatform}))
 
 
 @pytest.mark.anyio
@@ -90,12 +41,12 @@ async def test_show_runs_allowed_command(client: Client) -> None:
 
 
 @pytest.mark.anyio
-async def test_show_refuses_write_and_explains(client: Client) -> None:
+async def test_show_refuses_write_and_explains(client: Client, commands_run: list[str]) -> None:
     async with client:
         result = await client.call_tool("show", {"device": "leaf1", "command": "info > /tmp/exfil"})
     assert result.is_error
     assert "'>' is not allowed" in result.content[0].text
-    assert FakePlatform.commands_run == []
+    assert commands_run == []
 
 
 @pytest.mark.anyio
@@ -117,6 +68,14 @@ async def test_collection_keeps_results_when_some_devices_fail(client: Client) -
     assert set(errors) == {"broken", "mystery"}
     assert "connection refused" in errors["broken"]
     assert "supported platforms: fake" in errors["mystery"]
+
+
+@pytest.mark.anyio
+async def test_one_device_name_is_accepted_where_a_list_is_expected(client: Client) -> None:
+    async with client:
+        result = await client.call_tool("lldp_neighbors", {"devices": "leaf1"})
+    assert not result.is_error
+    assert [item["device"] for item in result.structured_content["items"]] == ["leaf1"]
 
 
 @pytest.mark.anyio

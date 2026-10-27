@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](https://mit-license.org)
 [![Author](https://img.shields.io/badge/Author-Kenneth_J_Grace-orange?style=flat-square)](https://kennethjeffersongrace.com)
 
-NetGPT gives language models read-only access to network devices. It is an [MCP](https://modelcontextprotocol.io) server: any MCP client, such as Claude Code or Claude Desktop, can be the chat interface, and the client runs the tool-calling loop.
+NetGPT gives language models read-only access to network devices. It is an [MCP](https://modelcontextprotocol.io) server: any MCP client, such as Claude Code or Claude Desktop, can be the chat interface, and the client runs the tool-calling loop. `netgpt-chat` does the same with a local model served by [Ollama](https://ollama.com), so device output never leaves the machine.
 
 The tools return typed records grouped by network layer (LLDP adjacencies, MAC tables, ARP bindings, routes, reachability). That makes them useful to a model and also to anything else that wants to draw the network.
 
@@ -63,6 +63,27 @@ The repository's [`.mcp.json`](.mcp.json) registers the server with Claude Code 
 
 ```bash
 python -m netgpt --inventory lab/inventory.yml
+```
+
+### Chat with a local model
+
+`netgpt-chat` builds the server in-process and runs the tool-calling loop against a model served by Ollama. Tool calls show up as they happen, and errors (such as a refused command) are always shown.
+
+```bash
+netgpt-chat --inventory lab/inventory.yml                               # interactive; /reset clears, Ctrl-D quits
+netgpt-chat --inventory lab/inventory.yml "What is cabled to spine1?"   # one question per argument
+```
+
+The default model, `gemma4:e4b`, runs on CPU alone: about 14 tokens/s on 16 threads of a Xeon Gold 6242, using 10 GB of RAM at its full 128K context. `--model` picks any other model with tool support.
+
+The chat lets the model think before each reply when the model supports it. That is slow on CPU, but small models need it for anything multi-step. On the lab, gemma4:e4b answered "find the host behind leaf2 and check that leaf1 can reach it" and "trace the path from host1 to host2" correctly 4 times out of 4 with thinking, taking about 3 minutes per question, and 0 times out of 4 without, at about 25 seconds per question. `--no-think` is fine for single lookups such as "what is cabled to spine1?".
+
+To keep Ollama off the GPUs entirely, for example while they're busy training, run a separate CPU-only instance. Hide the GPUs from both CUDA and Vulkan, since Ollama finds them through either:
+
+```bash
+CUDA_VISIBLE_DEVICES=-1 GGML_VK_VISIBLE_DEVICES=-1 OLLAMA_VULKAN=false \
+  OLLAMA_HOST=127.0.0.1:11435 ollama serve   # OLLAMA_MODELS=... to share another instance's models
+netgpt-chat --ollama http://127.0.0.1:11435 --threads 16 --inventory lab/inventory.yml
 ```
 
 ## Inventory
