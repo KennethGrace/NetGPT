@@ -12,6 +12,9 @@ import pytest
 from mcp import Client
 
 from netgpt.inventory import Inventory, InventoryError
+from netgpt.server import build_server
+
+from fakes import FakePlatform
 
 
 @pytest.mark.anyio
@@ -19,7 +22,7 @@ async def test_every_tool_is_annotated_read_only(client: Client) -> None:
     async with client:
         tools = (await client.list_tools()).tools
     assert {tool.name for tool in tools} == {
-        "list_devices", "show", "lldp_neighbors", "mac_table", "arp_table", "routes", "ping", "ping_sweep",
+        "list_devices", "show", "lldp_neighbors", "mac_table", "arp_table", "routes", "topology", "ping", "ping_sweep",
     }
     assert all(tool.annotations and tool.annotations.read_only_hint for tool in tools)
 
@@ -81,8 +84,8 @@ async def test_one_device_name_is_accepted_where_a_list_is_expected(client: Clie
 @pytest.mark.anyio
 async def test_unsupported_query_is_reported_per_device(client: Client) -> None:
     async with client:
-        result = await client.call_tool("arp_table", {"devices": ["leaf1"]})
-    assert result.structured_content["errors"][0]["error"] == "fake does not support ARP tables yet."
+        result = await client.call_tool("mac_table", {"devices": ["leaf1"]})
+    assert result.structured_content["errors"][0]["error"] == "fake does not support MAC tables yet."
 
 
 @pytest.mark.anyio
@@ -106,3 +109,37 @@ def test_world_readable_password_file_is_refused(tmp_path: Path) -> None:
     )
     with pytest.raises(InventoryError, match="chmod 600"):
         inventory.credentials_for(inventory.get("leaf1")).password()
+
+
+@pytest.mark.anyio
+async def test_topology_merges_every_device_and_reports_the_failures(client: Client) -> None:
+    async with client:
+        result = await client.call_tool("topology", {})
+    graph = result.structured_content
+    assert [(node["id"], node["kind"]) for node in graph["nodes"]] == [
+        ("leaf1", "device"), ("leaf2", "device"), ("broken", "device"), ("mystery", "device"),
+        ("spine1", "neighbor"), ("198.51.100.11", "host"), ("198.51.100.12", "host"),
+    ]
+    assert {error["device"] for error in graph["errors"]} == {"broken", "mystery"}
+    # One error per device, though both of its queries failed.
+    assert len(graph["errors"]) == 2
+
+
+@pytest.mark.anyio
+async def test_display_is_only_offered_to_a_client_that_can_draw(inventory: Inventory) -> None:
+    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True)) as client:
+        assert "display" in {tool.name for tool in (await client.list_tools()).tools}
+        assert "map of the network" in (client.instructions or "")
+        result = await client.call_tool("display", {"title": "leaf1's host", "focus": "198.51.100.11"})
+        # gemma4:e4b once sent highlight as an object keyed by the names it meant.
+        keyed = await client.call_tool("display", {"title": "Uplink", "highlight": {"leaf1--spine1": []}})
+        refused = await client.call_tool("display", {"title": "Nope", "focus": ["leaf9"]})
+    assert not result.is_error
+    # The model reads a summary; the drawing goes to the page as structured content.
+    assert result.content[0].text.startswith('The user now sees "leaf1\'s host"')
+    view = result.structured_content
+    assert view["emphasis"]["198.51.100.11"] == "focus" and view["emphasis"]["leaf1"] == "near"
+    assert view["emphasis"]["leaf2"] == "context"
+    assert refused.is_error and "'leaf9'" in refused.content[0].text
+    assert keyed.structured_content["highlight"] == ["leaf1", "leaf1:ethernet-1/49--spine1", "spine1"]
+

@@ -1,0 +1,147 @@
+{
+ "result": [
+  {
+   "admin-state": "enable",
+   "hello-timer": "30",
+   "hold-multiplier": 4,
+   "system-name": "spine1",
+   "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef spine1 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+   "chassis-id": "1A:11:04:FF:00:00",
+   "chassis-id-type": "MAC_ADDRESS",
+   "statistics": {
+    "frame-in": "2106",
+    "frame-out": "1582",
+    "frame-error-in": "0",
+    "frame-discard": "0",
+    "tlv-discard": "0",
+    "tlv-unknown": "0",
+    "tlv-accepted": "14742",
+    "entries-aged-out": "0"
+   },
+   "interface": [
+    {
+     "name": "ethernet-1/1",
+     "admin-state": "enable",
+     "oper-state": "up",
+     "statistics": {
+      "frame-in": "526",
+      "frame-out": "527",
+      "frame-error-in": "0",
+      "frame-discard": "0",
+      "tlv-discard": "0",
+      "tlv-unknown": "0",
+      "frame-error-out": "0"
+     },
+     "neighbor": [
+      {
+       "id": "1A:C8:02:FF:00:00",
+       "first-message": "2026-10-27T00:09:34.185Z",
+       "last-update": "2026-10-27T04:31:34.706Z",
+       "system-name": "leaf1",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef leaf1 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:C8:02:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "ethernet-1/49",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/2",
+     "admin-state": "enable",
+     "oper-state": "up",
+     "statistics": {
+      "frame-in": "526",
+      "frame-out": "527",
+      "frame-error-in": "0",
+      "frame-discard": "0",
+      "tlv-discard": "0",
+      "tlv-unknown": "0",
+      "frame-error-out": "0"
+     },
+     "neighbor": [
+      {
+       "id": "1A:EF:03:FF:00:00",
+       "first-message": "2026-10-27T00:09:34.260Z",
+       "last-update": "2026-10-27T04:31:34.705Z",
+       "system-name": "leaf2",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef leaf2 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:EF:03:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "ethernet-1/49",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "mgmt0",
+     "admin-state": "enable",
+     "oper-state": "up",
+     "statistics": {
+      "frame-in": "1054",
+      "frame-out": "528",
+      "frame-error-in": "0",
+      "frame-discard": "0",
+      "tlv-discard": "0",
+      "tlv-unknown": "0",
+      "frame-error-out": "0"
+     },
+     "neighbor": [
+      {
+       "id": "1A:C8:02:FF:00:00",
+       "first-message": "2026-10-27T00:09:34.184Z",
+       "last-update": "2026-10-27T04:31:34.705Z",
+       "system-name": "leaf1",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef leaf1 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:C8:02:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "mgmt0",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      },
+      {
+       "id": "1A:EF:03:FF:00:00",
+       "first-message": "2026-10-27T00:09:34.259Z",
+       "last-update": "2026-10-27T04:31:34.704Z",
+       "system-name": "leaf2",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef leaf2 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:EF:03:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "mgmt0",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

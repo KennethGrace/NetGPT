@@ -6,34 +6,13 @@ parsers are checked against real device output rather than against assumptions.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-import httpx
 import pytest
 
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms import PlatformError
 from netgpt.platforms.srlinux import SRLinuxPlatform
 
-FIXTURES = Path(__file__).parent / "fixtures" / "srlinux"
-
-
-def replay(fixtures: dict[str, str]) -> tuple[httpx.MockTransport, list[str]]:
-    """
-    Answer each JSON-RPC request with the fixture whose key prefixes its CLI
-    command or YANG path. Returns the transport and the list of requests made.
-    """
-    requests: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        command = json.loads(request.content)["params"]["commands"][0]
-        key = command["path"] if isinstance(command, dict) else command
-        requests.append(key)
-        name = next(fixture for prefix, fixture in fixtures.items() if key.startswith(prefix))
-        return httpx.Response(200, json=json.loads((FIXTURES / name).read_text()))
-
-    return httpx.MockTransport(handler), requests
+from fakes import replay
 
 
 @pytest.fixture(autouse=True)

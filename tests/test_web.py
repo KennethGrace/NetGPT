@@ -16,9 +16,11 @@ import pytest
 from mcp import Client
 
 from netgpt.chat import Chat
+from netgpt.inventory import Inventory
+from netgpt.server import build_server
 from netgpt.web import build_app
 
-from fakes import ScriptedOllama, calls, says
+from fakes import FakePlatform, ScriptedOllama, calls, says
 
 TOKEN = "correct-horse-battery-staple"
 
@@ -30,9 +32,10 @@ def events(response: httpx.Response) -> list[dict[str, Any]]:
 
 
 @pytest.fixture
-async def browser(client: Client) -> AsyncIterator[Browser]:
+async def browser(inventory: Inventory) -> AsyncIterator[Browser]:
     """Yields a factory: given a scripted Ollama, it returns a browser for the app, signed in or not."""
-    async with client:
+    # The page can draw, so its server offers display, as netgpt-chat --web does.
+    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True)) as client:
         opened: list[httpx.AsyncClient] = []
 
         async def open_page(ollama: ScriptedOllama, signed_in: bool = True) -> httpx.AsyncClient:
@@ -55,7 +58,8 @@ async def test_nothing_is_served_without_the_token(browser: Browser) -> None:
     page = await browser(ScriptedOllama(says("Never asked.")), signed_in=False)
     wrong = await page.get("/", params={"token": "guess"})
     assert wrong.status_code == 401 and "set-cookie" not in wrong.headers
-    for method, path in [("GET", "/"), ("GET", "/app.js"), ("GET", "/api/conversation"), ("POST", "/api/ask"), ("POST", "/api/reset")]:
+    paths = ["/", "/app.js", "/map.js", "/d3-force.js", "/app.css", "/api/conversation"]
+    for method, path in [("GET", path) for path in paths] + [("POST", "/api/ask"), ("POST", "/api/reset")]:
         response = await page.request(method, path, json={"question": "hi"} if method == "POST" else None)
         assert response.status_code == 401, path
 
@@ -70,7 +74,8 @@ async def test_token_link_becomes_a_strict_cookie_and_a_clean_url(browser: Brows
     index = await page.get("/")
     assert index.status_code == 200 and "app.js" in index.text
     assert "script-src 'self'" in index.headers["content-security-policy"]
-    assert (await page.get("/app.js")).headers["content-type"].startswith("text/javascript")
+    for script in ("/app.js", "/map.js", "/d3-force.js"):
+        assert (await page.get(script)).headers["content-type"].startswith("text/javascript")
 
 
 @pytest.mark.anyio
@@ -120,3 +125,24 @@ async def test_failures_arrive_as_error_events(browser: Browser) -> None:
     assert events(response) == [{"type": "error", "text": "Ollama: model 'missing' not found"}]
     assert (await page.post("/api/ask", json={"question": "  "})).status_code == 400
     assert (await page.post("/api/ask", json={"nope": 1})).status_code == 400
+
+
+@pytest.mark.anyio
+async def test_a_displayed_view_reaches_the_map_and_survives_a_reload(browser: Browser) -> None:
+    page = await browser(ScriptedOllama(calls("display", {"title": "leaf1's host", "focus": ["198.51.100.11"]}), says("See the map.")))
+    streamed = events(await page.post("/api/ask", json={"question": "Where is leaf1's host?"}))
+    tool = streamed[0]
+    assert tool["result"].startswith('The user now sees "leaf1\'s host"')
+    assert tool["view"]["emphasis"]["198.51.100.11"] == "focus"
+    replayed = (await page.get("/api/conversation")).json()["events"]
+    assert replayed[1]["view"] == tool["view"]
+
+
+@pytest.mark.anyio
+async def test_only_display_results_carry_a_view(browser: Browser) -> None:
+    page = await browser(ScriptedOllama(calls("display", {"title": "Nope", "focus": ["leaf9"]}), calls("topology", {}), says("Hmm.")))
+    streamed = events(await page.post("/api/ask", json={"question": "Show leaf9."}))
+    refused, graph = streamed[0], streamed[1]
+    assert refused["is_error"] and "view" not in refused
+    assert graph["name"] == "topology" and "view" not in graph
+

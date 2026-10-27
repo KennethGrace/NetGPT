@@ -17,10 +17,13 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `mac_table`      | Layer 2 forwarding entries across many devices.                                         |
 | `arp_table`      | ARP bindings across many devices.                                                       |
 | `routes`         | The IPv4 routing table of a network instance (VRF) across many devices.                 |
+| `topology`       | The network as one graph, merged from every device's LLDP and ARP tables, with the evidence for each link. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
 | `ping_sweep`     | The addresses that answer ICMP in a network, pinged from the NetGPT host itself.        |
 
 The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call.
+
+`topology` reconciles each cable from both ends and flags a link only one end reports. It keeps the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
 
 ## Safety model
 
@@ -96,6 +99,12 @@ netgpt-chat --inventory lab/inventory.yml --web 10.0.0.5:8080
 ```
 
 Anyone who can load the page can query the network, so every request needs a token: `$NETGPT_WEB_TOKEN` if set, otherwise a random one. At startup, netgpt-chat prints a link that carries the token. Opening it swaps the token for an HttpOnly cookie. The page is plain HTTP, so bind it to an address only trusted machines can reach, such as a VPN address or 127.0.0.1 behind an SSH tunnel. There is one conversation, and it answers one question at a time.
+
+#### The map
+
+The page also has a map, drawn by a tool only the page offers: `display`. When a picture helps, such as for the topology, where a host is attached, or the path between two points, the model calls `display`. It draws the whole network from the devices' own LLDP and ARP tables, and it chooses which parts to focus on and highlight. Focused nodes move to the middle, and the rest of the network stays on the map, dimmed and pushed aside. The model can't draw anything the devices didn't report, and every name it uses is checked against the graph first. Click a node or link to see the evidence for it, or drag one to move it. Each view stays in the conversation as a button that brings it back.
+
+The layout is a force simulation ([d3-force](https://d3js.org/d3-force), included in the package): nodes repel each other and links act as springs. A view changes the forces, not the nodes, so moving from one view to the next glides the network into its new shape.
 
 ## Inventory
 

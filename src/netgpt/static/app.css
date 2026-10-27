@@ -12,6 +12,8 @@
   --warn-bg: #fdf3e3;
   --error: #b42318;
   --error-bg: #fdecea;
+  --edge: #9aa0a8;
+  --lit-bg: #e8effc;
   color-scheme: light;
 }
 
@@ -30,6 +32,8 @@
     --warn-bg: #2e2516;
     --error: #f2877d;
     --error-bg: #34191a;
+    --edge: #5d636b;
+    --lit-bg: #1f2a3d;
     color-scheme: dark;
   }
 }
@@ -50,10 +54,14 @@ header, main, #composer {
   padding-right: 16px;
 }
 
-header {
+#top {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
+  background: var(--bg);
+}
+
+header {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -87,7 +95,9 @@ button {
   cursor: pointer;
 }
 button:disabled { opacity: 0.5; cursor: default; }
-#reset { margin-left: auto; white-space: nowrap; }
+#reset, #map-toggle:not([hidden]) { margin-left: auto; white-space: nowrap; }
+#map-toggle:not([hidden]) + #reset { margin-left: 0; }
+#map-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 
 main { padding-top: 16px; padding-bottom: 160px; }
 
@@ -184,3 +194,71 @@ pre code { background: none; padding: 0; }
 }
 @keyframes pulse { 50% { opacity: 0.25; } }
 @media (prefers-reduced-motion: reduce) { #status.live::before { animation: none; } }
+
+/* The map: on a wide screen it fills the right of the window, on a narrow one it sits under the header. */
+
+#map {
+  display: flex;
+  flex-direction: column;
+  height: 42vh;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+#map[hidden], body.map-hidden #map { display: none; }
+#map h2 { font-size: 15px; margin: 0; padding: 10px 16px 0; }
+#map-graph { flex: 1; min-height: 0; width: 100%; touch-action: none; user-select: none; }
+#map-inspector { font-size: 13px; padding: 0 16px 10px; max-height: 35%; overflow-y: auto; }
+#map-inspector h3 { font-size: 14px; margin: 6px 0 2px; overflow-wrap: anywhere; }
+#map-inspector p { margin: 2px 0; overflow-wrap: anywhere; }
+#map-inspector .kind, #map-inspector .addresses, #map-inspector .hint { color: var(--muted); }
+#map-inspector .failed { color: var(--error); }
+#map-inspector .remark { color: var(--accent); font-style: italic; }
+#map-inspector .evidence { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
+
+@media (min-width: 1000px) {
+  body.map-open:not(.map-hidden) { padding-right: 52vw; }
+  body.map-open:not(.map-hidden) #composer { right: 52vw; }
+  #map {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 52vw;
+    height: auto;
+    border-bottom: 0;
+    border-left: 1px solid var(--border);
+  }
+}
+
+#map-graph text { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+#map-graph .link, #map-graph .node { transition: opacity 0.6s; }
+#map-graph .near { opacity: 0.7; }
+#map-graph .context { opacity: 0.25; }
+#map-graph .wire { stroke: var(--edge); stroke-width: 2; }
+#map-graph .hit { stroke: transparent; stroke-width: 14; cursor: pointer; }
+#map-graph .link.lit .wire { stroke: var(--accent); stroke-width: 4; }
+#map-graph .link.one-sided .wire { stroke: var(--warn); stroke-dasharray: 6 4; }
+#map-graph .link.management .wire { stroke-dasharray: 2 4; }
+#map-graph .link.selected .wire { stroke-width: 5; }
+#map-graph .port { font-size: 10px; fill: var(--muted); text-anchor: middle; dominant-baseline: middle; visibility: hidden; }
+#map-graph .link.focus:not(.management) .port { visibility: visible; }
+#map-graph .note { font-size: 12px; fill: var(--accent); text-anchor: middle; font-style: italic; }
+
+#map-graph .node { cursor: grab; }
+#map-graph .body { fill: var(--surface); stroke: var(--fg); stroke-width: 2; }
+#map-graph .kind-host .body { fill: var(--muted); stroke: var(--surface); }
+#map-graph .kind-segment .body { stroke: var(--muted); }
+#map-graph .kind-neighbor .body { stroke-dasharray: 4 3; }
+#map-graph .node.lit .body { stroke: var(--accent); stroke-width: 3; fill: var(--lit-bg); }
+#map-graph .kind-host.lit .body { fill: var(--accent); }
+#map-graph .node.failed .body { stroke: var(--error); stroke-dasharray: 3 3; }
+#map-graph .node.selected .body { stroke-width: 4; }
+#map-graph .glyph { font-size: 13px; font-weight: 600; fill: var(--fg); text-anchor: middle; stroke: none; pointer-events: none; }
+#map-graph .context .glyph { font-size: 9px; }
+#map-graph .label { font-size: 13px; fill: var(--fg); }
+#map-graph .node .note { text-anchor: start; }
+#map-graph .context .label { font-size: 11px; }
+
+.view-chip { display: block; margin: 6px 0; font-size: 13px; color: var(--accent); border-color: var(--accent); }
+.view-chip::before { content: "◇ "; }
+.view-chip.active { background: var(--accent); color: var(--accent-fg); }

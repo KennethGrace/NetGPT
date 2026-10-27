@@ -62,8 +62,10 @@ class ChatObserver:
     def content(self, text: str) -> None:
         """The next piece of the model's reply text."""
 
-    def tool_call(self, name: str, arguments: dict[str, Any], result: str, is_error: bool) -> None:
-        """A tool call the model made, and its result."""
+    def tool_call(
+        self, name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None = None
+    ) -> None:
+        """A tool call the model made, the result the model read, and the result's structured content."""
 
 
 def ollama_tools(tools: list[Tool]) -> list[dict[str, Any]]:
@@ -78,10 +80,25 @@ def ollama_tools(tools: list[Tool]) -> list[dict[str, Any]]:
 
 
 def result_text(result: CallToolResult) -> str:
-    """Render a tool result for the model: structured content as JSON, otherwise its text."""
-    if result.structured_content is not None:
-        return json.dumps(result.structured_content, separators=(",", ":"))
-    return "\n".join(getattr(block, "text", "") for block in result.content)
+    """
+    Render a tool result for the model: its content, as any MCP client would show
+    it, with JSON compacted to save tokens. Structured content is for programs; a
+    tool such as display gives the model a summary there and the page the drawing.
+    """
+    texts = []
+    for block in result.content:
+        text = getattr(block, "text", "")
+        try:
+            text = json.dumps(json.loads(text), separators=(",", ":"), ensure_ascii=False)
+        except ValueError:
+            pass
+        texts.append(text)
+    return "\n".join(texts)
+
+
+def for_ollama(message: dict[str, Any]) -> dict[str, Any]:
+    """A history message without the keys Chat keeps for itself, which start with an underscore."""
+    return {key: value for key, value in message.items() if not key.startswith("_")}
 
 
 def ollama_error(response: httpx.Response) -> str:
@@ -182,7 +199,7 @@ class Chat:
         """Stream one reply from Ollama, passing its thinking and text to the observer as they arrive."""
         request = {
             "model": self.model,
-            "messages": self.messages,
+            "messages": [for_ollama(message) for message in self.messages],
             "tools": self._tools,
             "stream": True,
             "think": self.think,
@@ -224,10 +241,13 @@ class Chat:
         # Unknown tools and invalid arguments come back as error results for the model to read.
         result = await self._client.call_tool(name, arguments)
         text = result_text(result)
-        observer.tool_call(name, arguments, text, result.is_error)
+        observer.tool_call(name, arguments, text, result.is_error, result.structured_content)
         message = {"role": "tool", "tool_name": name, "content": text}
         if "id" in call:
             message["tool_call_id"] = call["id"]
+        if result.structured_content is not None:
+            # Kept so a page can redraw what a tool showed; never sent to the model.
+            message["_structured"] = result.structured_content
         return message
 
 
@@ -247,7 +267,9 @@ class TerminalObserver(ChatObserver):
     def __init__(self, verbose: bool) -> None:
         self._verbose = verbose
 
-    def tool_call(self, name: str, arguments: dict[str, Any], result: str, is_error: bool) -> None:
+    def tool_call(
+        self, name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None = None
+    ) -> None:
         rendered = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
         line = f"  · {name}({rendered})"
         if is_error:
@@ -296,8 +318,9 @@ async def run(args: argparse.Namespace) -> int:
     if args.threads:
         options["num_thread"] = args.threads
     timeout = httpx.Timeout(args.timeout, connect=10.0)
+    # Only the web page can show the map, so only it gets the tool that draws one.
     async with (
-        Client(build_server(inventory)) as client,
+        Client(build_server(inventory, display=args.web is not None)) as client,
         httpx.AsyncClient(base_url=args.ollama, timeout=timeout) as http,
     ):
         try:

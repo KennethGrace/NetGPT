@@ -29,7 +29,9 @@ class RecordingObserver(ChatObserver):
     def content(self, text: str) -> None:
         self.events.append(("content", text))
 
-    def tool_call(self, name: str, arguments: dict[str, Any], result: str, is_error: bool) -> None:
+    def tool_call(
+        self, name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None = None
+    ) -> None:
         self.events.append(("tool", (name, arguments, is_error)))
 
 
@@ -59,11 +61,14 @@ async def test_tool_results_go_back_to_the_model(chat_with: Any) -> None:
 
     first = ollama.requests[0]
     assert first["messages"][0]["role"] == "system" and "list_devices" in first["messages"][0]["content"]
-    assert len(first["tools"]) == 8 and first["options"] == {"num_ctx": 8192}
+    assert len(first["tools"]) == 9 and first["options"] == {"num_ctx": 8192}
     assert first["think"] is False and first["stream"] is True
     tool_message = ollama.messages(1)[-1]
     assert (tool_message["role"], tool_message["tool_name"], tool_message["tool_call_id"]) == ("tool", "lldp_neighbors", "call_1")
     assert json.loads(tool_message["content"])["items"][0]["neighbor"] == "spine1"
+    # The structured result stays in the history, for the page to redraw, but never reaches Ollama.
+    assert chat.messages[3]["_structured"]["items"][0]["neighbor"] == "spine1"
+    assert "_structured" not in tool_message
 
 
 @pytest.mark.anyio

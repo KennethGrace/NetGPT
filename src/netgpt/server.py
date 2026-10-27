@@ -23,7 +23,7 @@ from typing import Annotated, TypeVar
 import icmplib
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp_types import ToolAnnotations
+from mcp_types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BeforeValidator
 
 from netgpt import __version__
@@ -41,6 +41,7 @@ from netgpt.primitives import (
     PingResult,
     Route,
 )
+from netgpt.topology import PlaneChoice, Topology, View, ViewError, build_topology, describe, make_view, port_of
 
 logger = logging.getLogger("netgpt")
 
@@ -48,8 +49,17 @@ INSTRUCTIONS = """\
 NetGPT gives read-only access to the network devices in its inventory.
 Call list_devices first: every other tool takes device names from that list and cannot reach anything else.
 lldp_neighbors, arp_table, mac_table, and routes query many devices at once and return typed records,
-with per-device errors alongside the results. Use show for anything they don't cover; it accepts only
-read-only commands and says why when it refuses one.
+with per-device errors alongside the results. topology merges every device's LLDP and ARP tables into
+one graph of devices, hosts, and the links between them. Use show for anything the typed tools don't
+cover; it accepts only read-only commands and says why when it refuses one.
+"""
+
+DISPLAY_INSTRUCTIONS = """\
+The user sees a map of the network beside the chat. Call display whenever a picture helps: the
+topology, where a host is attached, the path between two points, where a problem is. Focus on the
+part of the network the answer is about and highlight the answer itself, such as the nodes of a path;
+the rest of the network stays on the map, dimmed and pushed aside. Refer to the map in your answer
+rather than describing every link in words.
 """
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
@@ -61,14 +71,35 @@ MAX_SWEEP_ADDRESSES = 1024
 
 PrimitiveT = TypeVar("PrimitiveT")
 
-# Small models often pass one device name where the schema asks for a list. Accept
-# it rather than spend a round trip on a validation error; the schema stays a list.
-DeviceNames = Annotated[list[str] | None, BeforeValidator(lambda value: [value] if isinstance(value, str) else value)]
 
 
-def build_server(inventory: Inventory, platforms: dict[str, type[Platform]] = PLATFORMS) -> MCPServer:
-    """Build the MCP server for an inventory. Platforms can be swapped out for testing."""
-    server = MCPServer(name="netgpt", version=__version__, instructions=INSTRUCTIONS)
+def as_names(value: object) -> object:
+    """
+    Small models often pass one name where the schema asks for a list, and now and
+    then an object keyed by the names. Accept both rather than spend a round trip
+    on a validation error; the schema stays a list.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return list(value)
+    return value
+
+
+Names = Annotated[list[str] | None, BeforeValidator(as_names)]
+DeviceNames = Names
+
+
+def build_server(
+    inventory: Inventory, platforms: dict[str, type[Platform]] = PLATFORMS, display: bool = False
+) -> MCPServer:
+    """
+    Build the MCP server for an inventory. Platforms can be swapped out for testing.
+    display adds the tool that draws the network; only offer it to a client that can
+    show the drawing.
+    """
+    instructions = INSTRUCTIONS + (DISPLAY_INSTRUCTIONS if display else "")
+    server = MCPServer(name="netgpt", version=__version__, instructions=instructions)
 
     def platform_class(name: str) -> type[Platform]:
         device = inventory.get(name)
@@ -103,6 +134,19 @@ def build_server(inventory: Inventory, platforms: dict[str, type[Platform]] = PL
             if error is not None:
                 errors.append(error)
         return items, errors
+
+    def is_management(device: str, interface: str) -> bool:
+        pattern = platforms.get(inventory.get(device).platform, Platform).management_interfaces
+        return pattern is not None and pattern.match(port_of(interface)) is not None
+
+    async def gather_topology() -> Topology:
+        (neighbors, lldp_errors), (bindings, arp_errors) = await asyncio.gather(
+            collect(None, lambda platform: platform.lldp_neighbors()),
+            collect(None, lambda platform: platform.arp_table()),
+        )
+        # A device that can't be reached fails both queries the same way; report it once.
+        errors = list({(error.device, error.error): error for error in lldp_errors + arp_errors}.values())
+        return build_topology(list_devices(), neighbors, bindings, errors, is_management)
 
     @server.tool(annotations=READ_ONLY)
     def list_devices() -> list[DeviceInfo]:
@@ -150,6 +194,44 @@ def build_server(inventory: Inventory, platforms: dict[str, type[Platform]] = PL
         """Return the IPv4 routing table of one network instance (VRF). Omit devices to query all of them."""
         items, errors = await collect(devices, lambda platform: platform.routes(network_instance))
         return Collection[Route](items=items, errors=errors)
+
+    @server.tool(annotations=READ_ONLY)
+    async def topology(plane: PlaneChoice = "data") -> Topology:
+        """
+        Return the network as a graph merged from every device's LLDP and ARP tables:
+        devices, LLDP neighbors outside the inventory, hosts found by ARP, and shared
+        segments, with the links between them and the evidence for each. The data
+        plane is the default; the management network rarely matters to a question.
+        """
+        return (await gather_topology()).on_plane(plane)
+
+    if display:
+
+        @server.tool(name="display", annotations=READ_ONLY)
+        async def display_view(
+            title: str,
+            focus: Names = None,
+            highlight: Names = None,
+            notes: dict[str, str] | None = None,
+            plane: PlaneChoice = "data",
+        ) -> Annotated[CallToolResult, View]:
+            """
+            Draw the network on the user's map. The whole network is always drawn: nodes in
+            focus move to the centre, and everything else stays on the map, dimmed and pushed
+            aside. Omit focus to show the whole network. highlight marks the answer itself,
+            such as every node of a path. Name nodes by device name or host address, and
+            links by their two nodes (leaf1--spine1) or by one end (leaf1:ethernet-1/49).
+            notes attach a few words to a node or link, keyed by its name.
+            """
+            try:
+                view = make_view(await gather_topology(), title, focus or [], highlight or [], notes or {}, plane)
+            except ViewError as error:
+                raise ToolError(str(error)) from error
+            # The model reads a summary; the page draws the view from the structured content.
+            return CallToolResult(
+                content=[TextContent(type="text", text=describe(view))],
+                structured_content=view.model_dump(mode="json"),
+            )
 
     @server.tool(annotations=READ_ONLY)
     async def ping(device: str, destination: str, count: int = 3, network_instance: str = "default") -> PingResult:

@@ -70,6 +70,7 @@ def parse_ping_output(device: str, destination: str, output: str) -> PingResult:
 
 class SRLinuxPlatform(Platform):
     policy = NOKIA_SRLINUX
+    management_interfaces = re.compile(r"^mgmt\d+$")
 
     def __init__(
         self,

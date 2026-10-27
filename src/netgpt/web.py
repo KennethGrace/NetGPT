@@ -11,6 +11,9 @@ There is one conversation, answered one question at a time, as Ollama answers
 one request at a time anyway. A question's progress (thinking, text, tool calls)
 streams to the page as newline-delimited JSON events. The answer keeps going if
 the page goes away, and a reload replays the conversation from its history.
+
+When the model calls display, its tool event carries the view, and the page draws
+it on the map (map.js, laid out by the vendored d3-force library).
 """
 
 from __future__ import annotations
@@ -31,6 +34,14 @@ from starlette.routing import Route
 from netgpt.chat import Chat, ChatError, ChatObserver
 
 COOKIE = "netgpt_token"
+DISPLAY_TOOL = "display"
+ASSETS = {
+    "index.html": "text/html",
+    "app.js": "text/javascript",
+    "map.js": "text/javascript",
+    "d3-force.js": "text/javascript",
+    "app.css": "text/css",
+}
 COOKIE_MAX_AGE = 30 * 24 * 3600
 MAX_QUESTION_CHARS = 8000
 
@@ -65,10 +76,20 @@ class StreamObserver(ChatObserver):
     def content(self, text: str) -> None:
         self._events.put_nowait({"type": "content", "text": text})
 
-    def tool_call(self, name: str, arguments: dict[str, Any], result: str, is_error: bool) -> None:
-        self._events.put_nowait(
-            {"type": "tool", "name": name, "arguments": arguments, "result": result, "is_error": is_error}
-        )
+    def tool_call(
+        self, name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None = None
+    ) -> None:
+        self._events.put_nowait(tool_event(name, arguments, result, is_error, structured))
+
+
+def tool_event(
+    name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None
+) -> Event:
+    """The event for one tool call. A view the model displayed comes along for the map."""
+    event: Event = {"type": "tool", "name": name, "arguments": arguments, "result": result, "is_error": is_error}
+    if name == DISPLAY_TOOL and structured is not None and not is_error:
+        event["view"] = structured
+    return event
 
 
 def conversation_events(messages: list[dict[str, Any]]) -> list[Event]:
@@ -90,14 +111,9 @@ def conversation_events(messages: list[dict[str, Any]]) -> list[Event]:
             if not calls:
                 events.append({"type": "answer", "text": message["content"]})
         elif message["role"] == "tool":
+            call_arguments = arguments.get(message.get("tool_call_id", ""), {})
             events.append(
-                {
-                    "type": "tool",
-                    "name": message["tool_name"],
-                    "arguments": arguments.get(message.get("tool_call_id", ""), {}),
-                    "result": message["content"],
-                    "is_error": False,
-                }
+                tool_event(message["tool_name"], call_arguments, message["content"], False, message.get("_structured"))
             )
     return events
 
@@ -105,7 +121,7 @@ def conversation_events(messages: list[dict[str, Any]]) -> list[Event]:
 def build_app(chat: Chat, token: str) -> Starlette:
     """Build the web app serving one conversation, for browsers holding the token."""
     static = files("netgpt") / "static"
-    assets = {name: (static / name).read_text(encoding="utf-8") for name in ("index.html", "app.js", "app.css")}
+    assets = {name: (static / name).read_text(encoding="utf-8") for name in ASSETS}
     expected = token.encode()
     busy = asyncio.Lock()
     running: set[asyncio.Task[None]] = set()
@@ -121,9 +137,9 @@ def build_app(chat: Chat, token: str) -> Starlette:
 
         return guarded
 
-    def asset(name: str, media_type: str) -> Endpoint:
+    def asset(name: str) -> Endpoint:
         async def serve_asset(request: Request) -> Response:
-            return Response(assets[name], media_type=media_type, headers=SECURITY_HEADERS)
+            return Response(assets[name], media_type=ASSETS[name], headers=SECURITY_HEADERS)
 
         return serve_asset
 
@@ -188,8 +204,7 @@ def build_app(chat: Chat, token: str) -> Starlette:
     return Starlette(
         routes=[
             Route("/", index),
-            Route("/app.js", requires_sign_in(asset("app.js", "text/javascript"))),
-            Route("/app.css", requires_sign_in(asset("app.css", "text/css"))),
+            *(Route(f"/{name}", requires_sign_in(asset(name))) for name in ASSETS if name != "index.html"),
             Route("/api/conversation", requires_sign_in(conversation)),
             Route("/api/ask", requires_sign_in(ask), methods=["POST"]),
             Route("/api/reset", requires_sign_in(reset), methods=["POST"]),

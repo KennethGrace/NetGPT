@@ -6,6 +6,9 @@
 //
 // Model output can echo device data, so it only ever reaches the page as text:
 // through textContent, or through renderMarkdown, which escapes before it formats.
+//
+// When the model calls display, its tool event carries a view, which the map
+// (map.js) draws. Each view leaves a chip in the conversation that brings it back.
 
 const conversation = document.getElementById("conversation");
 const composer = document.getElementById("composer");
@@ -14,15 +17,18 @@ const send = document.getElementById("send");
 const status = document.getElementById("status");
 const reset = document.getElementById("reset");
 const model = document.getElementById("model");
+const mapToggle = document.getElementById("map-toggle");
 
 const EXAMPLES = [
-  "Which devices are in the inventory?",
+  "Show me the network.",
   "What is cabled to each device?",
   "Show me every device's routing table.",
 ];
 
 let turn = null; // the reply being built, until its answer or error arrives
 let timer = null;
+let shown = ""; // the view on the map, as JSON, so a reload doesn't redraw it
+let latest = null; // the newest view replayed on load: [view, chip]
 
 function node(tag, className, text) {
   const element = document.createElement(tag);
@@ -192,6 +198,14 @@ function handle(event, live) {
         .join(", ");
       step.append(node("summary", "", `${event.name}(${args})`), node("pre", "", pretty(event.result)));
       reply().append(step);
+      if (event.view) {
+        const chip = node("button", "view-chip", event.view.title);
+        chip.type = "button";
+        chip.addEventListener("click", () => showView(event.view, chip));
+        reply().append(chip);
+        if (live) showView(event.view, chip);
+        else latest = [event.view, chip];
+      }
       break;
     }
     case "answer": {
@@ -223,6 +237,31 @@ function following(render) {
   render();
   if (atEnd) window.scrollTo(0, document.body.scrollHeight);
 }
+
+// ---- The map
+
+function showView(view, chip) {
+  const key = JSON.stringify(view);
+  if (key !== shown) netmap.show(view);
+  shown = key;
+  for (const other of conversation.querySelectorAll(".view-chip.active")) other.classList.remove("active");
+  chip.classList.add("active");
+  document.body.classList.remove("map-hidden");
+  mapToggle.hidden = false;
+  mapToggle.setAttribute("aria-pressed", "true");
+}
+
+function clearMap() {
+  netmap.clear();
+  shown = "";
+  mapToggle.hidden = true;
+  document.body.classList.remove("map-hidden");
+}
+
+mapToggle.addEventListener("click", () => {
+  const hidden = document.body.classList.toggle("map-hidden");
+  mapToggle.setAttribute("aria-pressed", String(!hidden));
+});
 
 // ---- Status and controls
 
@@ -323,8 +362,11 @@ async function load() {
   model.textContent = data.think ? `${data.model} · thinking` : data.model;
   conversation.replaceChildren();
   turn = null;
+  latest = null;
   for (const event of data.events) handle(event, false);
   if (!data.events.length) showIntro();
+  if (latest) showView(...latest);
+  else clearMap();
   window.scrollTo(0, document.body.scrollHeight);
   if (data.busy) {
     // Another page is waiting on an answer; show it when it lands.
@@ -358,6 +400,7 @@ reset.addEventListener("click", async () => {
   if (response.ok) {
     conversation.replaceChildren();
     turn = null;
+    clearMap();
     showIntro();
     question.focus();
   } else {

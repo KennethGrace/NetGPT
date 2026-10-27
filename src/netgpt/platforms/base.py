@@ -9,6 +9,7 @@ instead of failing the whole request.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from types import TracebackType
 from typing import ClassVar
@@ -33,6 +34,8 @@ class Platform(ABC):
     """
 
     policy: ClassVar[CliPolicy]
+    # Ports on the out-of-band management network, which the topology keeps apart from the data plane.
+    management_interfaces: ClassVar[re.Pattern[str] | None] = None
 
     def __init__(self, device: Device, credentials: Credentials) -> None:
         if device.tls_ca is not None and not device.tls_ca.is_file():
