@@ -1,0 +1,60 @@
+# NetGPT development lab: a small routed spine-leaf fabric of Nokia SR Linux
+# nodes, with a Linux host behind each leaf.
+#
+#   host1 ── leaf1 ──┐
+#                    spine1
+#   host2 ── leaf2 ──┘
+#
+# Fabric links are /31s in 192.168.0.0/24; host subnets are 192.168.11.0/24 and
+# 192.168.12.0/24; routing is static. Management addresses are fixed so the
+# inventory (inventory.yml) doesn't change between deploys.
+#
+# Use Docker. SR Linux 25.10.5 crashes at boot under podman (sr_app_mgr asserts in
+# its datapath launcher), and containerlab no longer tests the podman runtime.
+#
+#   sudo containerlab deploy -t lab/netgpt.clab.yml
+#   sudo containerlab destroy -t lab/netgpt.clab.yml
+name: netgpt
+
+mgmt:
+  network: netgpt-mgmt
+  ipv4-subnet: 172.20.20.0/24
+
+topology:
+  kinds:
+    nokia_srlinux:
+      image: ghcr.io/nokia/srlinux:25.10.5
+    linux:
+      image: ghcr.io/srl-labs/network-multitool:latest
+
+  nodes:
+    spine1:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.20.11
+      startup-config: configs/spine1.cli
+    leaf1:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.20.21
+      startup-config: configs/leaf1.cli
+    leaf2:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.20.22
+      startup-config: configs/leaf2.cli
+    host1:
+      kind: linux
+      mgmt-ipv4: 172.20.20.31
+      exec:
+        - ip addr add 192.168.11.2/24 dev eth1
+        - ip route add 192.168.0.0/16 via 192.168.11.1
+    host2:
+      kind: linux
+      mgmt-ipv4: 172.20.20.32
+      exec:
+        - ip addr add 192.168.12.2/24 dev eth1
+        - ip route add 192.168.0.0/16 via 192.168.12.1
+
+  links:
+    - endpoints: ["leaf1:e1-49", "spine1:e1-1"]
+    - endpoints: ["leaf2:e1-49", "spine1:e1-2"]
+    - endpoints: ["host1:eth1", "leaf1:e1-1"]
+    - endpoints: ["host2:eth1", "leaf2:e1-1"]

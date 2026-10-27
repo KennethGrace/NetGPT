@@ -1,0 +1,7 @@
+{
+ "result": [
+  "Using network instance default\nPING 192.168.12.2 (192.168.12.2) 56(84) bytes of data.\n64 bytes from 192.168.12.2: icmp_seq=1 ttl=62 time=3.86 ms\n64 bytes from 192.168.12.2: icmp_seq=2 ttl=62 time=6.93 ms\n64 bytes from 192.168.12.2: icmp_seq=3 ttl=62 time=2.11 ms\n\n--- 192.168.12.2 ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss, time 2004ms\nrtt min/avg/max/mdev = 2.106/4.297/6.925/1.991 ms\n"
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

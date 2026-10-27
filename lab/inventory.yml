@@ -1,0 +1,22 @@
+# Inventory for the containerlab lab in netgpt.clab.yml.
+#
+# Passwords never go in this file. The lab profile reads SR Linux's public default
+# password from a file outside the repository (chmod 600):
+#
+#   mkdir -p ~/.config/netgpt && printf 'NokiaSrl1!' > ~/.config/netgpt/srlinux-lab.password
+#   chmod 600 ~/.config/netgpt/srlinux-lab.password
+
+credentials:
+  srlinux-lab:
+    username: admin
+    password_file: ~/.config/netgpt/srlinux-lab.password
+
+# containerlab signs each node's API certificate with a per-lab CA.
+devices:
+  - {name: spine1, host: 172.20.20.11, platform: nokia_srlinux, credentials: srlinux-lab, role: spine, tls_ca: clab-netgpt/.tls/ca/ca.pem}
+  - {name: leaf1,  host: 172.20.20.21, platform: nokia_srlinux, credentials: srlinux-lab, role: leaf,  tls_ca: clab-netgpt/.tls/ca/ca.pem}
+  - {name: leaf2,  host: 172.20.20.22, platform: nokia_srlinux, credentials: srlinux-lab, role: leaf,  tls_ca: clab-netgpt/.tls/ca/ca.pem}
+
+# The NetGPT host may ping sweep the lab's management network.
+sweep_networks:
+  - 172.20.20.0/24

@@ -28,3 +28,10 @@ certs
 *.pfx
 *.cer
 *.crt
+
+# Python packaging and tests
+*.egg-info/
+.pytest_cache/
+
+# containerlab lab directories (generated on deploy, contain node TLS keys)
+lab/clab-*/

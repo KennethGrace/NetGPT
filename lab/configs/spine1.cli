@@ -1,0 +1,18 @@
+set / system lldp admin-state enable
+set / interface ethernet-1/1 admin-state enable
+set / interface ethernet-1/1 subinterface 0 ipv4 admin-state enable
+set / interface ethernet-1/1 subinterface 0 ipv4 address 192.168.0.0/31
+set / interface ethernet-1/2 admin-state enable
+set / interface ethernet-1/2 subinterface 0 ipv4 admin-state enable
+set / interface ethernet-1/2 subinterface 0 ipv4 address 192.168.0.2/31
+set / network-instance default type default
+set / network-instance default interface ethernet-1/1.0
+set / network-instance default interface ethernet-1/2.0
+set / network-instance default next-hop-groups group leaf1 admin-state enable
+set / network-instance default next-hop-groups group leaf1 nexthop 1 ip-address 192.168.0.1
+set / network-instance default next-hop-groups group leaf2 admin-state enable
+set / network-instance default next-hop-groups group leaf2 nexthop 1 ip-address 192.168.0.3
+set / network-instance default static-routes route 192.168.11.0/24 admin-state enable
+set / network-instance default static-routes route 192.168.11.0/24 next-hop-group leaf1
+set / network-instance default static-routes route 192.168.12.0/24 admin-state enable
+set / network-instance default static-routes route 192.168.12.0/24 next-hop-group leaf2

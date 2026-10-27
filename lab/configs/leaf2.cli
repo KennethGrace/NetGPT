@@ -1,0 +1,14 @@
+set / system lldp admin-state enable
+set / interface ethernet-1/1 admin-state enable
+set / interface ethernet-1/1 subinterface 0 ipv4 admin-state enable
+set / interface ethernet-1/1 subinterface 0 ipv4 address 192.168.12.1/24
+set / interface ethernet-1/49 admin-state enable
+set / interface ethernet-1/49 subinterface 0 ipv4 admin-state enable
+set / interface ethernet-1/49 subinterface 0 ipv4 address 192.168.0.3/31
+set / network-instance default type default
+set / network-instance default interface ethernet-1/1.0
+set / network-instance default interface ethernet-1/49.0
+set / network-instance default next-hop-groups group spine admin-state enable
+set / network-instance default next-hop-groups group spine nexthop 1 ip-address 192.168.0.2
+set / network-instance default static-routes route 192.168.0.0/16 admin-state enable
+set / network-instance default static-routes route 192.168.0.0/16 next-hop-group spine
