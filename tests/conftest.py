@@ -11,27 +11,10 @@ from pathlib import Path
 import pytest
 from mcp import Client
 
-from netgpt.guard import NOKIA_SRLINUX
 from netgpt.inventory import Inventory
-from netgpt.platforms import Platform, PlatformError
-from netgpt.primitives import LldpNeighbor
 from netgpt.server import build_server
 
-
-class FakePlatform(Platform):
-    """Answers from canned data; a device named 'broken' fails like an unreachable device."""
-
-    policy = NOKIA_SRLINUX
-    commands_run: list[str] = []
-
-    async def _run_checked_cli(self, command: str) -> str:
-        FakePlatform.commands_run.append(command)
-        return f"{self.device.name}: ran {command}"
-
-    async def lldp_neighbors(self) -> list[LldpNeighbor]:
-        if self.device.name == "broken":
-            raise PlatformError("broken: connection refused")
-        return [LldpNeighbor(device=self.device.name, interface="ethernet-1/49", neighbor="spine1")]
+from fakes import FakePlatform
 
 
 @pytest.fixture

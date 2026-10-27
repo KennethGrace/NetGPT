@@ -1,7 +1,7 @@
 """
 Tests for netgpt-chat's tool-calling loop. A scripted Ollama, served through
 httpx's mock transport, plays the model; the tools are the real NetGPT server on
-the fake platform in conftest.py.
+the fake platform from fakes.py.
 """
 
 from __future__ import annotations
@@ -14,33 +14,23 @@ import httpx
 import pytest
 from mcp import Client
 
-from netgpt.chat import Chat, ChatError, supports_thinking
+from netgpt.chat import Chat, ChatError, ChatObserver, supports_thinking
+
+from fakes import ScriptedOllama, calls, says
 
 
-def calls(name: str, arguments: dict[str, Any], call_id: str = "call_1", content: str = "") -> dict[str, Any]:
-    tool_calls = [{"id": call_id, "function": {"name": name, "arguments": arguments}}]
-    return {"role": "assistant", "content": content, "tool_calls": tool_calls}
+class RecordingObserver(ChatObserver):
+    def __init__(self) -> None:
+        self.events: list[tuple[str, Any]] = []
 
+    def thinking(self, text: str) -> None:
+        self.events.append(("thinking", text))
 
-def says(text: str) -> dict[str, Any]:
-    return {"role": "assistant", "content": text}
+    def content(self, text: str) -> None:
+        self.events.append(("content", text))
 
-
-class ScriptedOllama:
-    """Replies to /api/chat with the scripted messages in order and keeps every request."""
-
-    def __init__(self, *replies: dict[str, Any]) -> None:
-        self.replies = list(replies)
-        self.requests: list[dict[str, Any]] = []
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(json.loads(request.content))
-        if not self.replies:
-            return httpx.Response(404, json={"error": "model 'missing' not found"})
-        return httpx.Response(200, json={"message": self.replies.pop(0), "done": True})
-
-    def messages(self, request: int) -> list[dict[str, Any]]:
-        return self.requests[request]["messages"]
+    def tool_call(self, name: str, arguments: dict[str, Any], result: str, is_error: bool) -> None:
+        self.events.append(("tool", (name, arguments, is_error)))
 
 
 @pytest.fixture
@@ -50,7 +40,7 @@ async def chat_with(client: Client) -> AsyncIterator[Any]:
         http_clients: list[httpx.AsyncClient] = []
 
         async def build(ollama: ScriptedOllama, max_rounds: int = 10) -> Chat:
-            http = httpx.AsyncClient(base_url="http://ollama.test", transport=httpx.MockTransport(ollama.handler))
+            http = ollama.client()
             http_clients.append(http)
             chat = Chat(client, http, "scripted", {"num_ctx": 8192}, max_rounds=max_rounds)
             await chat.start()
@@ -69,10 +59,33 @@ async def test_tool_results_go_back_to_the_model(chat_with: Any) -> None:
 
     first = ollama.requests[0]
     assert first["messages"][0]["role"] == "system" and "list_devices" in first["messages"][0]["content"]
-    assert len(first["tools"]) == 8 and first["options"] == {"num_ctx": 8192} and first["think"] is False
+    assert len(first["tools"]) == 8 and first["options"] == {"num_ctx": 8192}
+    assert first["think"] is False and first["stream"] is True
     tool_message = ollama.messages(1)[-1]
     assert (tool_message["role"], tool_message["tool_name"], tool_message["tool_call_id"]) == ("tool", "lldp_neighbors", "call_1")
     assert json.loads(tool_message["content"])["items"][0]["neighbor"] == "spine1"
+
+
+@pytest.mark.anyio
+async def test_streamed_pieces_reach_the_observer_and_the_history(chat_with: Any) -> None:
+    streamed = [
+        {"role": "assistant", "content": "", "thinking": "Need LLDP. "},
+        {"role": "assistant", "content": "", "thinking": "Ask for leaf1."},
+        calls("lldp_neighbors", {"devices": ["leaf1"]}),
+    ]
+    answer = [{"role": "assistant", "content": "leaf1 is cabled "}, {"role": "assistant", "content": "to spine1."}]
+    chat = await chat_with(ScriptedOllama(streamed, answer))
+    observer = RecordingObserver()
+    assert await chat.ask("What is leaf1 cabled to?", observer) == "leaf1 is cabled to spine1."
+    assert observer.events == [
+        ("thinking", "Need LLDP. "),
+        ("thinking", "Ask for leaf1."),
+        ("tool", ("lldp_neighbors", {"devices": ["leaf1"]}, False)),
+        ("content", "leaf1 is cabled "),
+        ("content", "to spine1."),
+    ]
+    assert chat.messages[2]["thinking"] == "Need LLDP. Ask for leaf1."
+    assert chat.messages[2]["tool_calls"][0]["function"]["name"] == "lldp_neighbors"
 
 
 @pytest.mark.anyio
@@ -89,8 +102,10 @@ async def test_narration_alongside_tool_calls_is_dropped_from_history(chat_with:
 async def test_refused_command_reaches_the_model_not_the_device(chat_with: Any, commands_run: list[str]) -> None:
     ollama = ScriptedOllama(calls("show", {"device": "leaf1", "command": "info > backup.cfg"}), says("I can't write files."))
     chat = await chat_with(ollama)
-    await chat.ask("Save leaf1's config to backup.cfg.")
+    observer = RecordingObserver()
+    await chat.ask("Save leaf1's config to backup.cfg.", observer)
     assert "'>' is not allowed" in ollama.messages(1)[-1]["content"]
+    assert ("tool", ("show", {"device": "leaf1", "command": "info > backup.cfg"}, True)) in observer.events
     assert commands_run == []
 
 

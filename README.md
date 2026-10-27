@@ -86,6 +86,17 @@ CUDA_VISIBLE_DEVICES=-1 GGML_VK_VISIBLE_DEVICES=-1 OLLAMA_VULKAN=false \
 netgpt-chat --ollama http://127.0.0.1:11435 --threads 16 --inventory lab/inventory.yml
 ```
 
+### In a browser
+
+`netgpt-chat --web [HOST:]PORT` serves the same chat as a web page. The model's thinking streams in as it happens, each tool call opens to show its result, and a reload picks the conversation back up. The page loads nothing from outside the server, so it works on an air-gapped network.
+
+```bash
+export NETGPT_WEB_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(24))')
+netgpt-chat --inventory lab/inventory.yml --web 10.0.0.5:8080
+```
+
+Anyone who can load the page can query the network, so every request needs a token: `$NETGPT_WEB_TOKEN` if set, otherwise a random one. At startup, netgpt-chat prints a link that carries the token. Opening it swaps the token for an HttpOnly cookie. The page is plain HTTP, so bind it to an address only trusted machines can reach, such as a VPN address or 127.0.0.1 behind an SSH tunnel. There is one conversation, and it answers one question at a time.
+
 ## Inventory
 
 ```yaml

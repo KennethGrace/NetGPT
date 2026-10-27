@@ -5,7 +5,9 @@ It builds the NetGPT MCP server in-process and drives it through an MCP client,
 so the model sees exactly the tools and instructions any other MCP client sees,
 and device output never leaves the machine. The chat runs the tool-calling loop
 itself: each model reply either calls tools, whose results go back to the
-model, or answers the question.
+model, or answers the question. Replies stream from Ollama, and a ChatObserver
+sees the model's thinking, text, and tool calls as they arrive, which is how the
+terminal and the web page (web.py) show progress.
 """
 
 from __future__ import annotations
@@ -16,8 +18,8 @@ import json
 import logging
 import os
 import re
+import secrets
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -46,11 +48,22 @@ DEFAULT_CONTEXT = 131072
 BLANK_REPLY = re.compile(r"^\s*(<\|?[a-z_]+\|?>\s*)*$")
 BLANK_REPLY_RETRIES = 2
 
-ToolCallObserver = Callable[[str, dict[str, Any], str, bool], None]
-
 
 class ChatError(RuntimeError):
     """The model or Ollama failed to produce an answer."""
+
+
+class ChatObserver:
+    """Receives a question's progress as it happens. This base class ignores all of it."""
+
+    def thinking(self, text: str) -> None:
+        """The next piece of the model's reasoning."""
+
+    def content(self, text: str) -> None:
+        """The next piece of the model's reply text."""
+
+    def tool_call(self, name: str, arguments: dict[str, Any], result: str, is_error: bool) -> None:
+        """A tool call the model made, and its result."""
 
 
 def ollama_tools(tools: list[Tool]) -> list[dict[str, Any]]:
@@ -111,7 +124,6 @@ class Chat:
         options: dict[str, Any],
         think: bool = False,
         max_rounds: int = 10,
-        on_tool_call: ToolCallObserver | None = None,
     ) -> None:
         """client must already be connected; http's base URL is the Ollama server."""
         self.model = model
@@ -120,7 +132,6 @@ class Chat:
         self._http = http
         self._options = options
         self._max_rounds = max_rounds
-        self._on_tool_call = on_tool_call
         self._tools: list[dict[str, Any]] = []
         self._instructions = ""
         self.messages: list[dict[str, Any]] = []
@@ -134,55 +145,86 @@ class Chat:
     def reset(self) -> None:
         self.messages = [{"role": "system", "content": self._instructions}]
 
-    async def ask(self, question: str) -> str:
+    async def ask(self, question: str, observer: ChatObserver | None = None) -> str:
         """Answer one question, calling tools as the model asks for them."""
+        observer = observer or ChatObserver()
         checkpoint = len(self.messages)
         self.messages.append({"role": "user", "content": question})
         try:
             for _ in range(self._max_rounds):
-                message = await self._reply()
+                message = await self._reply(observer)
                 calls = message.get("tool_calls") or []
                 if not calls:
                     self.messages.append(message)
-                    return message.get("content", "").strip()
+                    return message["content"].strip()
                 # Keep the calls but drop any narration that came with them ("First I'll
                 # list the devices..."). With it left in, gemma4 under Ollama answers the
                 # tool results with an empty turn every time.
                 self.messages.append({**message, "content": ""})
                 for call in calls:
-                    self.messages.append(await self._run_tool(call))
+                    self.messages.append(await self._run_tool(call, observer))
             raise ChatError(f"{self.model} was still calling tools after {self._max_rounds} turns.")
         except ChatError:
             # Drop the unanswered question so the conversation can carry on.
             del self.messages[checkpoint:]
             raise
 
-    async def _reply(self) -> dict[str, Any]:
-        """Ask the model for its next message, resampling a blank reply."""
-        request = {
-            "model": self.model,
-            "messages": self.messages,
-            "tools": self._tools,
-            "stream": False,
-            "think": self.think,
-            "options": self._options,
-        }
+    async def _reply(self, observer: ChatObserver) -> dict[str, Any]:
+        """Get the model's next message, resampling a blank reply."""
         for _ in range(BLANK_REPLY_RETRIES + 1):
-            message = (await ollama_post(self._http, "/api/chat", request))["message"]
-            if message.get("tool_calls") or not BLANK_REPLY.match(message.get("content", "")):
+            message = await self._stream_reply(observer)
+            if message.get("tool_calls") or not BLANK_REPLY.match(message["content"]):
                 return message
             logger.warning("Resampling a blank reply from %s: %r", self.model, message)
         raise ChatError(f"{self.model} gave a blank reply {BLANK_REPLY_RETRIES + 1} times in a row.")
 
-    async def _run_tool(self, call: dict[str, Any]) -> dict[str, Any]:
+    async def _stream_reply(self, observer: ChatObserver) -> dict[str, Any]:
+        """Stream one reply from Ollama, passing its thinking and text to the observer as they arrive."""
+        request = {
+            "model": self.model,
+            "messages": self.messages,
+            "tools": self._tools,
+            "stream": True,
+            "think": self.think,
+            "options": self._options,
+        }
+        thinking, content, tool_calls = "", "", []
+        try:
+            async with self._http.stream("POST", "/api/chat", json=request) as response:
+                if response.is_error:
+                    await response.aread()
+                    raise ChatError(f"Ollama: {ollama_error(response)}")
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    chunk = json.loads(line)
+                    if "error" in chunk:
+                        raise ChatError(f"Ollama: {chunk['error']}")
+                    delta = chunk.get("message", {})
+                    if delta.get("thinking"):
+                        thinking += delta["thinking"]
+                        observer.thinking(delta["thinking"])
+                    if delta.get("content"):
+                        content += delta["content"]
+                        observer.content(delta["content"])
+                    tool_calls.extend(delta.get("tool_calls") or [])
+        except httpx.HTTPError as error:
+            raise ChatError(f"Cannot reach Ollama at {self._http.base_url}: {error!r}") from error
+        message: dict[str, Any] = {"role": "assistant", "content": content}
+        if thinking:
+            message["thinking"] = thinking
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        return message
+
+    async def _run_tool(self, call: dict[str, Any], observer: ChatObserver) -> dict[str, Any]:
         """Run one tool call and return the tool message that carries its result."""
         name = call["function"]["name"]
         arguments = call["function"].get("arguments") or {}
         # Unknown tools and invalid arguments come back as error results for the model to read.
         result = await self._client.call_tool(name, arguments)
         text = result_text(result)
-        if self._on_tool_call is not None:
-            self._on_tool_call(name, arguments, text, result.is_error)
+        observer.tool_call(name, arguments, text, result.is_error)
         message = {"role": "tool", "tool_name": name, "content": text}
         if "id" in call:
             message["tool_call_id"] = call["id"]
@@ -199,22 +241,23 @@ def progress(text: str, color: str) -> None:
     print(text, file=sys.stderr, flush=True)
 
 
-def tool_call_printer(verbose: bool) -> ToolCallObserver:
-    """Print each tool call as it happens. Errors are always shown; results only when verbose."""
+class TerminalObserver(ChatObserver):
+    """Prints each tool call as it happens. Errors are always shown; results only when verbose."""
 
-    def show(name: str, arguments: dict[str, Any], text: str, is_error: bool) -> None:
+    def __init__(self, verbose: bool) -> None:
+        self._verbose = verbose
+
+    def tool_call(self, name: str, arguments: dict[str, Any], result: str, is_error: bool) -> None:
         rendered = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
         line = f"  · {name}({rendered})"
         if is_error:
-            line += f"  ✗ {' '.join(text.split())[:300]}"
-        elif verbose:
-            line += f"  → {text[:500]}"
+            line += f"  ✗ {' '.join(result.split())[:300]}"
+        elif self._verbose:
+            line += f"  → {result[:500]}"
         progress(line, YELLOW if is_error else GRAY)
 
-    return show
 
-
-async def interactive(chat: Chat) -> None:
+async def interactive(chat: Chat, observer: ChatObserver) -> None:
     """Read questions from the terminal until Ctrl-D or /quit."""
     session: PromptSession[str] = PromptSession()
     thinking = "thinking" if chat.think else "not thinking"
@@ -233,13 +276,21 @@ async def interactive(chat: Chat) -> None:
             print("Conversation cleared.", flush=True)
         elif line:
             try:
-                print(f"\n{await chat.ask(line)}\n", flush=True)
+                print(f"\n{await chat.ask(line, observer)}\n", flush=True)
             except ChatError as error:
                 progress(str(error), RED)
 
 
+def web_address(value: str) -> tuple[str, int]:
+    """Parse [HOST:]PORT for --web; the host defaults to loopback."""
+    host, _, port = value.rpartition(":")
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        raise argparse.ArgumentTypeError(f"'{value}' is not [HOST:]PORT.")
+    return host.strip("[]") or "127.0.0.1", int(port)
+
+
 async def run(args: argparse.Namespace) -> int:
-    """Answer the questions on the command line, or chat interactively. Returns the exit status."""
+    """Serve the web page, answer the questions given, or chat in the terminal. Returns the exit status."""
     inventory = Inventory.load(Path(args.inventory))
     options: dict[str, Any] = {"num_ctx": args.context}
     if args.threads:
@@ -254,18 +305,20 @@ async def run(args: argparse.Namespace) -> int:
         except ChatError as error:
             progress(str(error), RED)
             return 1
-        chat = Chat(
-            client,
-            http,
-            args.model,
-            options,
-            think=think,
-            max_rounds=args.max_rounds,
-            on_tool_call=tool_call_printer(args.verbose),
-        )
+        chat = Chat(client, http, args.model, options, think=think, max_rounds=args.max_rounds)
         await chat.start()
+        if args.web:
+            # Imported here because the web page builds on this module.
+            from netgpt.web import serve
+
+            host, port = args.web
+            token = os.environ.get("NETGPT_WEB_TOKEN") or secrets.token_urlsafe(24)
+            progress(f"NetGPT chat with {chat.model} at http://{host}:{port}/?token={token}", GRAY)
+            await serve(chat, host, port, token)
+            return 0
+        observer = TerminalObserver(args.verbose)
         if not args.questions:
-            await interactive(chat)
+            await interactive(chat, observer)
             return 0
         status = 0
         for question in args.questions:
@@ -273,7 +326,7 @@ async def run(args: argparse.Namespace) -> int:
             if len(args.questions) > 1:
                 print(f"\n> {question}", flush=True)
             try:
-                print(await chat.ask(question), flush=True)
+                print(await chat.ask(question, observer), flush=True)
             except ChatError as error:
                 progress(str(error), RED)
                 status = 1
@@ -311,12 +364,23 @@ def main() -> None:
         "(default: on when the model supports it).",
     )
     parser.add_argument("--max-rounds", type=int, default=10, help="Model replies allowed per question.")
-    parser.add_argument("--timeout", type=float, default=900.0, help="Seconds to wait for one model reply.")
+    parser.add_argument(
+        "--timeout", type=float, default=900.0, help="Seconds to wait for Ollama to send anything (default: %(default)s)."
+    )
     parser.add_argument("--verbose", action="store_true", help="Show tool results as well as tool calls.")
+    parser.add_argument(
+        "--web",
+        type=web_address,
+        metavar="[HOST:]PORT",
+        help="Serve the chat as a web page instead of the terminal. HOST defaults to 127.0.0.1. "
+        "Sign-in uses $NETGPT_WEB_TOKEN, or a random token printed at startup.",
+    )
     parser.add_argument("--log-level", default="ERROR", help="Logging level, written to stderr.")
     args = parser.parse_args()
     if args.inventory is None:
         parser.error("--inventory is required (or set NETGPT_INVENTORY).")
+    if args.web and args.questions:
+        parser.error("--web serves a page for asking questions; leave the questions off the command line.")
 
     logging.basicConfig(level=args.log_level, stream=sys.stderr)
     sys.exit(asyncio.run(run(args)))
