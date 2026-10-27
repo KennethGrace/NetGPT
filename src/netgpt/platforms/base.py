@@ -9,6 +9,7 @@ instead of failing the whole request.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from abc import ABC, abstractmethod
 from types import TracebackType
@@ -36,6 +37,8 @@ class Platform(ABC):
     policy: ClassVar[CliPolicy]
     # Ports on the out-of-band management network, which the topology keeps apart from the data plane.
     management_interfaces: ClassVar[re.Pattern[str] | None] = None
+    # How many pings a sweep may have in flight at once over one connection to the device.
+    sweep_width: ClassVar[int] = 1
 
     def __init__(self, device: Device, credentials: Credentials) -> None:
         if device.tls_ca is not None and not device.tls_ca.is_file():
@@ -96,3 +99,27 @@ class Platform(ABC):
     async def ping(self, destination: str, count: int, network_instance: str) -> PingResult:
         """Send ICMP echo requests from the device to a destination."""
         raise self._unsupported("ping")
+
+    async def ping_sweep(self, destinations: list[str], count: int, network_instance: str) -> list[PingResult]:
+        """
+        Ping every destination from the device, sweep_width at a time, and return all
+        the results. A ping that fails, rather than going unanswered, is tried once more;
+        if it fails again, so does the sweep, since an address it couldn't try isn't
+        known to be empty.
+        """
+        gate = asyncio.Semaphore(self.sweep_width)
+
+        async def one(destination: str) -> PingResult:
+            async with gate:
+                try:
+                    return await self.ping(destination, count, network_instance)
+                except UnsupportedError:
+                    raise
+                except PlatformError:
+                    return await self.ping(destination, count, network_instance)
+
+        results = await asyncio.gather(*(one(destination) for destination in destinations), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        return results

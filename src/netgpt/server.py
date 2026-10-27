@@ -77,6 +77,8 @@ READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_worl
 EXPECTED_ERRORS = (InventoryError, GuardError, PlatformError)
 
 MAX_SWEEP_ADDRESSES = 1024
+# From a device, each ping is a command on the device: a /24 takes the better part of a minute.
+MAX_DEVICE_SWEEP_ADDRESSES = 256
 
 PrimitiveT = TypeVar("PrimitiveT")
 
@@ -345,22 +347,43 @@ def build_server(
             raise ToolError(str(error)) from error
 
     @server.tool(annotations=READ_ONLY)
-    async def ping_sweep(network: str, count: int = 2, timeout: float = 1.0) -> list[PingResult]:
+    async def ping_sweep(
+        network: str,
+        device: str | None = None,
+        network_instance: str = "default",
+        count: int | None = None,
+        timeout: float = 1.0,
+    ) -> list[PingResult]:
         """
-        Ping every address in an IPv4 network from the NetGPT host itself (not
-        from a device) and return the addresses that answered. Only networks
-        inside the inventory's sweep networks are allowed, up to /22 in size.
+        Ping every address in an IPv4 network and return the addresses that answered.
+        Name a device to sweep from it, inside one of its network instances (VRFs): that
+        reaches the networks behind the device, and fills its ARP table (and switches'
+        MAC tables) on the way, so topology can place what answered. Without a device,
+        the sweep runs from the NetGPT host itself, which may reach only the management
+        network. Only networks inside the inventory's sweep networks are allowed, up to
+        /22 from the NetGPT host and /24 from a device, where each ping is slower. count
+        is echo requests per address: 2 from the NetGPT host and 1 from a device unless
+        given. timeout applies to sweeps from the NetGPT host.
         """
         try:
             target = ipaddress.IPv4Network(network, strict=False)
             inventory.check_sweep(target)
         except (ValueError, InventoryError) as error:
             raise ToolError(str(error)) from error
-        if target.num_addresses > MAX_SWEEP_ADDRESSES:
-            raise ToolError(f"{target} has {target.num_addresses} addresses; the limit is {MAX_SWEEP_ADDRESSES}.")
+        limit = MAX_SWEEP_ADDRESSES if device is None else MAX_DEVICE_SWEEP_ADDRESSES
+        if target.num_addresses > limit:
+            where = "" if device is None else " from a device"
+            raise ToolError(f"{target} has {target.num_addresses} addresses; the limit{where} is {limit}.")
         addresses = [str(address) for address in target.hosts()] or [str(target.network_address)]
+        if device is not None:
+            try:
+                async with connect(device) as platform:
+                    results = await platform.ping_sweep(addresses, count or 1, network_instance)
+            except EXPECTED_ERRORS as error:
+                raise ToolError(str(error)) from error
+            return [result for result in results if result.received]
         hosts = await icmplib.async_multiping(
-            addresses, count=count, timeout=timeout, privileged=False, concurrent_tasks=128
+            addresses, count=count or 2, timeout=timeout, privileged=False, concurrent_tasks=128
         )
         return [
             PingResult(

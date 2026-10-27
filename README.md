@@ -21,7 +21,7 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `topology`       | The network as one graph at layer 2 or layer 3, merged from every device's tables, with the evidence for each link. |
 | `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
-| `ping_sweep`     | The addresses that answer ICMP in a network, pinged from the NetGPT host itself.        |
+| `ping_sweep`     | The addresses that answer ICMP in a network, pinged from a device (inside one of its network instances) or from the NetGPT host itself. |
 
 The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call.
 
@@ -31,7 +31,7 @@ The multi-device tools query devices concurrently. A device that fails shows up 
 
 ## Safety model
 
-- **Inventory only.** Tools take device names from the inventory. The model cannot point NetGPT at any other host. `ping_sweep` only covers networks listed under `sweep_networks`, up to /22.
+- **Inventory only.** Tools take device names from the inventory. The model cannot point NetGPT at any other host. `ping_sweep` only covers networks listed under `sweep_networks`, up to /22 from the NetGPT host and /24 from a device.
 - **Read-only CLI.** `show` accepts a command only if it starts with an allowed verb, every pipe leads to an allowed filter, and it contains no control characters or chaining syntax. On Cisco IOS this refuses `| redirect`, `| tee`, and `| append`. On SR Linux it refuses `>` redirection. Use a read-only account on the device as well; the policy is the second line of defence, not the first.
 - **Credentials stay on the server.** The inventory names an environment variable or a `chmod 600` file for each password. Passwords never appear in tool arguments or results.
 
@@ -56,7 +56,7 @@ sudo containerlab deploy -t lab/netgpt.clab.yml
 sudo containerlab deploy -t lab/netgpt.clab.yml --reconfigure   # after changing the topology
 ```
 
-A freshly deployed lab has empty ARP and MAC tables, so the hosts aren't on the map until something talks to them. Ask NetGPT to ping them from their leaves.
+A freshly deployed lab has empty ARP and MAC tables, so the hosts aren't on the map until something talks to them. Ask NetGPT to sweep the host networks from their leaves ("sweep 192.168.12.0/24 from leaf2"): the sweep fills the tables the map is drawn from. A /24 takes about 45 seconds from a device, since each ping is a command on it. A sweep from the NetGPT host itself is much faster but reaches only the lab's management network, and from there a data-plane network just looks empty.
 
 Use Docker, not podman. Under podman, SR Linux 25.10.5 crashes during boot, and containerlab no longer tests its podman runtime. On RHEL, Docker CE can run alongside podman: remove only the `podman-docker` package (the `docker` alias for podman), not podman itself.
 

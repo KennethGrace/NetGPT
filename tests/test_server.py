@@ -12,6 +12,8 @@ import pytest
 from mcp import Client
 
 from netgpt.inventory import Inventory, InventoryError
+from netgpt.platforms import PlatformError
+from netgpt.primitives import PingResult
 from netgpt.server import build_server
 
 from fakes import FakePlatform
@@ -96,6 +98,50 @@ async def test_ping_sweep_refuses_before_sending_anything(client: Client) -> Non
         too_big = await client.call_tool("ping_sweep", {"network": "198.18.0.0/21"})
     assert outside.is_error and "outside the inventory's sweep networks" in outside.content[0].text
     assert too_big.is_error and "the limit is 1024" in too_big.content[0].text
+
+
+@pytest.mark.anyio
+async def test_a_sweep_from_a_device_returns_what_answered_there(client: Client) -> None:
+    FakePlatform.pings = []
+    async with client:
+        result = await client.call_tool("ping_sweep", {"network": "192.0.2.0/29", "device": "leaf1", "network_instance": "blue"})
+    answered = [(ping["source"], ping["destination"]) for ping in result.structured_content["result"]]
+    assert answered == [("leaf1", "192.0.2.1"), ("leaf1", "192.0.2.2")]
+    # Every host address, once each (a device's pings are slow), inside the network instance asked for.
+    assert sorted(FakePlatform.pings) == [("leaf1", f"192.0.2.{n}", 1, "blue") for n in range(1, 7)]
+
+
+@pytest.mark.anyio
+async def test_a_device_sweep_keeps_to_the_sweep_networks_and_a_smaller_limit(client: Client) -> None:
+    async with client:
+        outside = await client.call_tool("ping_sweep", {"network": "10.20.48.0/24", "device": "leaf1"})
+        too_big = await client.call_tool("ping_sweep", {"network": "198.18.0.0/23", "device": "leaf1"})
+        broken = await client.call_tool("ping_sweep", {"network": "192.0.2.0/29", "device": "broken"})
+    assert outside.is_error and "outside the inventory's sweep networks" in outside.content[0].text
+    assert too_big.is_error and "the limit from a device is 256" in too_big.content[0].text
+    assert broken.is_error and "connection refused" in broken.content[0].text
+
+
+@pytest.mark.anyio
+async def test_a_ping_that_fails_is_tried_once_more(inventory: Inventory) -> None:
+    class Flaky(FakePlatform):
+        failures: dict[str, int] = {}
+
+        async def ping(self, destination: str, count: int, network_instance: str) -> PingResult:
+            if Flaky.failures.get(destination, 0) > 0:
+                Flaky.failures[destination] -= 1
+                raise PlatformError(f"{self.device.name}: JSON-RPC session limit reached")
+            return await super().ping(destination, count, network_instance)
+
+    device = inventory.get("leaf1")
+    Flaky.failures = {"192.0.2.2": 1}
+    async with Flaky(device, inventory.credentials_for(device)) as platform:
+        results = await platform.ping_sweep(["192.0.2.1", "192.0.2.2", "192.0.2.3"], 1, "default")
+    assert [result.received for result in results] == [1, 1, 0]
+    Flaky.failures = {"192.0.2.2": 2}
+    async with Flaky(device, inventory.credentials_for(device)) as platform:
+        with pytest.raises(PlatformError, match="session limit"):
+            await platform.ping_sweep(["192.0.2.1", "192.0.2.2", "192.0.2.3"], 1, "default")
 
 
 def test_world_readable_password_file_is_refused(tmp_path: Path) -> None:

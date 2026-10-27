@@ -18,7 +18,7 @@ from netgpt.guard import NOKIA_SRLINUX
 from netgpt.platforms import Platform, PlatformError
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms.srlinux import SRLinuxPlatform
-from netgpt.primitives import ArpEntry, DeviceInfo, Interface, LldpNeighbor, MacEntry, NextHop, Route
+from netgpt.primitives import ArpEntry, DeviceInfo, Interface, LldpNeighbor, MacEntry, NextHop, PingResult, Route
 from netgpt.topology import Topology, build_topology
 
 FIXTURES = Path(__file__).parent / "fixtures" / "srlinux"
@@ -172,6 +172,7 @@ class FakePlatform(Platform):
     policy = NOKIA_SRLINUX
     management_interfaces = re.compile(r"^mgmt\d+$")
     commands_run: list[str] = []
+    pings: list[tuple[str, str, int, str]] = []
 
     async def _run_checked_cli(self, command: str) -> str:
         FakePlatform.commands_run.append(command)
@@ -187,6 +188,14 @@ class FakePlatform(Platform):
             raise PlatformError("broken: connection refused")
         host = {"leaf1": "198.51.100.11", "leaf2": "198.51.100.12"}[self.device.name]
         return [ArpEntry(device=self.device.name, interface="ethernet-1/1.0", ip_address=host, mac="02:00:00:00:00:01")]
+
+    async def ping(self, destination: str, count: int, network_instance: str) -> PingResult:
+        """Every network's .1 and .2 answer; nothing else does."""
+        if self.device.name == "broken":
+            raise PlatformError("broken: connection refused")
+        FakePlatform.pings.append((self.device.name, destination, count, network_instance))
+        received = count if destination.rsplit(".", 1)[-1] in ("1", "2") else 0
+        return PingResult(source=self.device.name, destination=destination, sent=count, received=received)
 
     async def routes(self, network_instance: str) -> list[Route]:
         if self.device.name == "broken":

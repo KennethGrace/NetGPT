@@ -83,6 +83,8 @@ def parse_ping_output(device: str, destination: str, output: str) -> PingResult:
 class SRLinuxPlatform(Platform):
     policy = NOKIA_SRLINUX
     management_interfaces = re.compile(r"^mgmt\d+$")
+    # Each ping is a CLI session on the device; past about 16 at once, a sweep gets no faster.
+    sweep_width = 16
 
     def __init__(
         self,
