@@ -14,7 +14,7 @@ import httpx
 import pytest
 from mcp import Client
 
-from netgpt.chat import Chat, ChatError, ChatObserver, supports_thinking
+from netgpt.chat import Chat, ChatError, ChatObserver, plain_schema, supports_thinking
 
 from fakes import ScriptedOllama, calls, says
 
@@ -61,7 +61,7 @@ async def test_tool_results_go_back_to_the_model(chat_with: Any) -> None:
 
     first = ollama.requests[0]
     assert first["messages"][0]["role"] == "system" and "list_devices" in first["messages"][0]["content"]
-    assert len(first["tools"]) == 9 and first["options"] == {"num_ctx": 8192}
+    assert len(first["tools"]) == 10 and first["options"] == {"num_ctx": 8192}
     assert first["think"] is False and first["stream"] is True
     tool_message = ollama.messages(1)[-1]
     assert (tool_message["role"], tool_message["tool_name"], tool_message["tool_call_id"]) == ("tool", "lldp_neighbors", "call_1")
@@ -168,3 +168,25 @@ async def test_ollama_errors_are_reported(chat_with: Any) -> None:
     chat = await chat_with(ScriptedOllama())
     with pytest.raises(ChatError, match="model 'missing' not found"):
         await chat.ask("Anyone home?")
+
+
+def test_schemas_reach_ollama_without_references_or_null_unions() -> None:
+    # Ollama drops $ref, so a nested model would reach the model as an empty object.
+    schema = {
+        "type": "object",
+        "properties": {
+            "devices": {"anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}], "default": None},
+            "path": {"anyOf": [{"$ref": "#/$defs/Ends"}, {"type": "null"}], "default": None},
+            "plane": {"enum": ["data", "all"], "type": "string"},
+        },
+        "$defs": {"Ends": {"type": "object", "properties": {"source": {"type": "string"}}, "required": ["source"]}},
+    }
+    assert plain_schema(schema) == {
+        "type": "object",
+        "properties": {
+            "devices": {"type": "array", "items": {"type": "string"}, "default": None},
+            "path": {"type": "object", "properties": {"source": {"type": "string"}}, "required": ["source"], "default": None},
+            "plane": {"enum": ["data", "all"], "type": "string"},
+        },
+    }
+

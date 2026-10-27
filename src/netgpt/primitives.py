@@ -9,7 +9,7 @@ devices can be merged into one picture of the network.
 
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -91,6 +91,16 @@ class ArpEntry(BaseModel):
     origin: str | None = Field(None, description="For example dynamic or static.")
 
 
+class NextHop(BaseModel):
+    """Where a route sends a packet."""
+
+    address: str | None = Field(None, description="The next router's IPv4 address; none for a directly connected network.")
+    interface: str | None = Field(None, description="The interface the packet leaves by, when the device names it.")
+    action: Literal["forward", "receive", "drop"] = Field(
+        "forward", description="receive: the packet is for the device itself. drop: it is discarded."
+    )
+
+
 class Route(BaseModel):
     """One route in a routing table."""
 
@@ -98,7 +108,7 @@ class Route(BaseModel):
     network_instance: str
     prefix: str
     protocol: str = Field(description="The route owner, for example local, static, or bgp.")
-    next_hops: list[str] = Field(default_factory=list)
+    next_hops: list[NextHop] = Field(default_factory=list)
     active: bool | None = None
     metric: int | None = None
     preference: int | None = None

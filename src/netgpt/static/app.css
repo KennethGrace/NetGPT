@@ -252,6 +252,8 @@ pre code { background: none; padding: 0; }
 #map-graph .node.lit .body { stroke: var(--accent); stroke-width: 3; fill: var(--lit-bg); }
 #map-graph .kind-host.lit .body { fill: var(--accent); }
 #map-graph .node.failed .body { stroke: var(--error); stroke-dasharray: 3 3; }
+#map-graph .node.trouble .body { stroke: var(--error); stroke-width: 3; }
+#map-graph .node.trouble .note { fill: var(--error); }
 #map-graph .node.selected .body { stroke-width: 4; }
 #map-graph .glyph { font-size: 13px; font-weight: 600; fill: var(--fg); text-anchor: middle; stroke: none; pointer-events: none; }
 #map-graph .context .glyph { font-size: 9px; }

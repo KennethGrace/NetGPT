@@ -1,13 +1,10 @@
 """
 The topology module merges what devices report about their neighbors into one
-graph of the network, and resolves the views the model draws on that graph.
+graph of the network.
 
-Devices supply the facts. LLDP says which ports are cabled together, and ARP says
-which addresses answer behind a port. Every node and link keeps the evidence it
-came from, so a drawing can always say why a line is there. The model supplies
-only editorial choices: which parts of the graph a view focuses on and which it
-highlights. It names graph elements, and every name is checked against the graph
-before anything is drawn.
+LLDP says which ports are cabled together, and ARP says which addresses answer
+behind a port. Every node and link keeps the evidence it came from, so a drawing
+can always say why a line is there.
 """
 
 from __future__ import annotations
@@ -15,7 +12,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -24,13 +21,9 @@ from netgpt.primitives import ArpEntry, DeviceError, DeviceInfo, LldpNeighbor
 
 Plane = Literal["data", "management"]
 PlaneChoice = Literal["data", "management", "all"]
-Emphasis = Literal["focus", "near", "context"]
 
 # A subinterface (ethernet-1/1.0, GigabitEthernet0/0.100) belongs to the port before the dot.
 SUBINTERFACE = re.compile(r"^(?P<port>.+)\.\d+$")
-
-# The ways a view may name a link by its two nodes: leaf1--spine1, leaf1 <-> spine1, leaf1 → spine1.
-LINK_SEPARATOR = re.compile(r"\s*(?:<-+>|-{2,}>?|->|↔|→|—|–)\s*")
 
 # Is this interface of this inventory device a management port?
 ManagementCheck = Callable[[str, str], bool]
@@ -277,177 +270,3 @@ def build_topology(
     links = sorted(graph.links.values(), key=lambda link: link.id)
     return Topology(nodes=nodes, links=links, errors=errors)
 
-
-# Views: what the model chooses to show.
-
-
-class ViewError(ValueError):
-    """A view named graph elements that aren't there."""
-
-
-class View(BaseModel):
-    """
-    A drawing of the network: the graph on one plane, with what the model chose to
-    show. Every node and link has an emphasis: focus (what the view is about), near
-    (one hop from the focus), or context (everything else, kept on screen but
-    pushed aside). With nothing focused, the whole graph is in focus.
-    """
-
-    title: str
-    plane: PlaneChoice
-    nodes: list[TopologyNode]
-    links: list[TopologyLink]
-    emphasis: dict[str, Emphasis] = Field(description="The emphasis of every node and link, by ID.")
-    highlight: list[str] = Field(default_factory=list, description="IDs of the highlighted nodes and links.")
-    notes: dict[str, str] = Field(default_factory=dict, description="Notes the model attached to nodes and links, by ID.")
-    errors: list[DeviceError] = Field(default_factory=list)
-
-
-class _Resolver:
-    """Finds the graph elements a view names, and collects the names it can't find."""
-
-    def __init__(self, graph: Topology) -> None:
-        self.graph = graph
-        self.unknown: list[str] = []
-        self.nodes = {node.id.lower(): node.id for node in graph.nodes}
-        for node in graph.nodes:
-            for address in node.addresses:
-                self.nodes.setdefault(address.lower(), node.id)
-        self.links = {link.id.lower(): link.id for link in graph.links}
-
-    def node(self, name: str) -> str | None:
-        return self.nodes.get(name.strip().lower())
-
-    def end(self, name: str) -> tuple[str, str | None] | None:
-        """A node, or one end of a link written node:interface, as (node, port)."""
-        if (node := self.node(name)) is not None:
-            return node, None
-        node_name, colon, interface = name.strip().partition(":")
-        if colon and (node := self.node(node_name)) is not None:
-            return node, port_of(interface.strip()).lower()
-        return None
-
-    @staticmethod
-    def touches(end: LinkEnd, wanted: tuple[str, str | None]) -> bool:
-        node, port = wanted
-        return end.node == node and (port is None or (end.interface is not None and port_of(end.interface).lower() == port))
-
-    def find(self, name: str) -> tuple[set[str], set[str]]:
-        """The nodes and links one name refers to; records the name as unknown if nothing."""
-        if (node := self.node(name)) is not None:
-            return {node}, set()
-        if (link := self.links.get(name.strip().lower())) is not None:
-            return set(), {link}
-        parts = LINK_SEPARATOR.split(name.strip())
-        if len(parts) == 2 and None not in (ends := [self.end(part) for part in parts]):
-            # Either end may come first, and each may be a node or a node:interface.
-            first, second = ends
-            between = {
-                link.id
-                for link in self.graph.links
-                if (self.touches(link.a, first) and self.touches(link.b, second))
-                or (self.touches(link.b, first) and self.touches(link.a, second))
-            }
-            if between:
-                return set(), between
-            self.unknown.append(f"{name!r} (no link between {first[0]} and {second[0]})")
-            return set(), set()
-        if (port := self.end(name)) is not None and port[1] is not None:
-            at = {link.id for link in self.graph.links if self.touches(link.a, port) or self.touches(link.b, port)}
-            if at:
-                return set(), at
-        self.unknown.append(repr(name))
-        return set(), set()
-
-    def find_all(self, names: Iterable[str]) -> tuple[set[str], set[str]]:
-        nodes: set[str] = set()
-        links: set[str] = set()
-        for name in names:
-            found_nodes, found_links = self.find(name)
-            nodes |= found_nodes
-            links |= found_links
-        return nodes, links
-
-
-def make_view(
-    topology: Topology,
-    title: str,
-    focus: list[str],
-    highlight: list[str],
-    notes: dict[str, str],
-    plane: PlaneChoice = "data",
-) -> View:
-    """Check a view's names against the graph and work out the emphasis of every element."""
-    graph = topology.on_plane(plane)
-    resolver = _Resolver(graph)
-    focus_nodes, focus_links = resolver.find_all(focus)
-    lit_nodes, lit_links = resolver.find_all(highlight)
-    noted: dict[str, str] = {}
-    for name, note in notes.items():
-        found_nodes, found_links = resolver.find(name)
-        for element in found_nodes | found_links:
-            noted[element] = note
-    if resolver.unknown:
-        named = ", ".join(node.id for node in graph.nodes)
-        raise ViewError(
-            f"There is nothing on the {plane} plane called {', '.join(resolver.unknown)}. "
-            f"Its nodes are: {named}. Name a link by its two nodes (a--b) or by one end (device:interface)."
-        )
-
-    by_id = {link.id: link for link in graph.links}
-
-    def ends(links: set[str]) -> set[str]:
-        return {end.node for link_id in links for end in (by_id[link_id].a, by_id[link_id].b)}
-
-    def between(nodes: set[str]) -> set[str]:
-        return {link.id for link in graph.links if link.a.node in nodes and link.b.node in nodes}
-
-    # A link's ends are part of what it names, and a link between two named nodes is named too.
-    lit_nodes |= ends(lit_links)
-    lit_links |= between(lit_nodes)
-    focus_nodes |= lit_nodes | ends(focus_links)
-    focus_links |= lit_links | between(focus_nodes)
-
-    emphasis: dict[str, Emphasis] = {}
-    if not focus_nodes:
-        emphasis = {element: "focus" for element in [node.id for node in graph.nodes] + list(by_id)}
-    else:
-        touching = {link.id for link in graph.links if link.a.node in focus_nodes or link.b.node in focus_nodes}
-        near_nodes = ends(touching) - focus_nodes
-        for node in graph.nodes:
-            emphasis[node.id] = "focus" if node.id in focus_nodes else "near" if node.id in near_nodes else "context"
-        for link in graph.links:
-            emphasis[link.id] = "focus" if link.id in focus_links else "near" if link.id in touching else "context"
-
-    return View(
-        title=title.strip() or "The network",
-        plane=plane,
-        nodes=graph.nodes,
-        links=graph.links,
-        emphasis=emphasis,
-        highlight=sorted(lit_nodes | lit_links),
-        notes=noted,
-        errors=graph.errors,
-    )
-
-
-def describe(view: View) -> str:
-    """Tell the model what the user now sees, in a few lines."""
-    focused = [node.id for node in view.nodes if view.emphasis[node.id] == "focus"]
-    aside = sum(1 for node in view.nodes if view.emphasis[node.id] == "context")
-    lines = [f'The user now sees "{view.title}": the {view.plane} plane, {len(view.nodes)} nodes and {len(view.links)} links.']
-    if len(focused) == len(view.nodes):
-        lines.append("Nothing is singled out; the whole graph is in focus.")
-    else:
-        lines.append(f"In focus: {', '.join(focused)}. {aside} other nodes are dimmed and pushed aside.")
-    lit_nodes = [node.id for node in view.nodes if node.id in view.highlight]
-    lit_links = sum(1 for link in view.links if link.id in view.highlight)
-    if lit_nodes or lit_links:
-        between = f" and {lit_links} link{'s' if lit_links != 1 else ''}" if lit_links else ""
-        lines.append(f"Highlighted: {', '.join(lit_nodes) or 'no nodes'}{between}.")
-    one_sided = [link.id for link in view.links if link.one_sided]
-    if one_sided:
-        lines.append(f"Only one end reports these links: {', '.join(one_sided)}.")
-    if view.errors:
-        lines.append(f"Could not query: {', '.join(sorted({error.device for error in view.errors}))}.")
-    return "\n".join(lines)

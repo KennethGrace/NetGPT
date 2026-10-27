@@ -68,12 +68,38 @@ class ChatObserver:
         """A tool call the model made, the result the model read, and the result's structured content."""
 
 
+def plain_schema(schema: Any, definitions: dict[str, Any] | None = None) -> Any:
+    """
+    Write a JSON schema as plainly as possible for a small model. Ollama keeps no
+    $ref, so referenced definitions are written in place; and "X or null" becomes
+    X, since leaving an optional parameter out already says it may be empty.
+    """
+    if isinstance(schema, list):
+        return [plain_schema(item, definitions) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    definitions = schema.get("$defs", definitions) or {}
+    rest = {key: value for key, value in schema.items() if key not in ("$defs", "$ref", "anyOf")}
+    if "$ref" in schema:
+        return plain_schema({**definitions[schema["$ref"].rsplit("/", 1)[-1]], **rest}, definitions)
+    options = [option for option in schema.get("anyOf", []) if option != {"type": "null"}]
+    if len(options) == 1:
+        return plain_schema({**options[0], **rest}, definitions)
+    if options:
+        rest["anyOf"] = options
+    return {key: plain_schema(value, definitions) for key, value in rest.items()}
+
+
 def ollama_tools(tools: list[Tool]) -> list[dict[str, Any]]:
     """Describe MCP tools in Ollama's function-calling format."""
     return [
         {
             "type": "function",
-            "function": {"name": tool.name, "description": tool.description or "", "parameters": tool.input_schema},
+            "function": {
+                "name": tool.name,
+                "description": tool.description or "",
+                "parameters": plain_schema(tool.input_schema),
+            },
         }
         for tool in tools
     ]

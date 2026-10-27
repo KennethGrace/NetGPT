@@ -11,6 +11,7 @@ import pytest
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms import PlatformError
 from netgpt.platforms.srlinux import SRLinuxPlatform
+from netgpt.primitives import NextHop
 
 from fakes import replay
 
@@ -57,10 +58,16 @@ async def test_routes_resolve_next_hops() -> None:
     platform, _ = leaf1({"/network-instance": "route_table.json"})
     async with platform:
         routes = {route.prefix: route for route in await platform.routes("default")}
-    assert (routes["192.168.0.0/16"].protocol, routes["192.168.0.0/16"].next_hops) == ("static", ["192.168.0.0"])
+    # A static route's next hop is indirect: an address, resolved through another route.
+    assert routes["192.168.0.0/16"].protocol == "static"
+    assert routes["192.168.0.0/16"].next_hops == [NextHop(address="192.168.0.0")]
     # Connected routes point at the interface, not at the router's own address.
-    assert (routes["192.168.11.0/24"].protocol, routes["192.168.11.0/24"].next_hops) == ("local", ["ethernet-1/1.0"])
-    assert routes["192.168.0.0/31"].next_hops == ["ethernet-1/49.0"]
+    assert routes["192.168.11.0/24"].protocol == "local"
+    assert routes["192.168.11.0/24"].next_hops == [NextHop(interface="ethernet-1/1.0")]
+    assert routes["192.168.0.0/31"].next_hops == [NextHop(interface="ethernet-1/49.0")]
+    # The device's own addresses, and the subnet broadcast, are received rather than forwarded.
+    assert routes["192.168.11.1/32"].next_hops == [NextHop(action="receive")]
+    assert routes["192.168.11.255/32"].next_hops == [NextHop(action="receive")]
     assert routes["192.168.0.0/16"].active is True and routes["192.168.0.0/16"].preference == 5
 
 

@@ -24,7 +24,7 @@ import icmplib
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import BeforeValidator
+from pydantic import BaseModel, BeforeValidator
 
 from netgpt import __version__
 from netgpt.guard import GuardError
@@ -41,7 +41,9 @@ from netgpt.primitives import (
     PingResult,
     Route,
 )
-from netgpt.topology import PlaneChoice, Topology, View, ViewError, build_topology, describe, make_view, port_of
+from netgpt.forwarding import ForwardingPath, TraceError, trace_path
+from netgpt.topology import PlaneChoice, Topology, build_topology, port_of
+from netgpt.views import View, ViewError, describe, make_view
 
 logger = logging.getLogger("netgpt")
 
@@ -50,16 +52,19 @@ NetGPT gives read-only access to the network devices in its inventory.
 Call list_devices first: every other tool takes device names from that list and cannot reach anything else.
 lldp_neighbors, arp_table, mac_table, and routes query many devices at once and return typed records,
 with per-device errors alongside the results. topology merges every device's LLDP and ARP tables into
-one graph of devices, hosts, and the links between them. Use show for anything the typed tools don't
-cover; it accepts only read-only commands and says why when it refuses one.
+one graph of devices, hosts, and the links between them. forwarding_path follows the routing tables
+hop by hop to show where packets from a source to a destination go, and where they are lost. Use show
+for anything the typed tools don't cover; it accepts only read-only commands and says why when it
+refuses one.
 """
 
 DISPLAY_INSTRUCTIONS = """\
 The user sees a map of the network beside the chat. Call display whenever a picture helps: the
 topology, where a host is attached, the path between two points, where a problem is. Focus on the
-part of the network the answer is about and highlight the answer itself, such as the nodes of a path;
-the rest of the network stays on the map, dimmed and pushed aside. Refer to the map in your answer
-rather than describing every link in words.
+part of the network the answer is about and highlight the answer itself; the rest of the network
+stays on the map, dimmed and pushed aside. For the way traffic goes between two points, give display a
+path (source and destination) and the server traces it through the routing tables. Refer to the map in
+your answer rather than describing every link in words.
 """
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
@@ -88,6 +93,20 @@ def as_names(value: object) -> object:
 
 Names = Annotated[list[str] | None, BeforeValidator(as_names)]
 DeviceNames = Names
+
+
+class PathEnds(BaseModel):
+    """The two ends of a path to trace."""
+
+    source: str
+    destination: str
+
+
+def as_path_ends(value: object) -> object:
+    """Accept [source, destination] as well as the object."""
+    if isinstance(value, list | tuple) and len(value) == 2:
+        return {"source": value[0], "destination": value[1]}
+    return value
 
 
 def build_server(
@@ -148,6 +167,17 @@ def build_server(
         errors = list({(error.device, error.error): error for error in lldp_errors + arp_errors}.values())
         return build_topology(list_devices(), neighbors, bindings, errors, is_management)
 
+    async def trace(source: str, destination: str, network_instance: str) -> tuple[Topology, ForwardingPath]:
+        """Trace a path, returning the topology it was traced on as well."""
+        topology, (routes, failures) = await asyncio.gather(
+            gather_topology(), collect(None, lambda platform: platform.routes(network_instance))
+        )
+        tables: dict[str, list[Route]] = {}
+        for route in routes:
+            tables.setdefault(route.device, []).append(route)
+        unreadable = {failure.device: failure.error for failure in failures}
+        return topology, trace_path(topology, tables, unreadable, source, destination, network_instance)
+
     @server.tool(annotations=READ_ONLY)
     def list_devices() -> list[DeviceInfo]:
         """List the devices NetGPT can query, with their platform, address, and role."""
@@ -205,6 +235,21 @@ def build_server(
         """
         return (await gather_topology()).on_plane(plane)
 
+    @server.tool(annotations=READ_ONLY)
+    async def forwarding_path(source: str, destination: str, network_instance: str = "default") -> ForwardingPath:
+        """
+        Work out the path packets take from a source to a destination by following each
+        device's routing table: the route that matches at every hop, the interface the
+        packet leaves by, and where the path ends, delivered or lost (no route, a loop, a
+        next hop nothing answers for). The source is a device, a host's address, or any
+        address on a network a device is connected to; the destination is an IPv4 address.
+        Nothing is sent on the network: the path is read from the devices' state.
+        """
+        try:
+            return (await trace(source, destination, network_instance))[1]
+        except TraceError as error:
+            raise ToolError(str(error)) from error
+
     if display:
 
         @server.tool(name="display", annotations=READ_ONLY)
@@ -212,20 +257,27 @@ def build_server(
             title: str,
             focus: Names = None,
             highlight: Names = None,
+            path: Annotated[PathEnds | None, BeforeValidator(as_path_ends)] = None,
             notes: dict[str, str] | None = None,
             plane: PlaneChoice = "data",
         ) -> Annotated[CallToolResult, View]:
             """
             Draw the network on the user's map. The whole network is always drawn: nodes in
             focus move to the centre, and everything else stays on the map, dimmed and pushed
-            aside. Omit focus to show the whole network. highlight marks the answer itself,
-            such as every node of a path. Name nodes by device name or host address, and
-            links by their two nodes (leaf1--spine1) or by one end (leaf1:ethernet-1/49).
-            notes attach a few words to a node or link, keyed by its name.
+            aside. Omit focus to show the whole network. highlight marks the answer itself.
+            path takes a source and a destination: the server traces the way packets go
+            between them through the routing tables and highlights it hop by hop, with
+            where it is lost if it is. Name nodes by device name or host address, and links
+            by their two nodes (leaf1--spine1) or by one end (leaf1:ethernet-1/49). notes
+            attach a few words to a node or link, keyed by its name.
             """
             try:
-                view = make_view(await gather_topology(), title, focus or [], highlight or [], notes or {}, plane)
-            except ViewError as error:
+                if path is not None:
+                    topology, traced = await trace(path.source, path.destination, "default")
+                else:
+                    topology, traced = await gather_topology(), None
+                view = make_view(topology, title, focus or [], highlight or [], notes or {}, plane, traced)
+            except (TraceError, ViewError) as error:
                 raise ToolError(str(error)) from error
             # The model reads a summary; the page draws the view from the structured content.
             return CallToolResult(

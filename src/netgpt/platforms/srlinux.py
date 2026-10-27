@@ -16,11 +16,14 @@ import httpx
 from netgpt.guard import NOKIA_SRLINUX
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms.base import Platform, PlatformError
-from netgpt.primitives import ArpEntry, LldpNeighbor, MacEntry, PingResult, Route
+from netgpt.primitives import ArpEntry, LldpNeighbor, MacEntry, NextHop, PingResult, Route
 
 NETWORK_INSTANCE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 PING_COUNTS = re.compile(r"(\d+) packets transmitted, (\d+) received")
 PING_RTT = re.compile(r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/")
+
+# What SR Linux's next-hop types do with a packet; any other type forwards it.
+NEXT_HOP_ACTIONS = {"extract": "receive", "broadcast": "receive", "blackhole": "drop", "drop": "drop", "reject": "drop"}
 
 
 def strip_module_prefixes(node: Any) -> Any:
@@ -39,18 +42,18 @@ def as_list(node: Any) -> list[Any]:
     return node if isinstance(node, list) else [node]
 
 
-def describe_next_hop(hop: dict[str, Any], protocol: str) -> str:
+def next_hop(hop: dict[str, Any], protocol: str) -> NextHop:
     """
-    Render one resolved next hop. SR Linux gives a connected (local) route the
-    router's own address as its next hop, so for those the interface is the
-    meaningful answer.
+    Read one next hop. SR Linux gives a connected (local) route the router's own
+    address as its next hop; for those the interface is the whole answer. An
+    indirect next hop has an address and no interface: the route to that address
+    says which way it goes.
     """
-    address, subinterface = hop.get("ip-address"), hop.get("subinterface")
-    if protocol == "local" and subinterface:
-        return subinterface
-    if address and subinterface:
-        return f"{address} via {subinterface}"
-    return address or subinterface or str(hop.get("type", "unknown")).split(":")[-1]
+    action = NEXT_HOP_ACTIONS.get(str(hop.get("type", "")).split(":")[-1], "forward")
+    if action != "forward":
+        return NextHop(action=action)
+    address = None if protocol == "local" else hop.get("ip-address")
+    return NextHop(address=address, interface=hop.get("subinterface"))
 
 
 def parse_ping_output(device: str, destination: str, output: str) -> PingResult:
@@ -202,7 +205,7 @@ class SRLinuxPlatform(Platform):
                     network_instance=network_instance,
                     prefix=route["ipv4-prefix"],
                     protocol=protocol,
-                    next_hops=[describe_next_hop(hop, protocol) for hop in hops],
+                    next_hops=[next_hop(hop, protocol) for hop in hops],
                     active=route.get("active"),
                     metric=route.get("metric"),
                     preference=route.get("preference"),

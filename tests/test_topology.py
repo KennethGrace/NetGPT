@@ -10,23 +10,12 @@ import re
 
 import pytest
 
-from netgpt.inventory import Credentials, Device
-from netgpt.platforms.srlinux import SRLinuxPlatform
-from netgpt.primitives import ArpEntry, DeviceError, DeviceInfo, LldpNeighbor
-from netgpt.topology import Topology, ViewError, build_topology, describe, make_view
+from netgpt.primitives import ArpEntry, DeviceError, LldpNeighbor
+from netgpt.topology import Topology, build_topology
+from netgpt.views import ViewError, describe, make_view
 
-from fakes import replay
+from fakes import LAB, recorded_lab
 
-DEVICES = [
-    DeviceInfo(name="spine1", platform="nokia_srlinux", host="172.20.20.11", role="spine"),
-    DeviceInfo(name="leaf1", platform="nokia_srlinux", host="172.20.20.21", role="leaf"),
-    DeviceInfo(name="leaf2", platform="nokia_srlinux", host="172.20.20.22", role="leaf"),
-]
-RECORDED = {
-    "spine1": ("lldp_spine1.json", "arp_spine1.json"),
-    "leaf1": ("lldp.json", "arp.json"),
-    "leaf2": ("lldp_leaf2.json", "arp_leaf2.json"),
-}
 HOST1, HOST2 = "192.168.11.2", "192.168.12.2"
 LEAF1_UPLINK = "leaf1:ethernet-1/49--spine1:ethernet-1/1"
 LEAF2_UPLINK = "leaf2:ethernet-1/49--spine1:ethernet-1/2"
@@ -42,22 +31,13 @@ def is_management(device: str, interface: str) -> bool:
 async def tables(monkeypatch: pytest.MonkeyPatch) -> tuple[list[LldpNeighbor], list[ArpEntry]]:
     """Every lab device's LLDP and ARP records, parsed from recorded responses."""
     monkeypatch.setenv("NETGPT_TEST_PASSWORD", "not-used-by-the-mock")
-    credentials = Credentials(username="admin", password_env="NETGPT_TEST_PASSWORD")
-    neighbors: list[LldpNeighbor] = []
-    bindings: list[ArpEntry] = []
-    for info in DEVICES:
-        lldp, arp = RECORDED[info.name]
-        transport, _ = replay({"/system/lldp": lldp, "/interface": arp})
-        device = Device(name=info.name, host=info.host, platform=info.platform, credentials="lab")
-        async with SRLinuxPlatform(device, credentials, transport=transport) as platform:
-            neighbors += await platform.lldp_neighbors()
-            bindings += await platform.arp_table()
+    neighbors, bindings, _ = await recorded_lab()
     return neighbors, bindings
 
 
 @pytest.fixture
 def lab(tables: tuple[list[LldpNeighbor], list[ArpEntry]]) -> Topology:
-    return build_topology(DEVICES, *tables, [], is_management)
+    return build_topology(LAB, *tables, [], is_management)
 
 
 def node(topology: Topology, node_id: str):
@@ -99,19 +79,19 @@ async def test_the_management_mesh_is_one_shared_segment(lab: Topology) -> None:
 async def test_a_cable_only_one_end_reports_is_flagged(tables: tuple[list[LldpNeighbor], list[ArpEntry]]) -> None:
     neighbors, bindings = tables
     unreported = [n for n in neighbors if not (n.device == "spine1" and n.interface == "ethernet-1/1")]
-    links = {link.id: link for link in build_topology(DEVICES, unreported, bindings, [], is_management).links}
+    links = {link.id: link for link in build_topology(LAB, unreported, bindings, [], is_management).links}
     assert links[LEAF1_UPLINK].one_sided and not links[LEAF2_UPLINK].one_sided
 
     # A device that couldn't be asked can't contradict anything; it carries the error instead.
     failed = [DeviceError(device="spine1", error="spine1: connection refused")]
-    topology = build_topology(DEVICES, unreported, bindings, failed, is_management)
+    topology = build_topology(LAB, unreported, bindings, failed, is_management)
     assert not any(link.one_sided for link in topology.links)
     assert node(topology, "spine1").error == "spine1: connection refused"
 
 
 def test_neighbors_outside_the_inventory_become_nodes() -> None:
     neighbors = [LldpNeighbor(device="leaf1", interface="ethernet-1/2", neighbor="server9", neighbor_interface="eno1")]
-    topology = build_topology(DEVICES[1:2], neighbors, [], [], is_management)
+    topology = build_topology(LAB[1:2], neighbors, [], [], is_management)
     server = node(topology, "server9")
     assert (server.kind, server.plane) == ("neighbor", "data")
     assert [link.id for link in topology.links] == ["leaf1:ethernet-1/2--server9:eno1"]

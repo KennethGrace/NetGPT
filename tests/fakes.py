@@ -16,7 +16,9 @@ import httpx
 
 from netgpt.guard import NOKIA_SRLINUX
 from netgpt.platforms import Platform, PlatformError
-from netgpt.primitives import ArpEntry, LldpNeighbor
+from netgpt.inventory import Credentials, Device
+from netgpt.platforms.srlinux import SRLinuxPlatform
+from netgpt.primitives import ArpEntry, DeviceInfo, LldpNeighbor, NextHop, Route
 
 FIXTURES = Path(__file__).parent / "fixtures" / "srlinux"
 
@@ -38,11 +40,43 @@ def replay(fixtures: dict[str, str]) -> tuple[httpx.MockTransport, list[str]]:
     return httpx.MockTransport(handler), requests
 
 
+# The containerlab lab, and the responses recorded from each of its devices.
+LAB = [
+    DeviceInfo(name="spine1", platform="nokia_srlinux", host="172.20.20.11", role="spine"),
+    DeviceInfo(name="leaf1", platform="nokia_srlinux", host="172.20.20.21", role="leaf"),
+    DeviceInfo(name="leaf2", platform="nokia_srlinux", host="172.20.20.22", role="leaf"),
+]
+RECORDED = {
+    "spine1": {"/system/lldp": "lldp_spine1.json", "/interface": "arp_spine1.json", "/network-instance": "route_table_spine1.json"},
+    "leaf1": {"/system/lldp": "lldp.json", "/interface": "arp.json", "/network-instance": "route_table.json"},
+    "leaf2": {"/system/lldp": "lldp_leaf2.json", "/interface": "arp_leaf2.json", "/network-instance": "route_table_leaf2.json"},
+}
+
+
+async def recorded_lab() -> tuple[list[LldpNeighbor], list[ArpEntry], dict[str, list[Route]]]:
+    """
+    Every lab device's LLDP, ARP, and routing tables, parsed by the real SR Linux
+    driver from recorded responses. Needs NETGPT_TEST_PASSWORD set to anything.
+    """
+    credentials = Credentials(username="admin", password_env="NETGPT_TEST_PASSWORD")
+    neighbors: list[LldpNeighbor] = []
+    bindings: list[ArpEntry] = []
+    routes: dict[str, list[Route]] = {}
+    for info in LAB:
+        transport, _ = replay(RECORDED[info.name])
+        device = Device(name=info.name, host=info.host, platform=info.platform, credentials="lab")
+        async with SRLinuxPlatform(device, credentials, transport=transport) as platform:
+            neighbors += await platform.lldp_neighbors()
+            bindings += await platform.arp_table()
+            routes[info.name] = await platform.routes("default")
+    return neighbors, bindings, routes
+
+
 class FakePlatform(Platform):
     """
     Answers from canned data: each device is cabled to spine1 (outside the
-    inventory) on ethernet-1/49, with one host behind ethernet-1/1. A device
-    named 'broken' fails like an unreachable device.
+    inventory) on ethernet-1/49, with one host behind ethernet-1/1 and a default
+    route toward spine1. A device named 'broken' fails like an unreachable device.
     """
 
     policy = NOKIA_SRLINUX
@@ -63,6 +97,20 @@ class FakePlatform(Platform):
             raise PlatformError("broken: connection refused")
         host = {"leaf1": "198.51.100.11", "leaf2": "198.51.100.12"}[self.device.name]
         return [ArpEntry(device=self.device.name, interface="ethernet-1/1.0", ip_address=host, mac="02:00:00:00:00:01")]
+
+    async def routes(self, network_instance: str) -> list[Route]:
+        if self.device.name == "broken":
+            raise PlatformError("broken: connection refused")
+        hosts = {"leaf1": "198.51.100.8/30", "leaf2": "198.51.100.12/30"}[self.device.name]
+        table = [
+            (hosts, "local", NextHop(interface="ethernet-1/1.0")),
+            ("10.0.0.0/31", "local", NextHop(interface="ethernet-1/49.0")),
+            ("0.0.0.0/0", "static", NextHop(address="10.0.0.1")),
+        ]
+        return [
+            Route(device=self.device.name, network_instance=network_instance, prefix=prefix, protocol=protocol, next_hops=[hop])
+            for prefix, protocol, hop in table
+        ]
 
 
 def calls(name: str, arguments: dict[str, Any], call_id: str = "call_1", content: str = "") -> dict[str, Any]:

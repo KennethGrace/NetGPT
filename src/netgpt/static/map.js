@@ -39,6 +39,7 @@ const netmap = (() => {
   const CHARGE = { focus: -520, near: -360, context: -200 };
   const SPRING = { focus: 0.8, near: 0.4, context: 0.1 };
   const LENGTH = { focus: 100, near: 120, context: 120 };
+  const CHAR_WIDTH = 7; // roughly, for the 12–13px label and note text
   const SHORT = [
     [/^ethernet-/i, "e"], [/^TenGigabitEthernet/i, "Te"], [/^GigabitEthernet/i, "Gi"],
     [/^FastEthernet/i, "Fa"], [/^HundredGigE/i, "Hu"], [/^Ethernet/i, "Eth"], [/^Port-channel/i, "Po"],
@@ -143,6 +144,7 @@ const netmap = (() => {
 
     const tier = tiers(view);
     const lit = new Set(view.highlight);
+    const trouble = new Set(view.trouble);
     const focus = view.nodes.filter((node) => view.emphasis[node.id] === "focus");
     const middle = focus.reduce((sum, node) => sum + tier.get(node.id), 0) / (focus.length || 1);
     const core = 60 + 50 * Math.sqrt(focus.length);
@@ -154,6 +156,7 @@ const netmap = (() => {
         data,
         emphasis: view.emphasis[data.id],
         lit: lit.has(data.id),
+        trouble: trouble.has(data.id),
         note: view.notes[data.id] || "",
         tierY: (tier.get(data.id) - middle) * TIER_GAP,
       });
@@ -194,9 +197,33 @@ const netmap = (() => {
       .force("collide", d3.forceCollide((node) => node.radius + 22))
       .force("x", d3.forceX(0).strength((node) => PULL[node.emphasis] / 2))
       .force("y", d3.forceY((node) => node.tierY).strength((node) => PULL[node.emphasis]))
-      .force("ring", d3.forceRadial((node) => (node.emphasis === "near" ? core + 60 : core + 190)).strength((node) => RING[node.emphasis]));
+      .force("ring", d3.forceRadial((node) => (node.emphasis === "near" ? core + 60 : core + 190)).strength((node) => RING[node.emphasis]))
+      .force("labels", labelRoom);
     settle();
     inspect(null);
+  }
+
+  function textWidth(node) {
+    const note = node.emphasis === "context" ? 0 : node.note.length;
+    return Math.max(node.data.label.length, note) * CHAR_WIDTH;
+  }
+
+  function labelRoom(alpha) {
+    // Labels and notes sit to the right of their nodes. Push apart nodes on the same
+    // line until each one's text clears the next node along.
+    const shown = [...nodes.values()].filter((node) => node.emphasis !== "context");
+    for (const left of shown) {
+      for (const right of shown) {
+        if (left === right || right.x < left.x || Math.abs(right.y - left.y) > 32) continue;
+        const room = left.radius + 12 + textWidth(left) + right.radius;
+        const gap = right.x - left.x;
+        if (gap < room) {
+          const push = (room - gap) * alpha * 0.3;
+          left.vx -= push;
+          right.vx += push;
+        }
+      }
+    }
   }
 
   function settle() {
@@ -215,7 +242,15 @@ const netmap = (() => {
       const { element, data } = node;
       element.setAttribute(
         "class",
-        ["node", `kind-${data.kind}`, node.emphasis, node.lit && "lit", data.error && "failed", selected === node.id && "selected"]
+        [
+          "node",
+          `kind-${data.kind}`,
+          node.emphasis,
+          node.lit && "lit",
+          node.trouble && "trouble",
+          data.error && "failed",
+          selected === node.id && "selected",
+        ]
           .filter(Boolean)
           .join(" "),
       );
@@ -289,9 +324,8 @@ const netmap = (() => {
     let bottom = -Infinity;
     for (const node of nodes.values()) {
       // Room for the label and note on the right.
-      const text = Math.max(node.data.label.length, node.emphasis === "context" ? 0 : node.note.length) * 7.5;
       left = Math.min(left, node.x - node.radius - 30);
-      right = Math.max(right, node.x + node.radius + 12 + text);
+      right = Math.max(right, node.x + node.radius + 12 + textWidth(node));
       top = Math.min(top, node.y - node.radius - 25);
       bottom = Math.max(bottom, node.y + node.radius + 30);
     }
@@ -321,7 +355,9 @@ const netmap = (() => {
       inspector.append(html("p", "kind", kind));
       if (data.addresses.length) inspector.append(html("p", "addresses", data.addresses.join(", ")));
       if (data.error) inspector.append(html("p", "failed", data.error));
-      if (node.note) inspector.append(html("p", "remark", node.note));
+      const hop = current.path && current.path.hops.find((candidate) => candidate.node === id);
+      if (hop && hop.route) inspector.append(html("p", node.trouble ? "failed" : "remark", forwarding(hop)));
+      else if (node.note) inspector.append(html("p", node.trouble ? "failed" : "remark", node.note));
       evidence(data.evidence);
     } else if (link) {
       const data = link.data;
@@ -332,9 +368,20 @@ const netmap = (() => {
       if (link.note) inspector.append(html("p", "remark", link.note));
       evidence(data.evidence);
     } else if (current) {
+      if (current.path) inspector.append(html("p", current.path.outcome === "delivered" ? "remark" : "failed", current.path.detail));
       for (const error of current.errors) inspector.append(html("p", "failed", `${error.device}: ${error.error}`));
       inspector.append(html("p", "hint", "Select a node or link to see the evidence for it. Drag a node to move it."));
     }
+  }
+
+  function forwarding(hop) {
+    // The route a hop used, its next hops, and the interfaces the packet leaves by.
+    const { protocol, prefix, next_hops: nextHops } = hop.route;
+    const via = nextHops.map((next) => (next.action === "forward" ? [next.address, next.interface].filter(Boolean).join(" on ") : next.action));
+    let text = `${protocol} ${prefix}`;
+    if (via.some(Boolean)) text += ` via ${via.filter(Boolean).join(", ")}`;
+    if (hop.interfaces.length) text += `, out ${hop.interfaces.join(", ")}`;
+    return hop.next.length || hop.note === `${protocol} ${prefix}` ? text : `${text}: ${hop.note}`;
   }
 
   function evidence(lines) {

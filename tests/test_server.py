@@ -22,7 +22,8 @@ async def test_every_tool_is_annotated_read_only(client: Client) -> None:
     async with client:
         tools = (await client.list_tools()).tools
     assert {tool.name for tool in tools} == {
-        "list_devices", "show", "lldp_neighbors", "mac_table", "arp_table", "routes", "topology", "ping", "ping_sweep",
+        "list_devices", "show", "lldp_neighbors", "mac_table", "arp_table", "routes", "topology", "forwarding_path",
+        "ping", "ping_sweep",
     }
     assert all(tool.annotations and tool.annotations.read_only_hint for tool in tools)
 
@@ -142,4 +143,34 @@ async def test_display_is_only_offered_to_a_client_that_can_draw(inventory: Inve
     assert view["emphasis"]["leaf2"] == "context"
     assert refused.is_error and "'leaf9'" in refused.content[0].text
     assert keyed.structured_content["highlight"] == ["leaf1", "leaf1:ethernet-1/49--spine1", "spine1"]
+
+
+@pytest.mark.anyio
+async def test_forwarding_path_follows_routes_until_the_packet_leaves_the_inventory(client: Client) -> None:
+    async with client:
+        result = await client.call_tool("forwarding_path", {"source": "198.51.100.11", "destination": "203.0.113.5"})
+        refused = await client.call_tool("forwarding_path", {"source": "nowhere", "destination": "203.0.113.5"})
+    path = result.structured_content
+    # leaf1's default route resolves through its /31 to ethernet-1/49, cabled to spine1, which NetGPT can't query.
+    assert (path["outcome"], path["nodes"]) == ("left_inventory", ["198.51.100.11", "leaf1", "spine1"])
+    assert path["hops"][1]["interfaces"] == ["ethernet-1/49.0"]
+    assert refused.is_error and "'nowhere'" in refused.content[0].text
+
+
+@pytest.mark.anyio
+async def test_display_traces_a_path_and_marks_where_it_is_lost(inventory: Inventory) -> None:
+    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True)) as client:
+        result = await client.call_tool(
+            "display", {"title": "Out of leaf1", "path": {"source": "198.51.100.11", "destination": "203.0.113.5"}}
+        )
+        # gemma4:e4b sometimes gives the two ends as a list.
+        listed = await client.call_tool("display", {"title": "Out of leaf1", "path": ["198.51.100.11", "203.0.113.5"]})
+        lopsided = await client.call_tool("display", {"title": "Hmm", "path": ["198.51.100.11"]})
+    view = result.structured_content
+    assert view["trouble"] == ["spine1"] and view["path"]["outcome"] == "left_inventory"
+    assert set(view["highlight"]) >= {"198.51.100.11", "leaf1", "spine1"}
+    assert view["notes"]["leaf1"] == "static 0.0.0.0/0"
+    assert "Forwarding path, left_inventory:" in result.content[0].text
+    assert listed.structured_content["path"] == view["path"]
+    assert lopsided.is_error and "path" in lopsided.content[0].text
 

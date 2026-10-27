@@ -18,12 +18,15 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `arp_table`      | ARP bindings across many devices.                                                       |
 | `routes`         | The IPv4 routing table of a network instance (VRF) across many devices.                 |
 | `topology`       | The network as one graph, merged from every device's LLDP and ARP tables, with the evidence for each link. |
+| `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
 | `ping_sweep`     | The addresses that answer ICMP in a network, pinged from the NetGPT host itself.        |
 
 The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call.
 
 `topology` reconciles each cable from both ends and flags a link only one end reports. It keeps the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
+
+`forwarding_path` walks the routing tables the way the devices do. At each hop it takes the longest matching route, resolves the route's next hop down to an interface (a static route's next hop is often just an address), and follows the cable on that interface to the next device. It reports where the path ends: delivered, or lost, with the reason (no route, a route that drops the packet, a loop, a next hop nothing answers ARP for, or a device it couldn't read). It sends nothing on the network.
 
 ## Safety model
 
@@ -103,6 +106,8 @@ Anyone who can load the page can query the network, so every request needs a tok
 #### The map
 
 The page also has a map, drawn by a tool only the page offers: `display`. When a picture helps, such as for the topology, where a host is attached, or the path between two points, the model calls `display`. It draws the whole network from the devices' own LLDP and ARP tables, and it chooses which parts to focus on and highlight. Focused nodes move to the middle, and the rest of the network stays on the map, dimmed and pushed aside. The model can't draw anything the devices didn't report, and every name it uses is checked against the graph first. Click a node or link to see the evidence for it, or drag one to move it. Each view stays in the conversation as a button that brings it back.
+
+Given a path (a source and a destination), `display` traces it through the routing tables and highlights it hop by hop, with the route each device used. Where a path is lost, the device that loses it turns red, with the reason.
 
 The layout is a force simulation ([d3-force](https://d3js.org/d3-force), included in the package): nodes repel each other and links act as springs. A view changes the forces, not the nodes, so moving from one view to the next glides the network into its new shape.
 
