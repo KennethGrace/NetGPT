@@ -14,19 +14,20 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `list_devices`   | The devices in the inventory, with platform, address, and role.                         |
 | `show`           | The text output of one read-only CLI command on one device.                             |
 | `lldp_neighbors` | LLDP adjacencies across many devices.                                                   |
+| `interfaces`     | Each logical interface's network instance, whether it routes or bridges, its addresses, and its state. |
 | `mac_table`      | Layer 2 forwarding entries across many devices.                                         |
 | `arp_table`      | ARP bindings across many devices.                                                       |
 | `routes`         | The IPv4 routing table of a network instance (VRF) across many devices.                 |
-| `topology`       | The network as one graph, merged from every device's LLDP and ARP tables, with the evidence for each link. |
+| `topology`       | The network as one graph at layer 2 or layer 3, merged from every device's tables, with the evidence for each link. |
 | `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
 | `ping_sweep`     | The addresses that answer ICMP in a network, pinged from the NetGPT host itself.        |
 
 The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call.
 
-`topology` reconciles each cable from both ends and flags a link only one end reports. It keeps the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
+`topology` draws the network at one of two layers. At layer 2 (the default) it is the cabling. Each cable is reconciled from both ends, and a link only one end reports is flagged. Each host hangs off the port it is plugged into: ARP says which port an address was heard on, and where a switch is in the way, the switch's MAC table says which of its ports the address is behind. If a switch has forgotten a MAC, the host is drawn behind the switch with no port, and the evidence says why. At layer 3 the graph is the routing in one network instance: routers, the networks their interfaces are on, and the hosts on those networks. Switches drop out, and a network between just two routers is drawn as a link between them. Both layers keep the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
 
-`forwarding_path` walks the routing tables the way the devices do. At each hop it takes the longest matching route, resolves the route's next hop down to an interface (a static route's next hop is often just an address), and follows the cable on that interface to the next device. It reports where the path ends: delivered, or lost, with the reason (no route, a route that drops the packet, a loop, a next hop nothing answers ARP for, or a device it couldn't read). It sends nothing on the network.
+`forwarding_path` walks the routing tables the way the devices do. At each hop it takes the longest matching route, resolves the route's next hop down to an interface (a static route's next hop is often just an address), and follows the cable on that interface to the next device, through any switches in the way. Between two hosts on the same network, no router is involved: the path goes straight across the switch. It reports where the path ends: delivered, or lost, with the reason (no route, a route that drops the packet, a loop, a next hop nothing answers ARP for, or a device it couldn't read). It sends nothing on the network.
 
 ## Safety model
 
@@ -48,11 +49,14 @@ pytest
 
 ### A lab to talk to
 
-[`lab/`](lab/) holds a [containerlab](https://containerlab.dev) topology: one Nokia SR Linux spine, two leaves, and a Linux host behind each leaf, with static routing across the fabric. It needs [containerlab](https://containerlab.dev/install/) and Docker:
+[`lab/`](lab/) holds a [containerlab](https://containerlab.dev) topology: one Nokia SR Linux spine and two leaves, with static routing across the fabric. A Linux host hangs off leaf1. Behind leaf2 is switch1, an SR Linux node that only bridges, with two hosts on its LAN. It needs [containerlab](https://containerlab.dev/install/) and Docker:
 
 ```bash
 sudo containerlab deploy -t lab/netgpt.clab.yml
+sudo containerlab deploy -t lab/netgpt.clab.yml --reconfigure   # after changing the topology
 ```
+
+A freshly deployed lab has empty ARP and MAC tables, so the hosts aren't on the map until something talks to them. Ask NetGPT to ping them from their leaves.
 
 Use Docker, not podman. Under podman, SR Linux 25.10.5 crashes during boot, and containerlab no longer tests its podman runtime. On RHEL, Docker CE can run alongside podman: remove only the `podman-docker` package (the `docker` alias for podman), not podman itself.
 
@@ -105,9 +109,9 @@ Anyone who can load the page can query the network, so every request needs a tok
 
 #### The map
 
-The page also has a map, drawn by a tool only the page offers: `display`. When a picture helps, such as for the topology, where a host is attached, or the path between two points, the model calls `display`. It draws the whole network from the devices' own LLDP and ARP tables, and it chooses which parts to focus on and highlight. Focused nodes move to the middle, and the rest of the network stays on the map, dimmed and pushed aside. The model can't draw anything the devices didn't report, and every name it uses is checked against the graph first. Click a node or link to see the evidence for it. Each view stays in the conversation as a button that brings it back.
+The page also has a map, drawn by a tool only the page offers: `display`. When a picture helps, such as for the topology, where a host is attached, or the path between two points, the model calls `display`. It draws the whole network from the devices' own tables, at layer 2 (cables, switches, and the port each host is on) or at layer 3 (routers and the networks between them), and it chooses which parts to focus on and highlight. Focused nodes move to the middle, and the rest of the network stays on the map, dimmed and pushed aside. The model can't draw anything the devices didn't report, and every name it uses is checked against the graph first. Click a node or link to see the evidence for it. Each view stays in the conversation as a button that brings it back.
 
-Given a path (a source and a destination), `display` traces it through the routing tables and highlights it hop by hop, with the route each device used. Where a path is lost, the device that loses it turns red, with the reason.
+Given a path (a source and a destination), `display` traces it through the routing tables and highlights it hop by hop, with the route each device used. At layer 2 the path runs through the switches, out the port each one bridges it to. At layer 3 it crosses the networks instead. Where a path is lost, the device that loses it turns red, with the reason.
 
 The layout is a force simulation ([d3-force](https://d3js.org/d3-force), included in the package): nodes repel each other and links act as springs. A view changes the forces, not the nodes, so moving from one view to the next glides the network into its new shape.
 

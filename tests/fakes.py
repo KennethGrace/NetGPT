@@ -10,7 +10,7 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 
@@ -18,7 +18,8 @@ from netgpt.guard import NOKIA_SRLINUX
 from netgpt.platforms import Platform, PlatformError
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms.srlinux import SRLinuxPlatform
-from netgpt.primitives import ArpEntry, DeviceInfo, LldpNeighbor, NextHop, Route
+from netgpt.primitives import ArpEntry, DeviceInfo, Interface, LldpNeighbor, MacEntry, NextHop, Route
+from netgpt.topology import Topology, build_topology
 
 FIXTURES = Path(__file__).parent / "fixtures" / "srlinux"
 
@@ -40,36 +41,125 @@ def replay(fixtures: dict[str, str]) -> tuple[httpx.MockTransport, list[str]]:
     return httpx.MockTransport(handler), requests
 
 
-# The containerlab lab, and the responses recorded from each of its devices.
+# The containerlab lab, and the responses recorded from each of its devices (by the
+# path each query asks for).
 LAB = [
     DeviceInfo(name="spine1", platform="nokia_srlinux", host="172.20.20.11", role="spine"),
     DeviceInfo(name="leaf1", platform="nokia_srlinux", host="172.20.20.21", role="leaf"),
     DeviceInfo(name="leaf2", platform="nokia_srlinux", host="172.20.20.22", role="leaf"),
+    DeviceInfo(name="switch1", platform="nokia_srlinux", host="172.20.20.41", role="access"),
 ]
-RECORDED = {
-    "spine1": {"/system/lldp": "lldp_spine1.json", "/interface": "arp_spine1.json", "/network-instance": "route_table_spine1.json"},
-    "leaf1": {"/system/lldp": "lldp.json", "/interface": "arp.json", "/network-instance": "route_table.json"},
-    "leaf2": {"/system/lldp": "lldp_leaf2.json", "/interface": "arp_leaf2.json", "/network-instance": "route_table_leaf2.json"},
+TABLES = {
+    "/system/lldp": "lldp.json",
+    "/interface[name=*]/subinterface[index=*]/ipv4/arp": "arp.json",
+    "/interface[name=*]/subinterface[index=*]/type": "interfaces.json",
+    "/network-instance[name=*]/bridge-table": "mac_table.json",
+    "/network-instance[name=default]/route-table": "route_table.json",
 }
+RECORDED = {device.name: {path: f"lab/{device.name}/{name}" for path, name in TABLES.items()} for device in LAB}
 
 
-async def recorded_lab() -> tuple[list[LldpNeighbor], list[ArpEntry], dict[str, list[Route]]]:
+class RecordedLab(NamedTuple):
+    """Every lab device's tables, as the SR Linux driver parses them."""
+
+    neighbors: list[LldpNeighbor]
+    arp: list[ArpEntry]
+    macs: list[MacEntry]
+    interfaces: list[Interface]
+    routes: dict[str, list[Route]]
+
+    def topology(self, is_management: Any, devices: list[DeviceInfo] = LAB) -> Topology:
+        return build_topology(devices, self.neighbors, self.arp, [], is_management, self.macs, self.interfaces)
+
+
+async def recorded_lab() -> RecordedLab:
     """
-    Every lab device's LLDP, ARP, and routing tables, parsed by the real SR Linux
-    driver from recorded responses. Needs NETGPT_TEST_PASSWORD set to anything.
+    Every lab device's LLDP, ARP, MAC, and routing tables and interfaces, parsed by
+    the real SR Linux driver from recorded responses. Needs NETGPT_TEST_PASSWORD set
+    to anything.
     """
     credentials = Credentials(username="admin", password_env="NETGPT_TEST_PASSWORD")
-    neighbors: list[LldpNeighbor] = []
-    bindings: list[ArpEntry] = []
-    routes: dict[str, list[Route]] = {}
+    lab = RecordedLab([], [], [], [], {})
     for info in LAB:
         transport, _ = replay(RECORDED[info.name])
         device = Device(name=info.name, host=info.host, platform=info.platform, credentials="lab")
         async with SRLinuxPlatform(device, credentials, transport=transport) as platform:
-            neighbors += await platform.lldp_neighbors()
-            bindings += await platform.arp_table()
-            routes[info.name] = await platform.routes("default")
-    return neighbors, bindings, routes
+            lab.neighbors.extend(await platform.lldp_neighbors())
+            lab.arp.extend(await platform.arp_table())
+            lab.macs.extend(await platform.mac_table())
+            lab.interfaces.extend(await platform.interfaces())
+            lab.routes[info.name] = await platform.routes("default")
+    return lab
+
+
+class SwitchedNetwork:
+    """
+    A small routed network with a layer 2 switch in it, as the devices would report it:
+
+        r0 (e1/1) ── (e1/49) r1 (e1/1) ── (e1/1) sw1 (e1/2) ── 10.1.0.2
+                                                     (e1/3) ── 10.1.0.3
+
+    r0 and r1 share 10.0.0.0/31; r1 routes 10.1.0.0/24, which sw1 bridges (in 'lan')
+    out to the two hosts. Hosts don't speak LLDP, so only ARP on r1 and sw1's MAC
+    table say where they are.
+    """
+
+    HOST2, HOST3 = "10.1.0.2", "10.1.0.3"
+    MAC2, MAC3, R1_MAC = "AA:00:00:00:00:02", "AA:00:00:00:00:03", "1A:00:00:00:01:01"
+
+    def __init__(self) -> None:
+        self.devices = [
+            DeviceInfo(name="r0", platform="nokia_srlinux", host="172.20.20.10", role="spine"),
+            DeviceInfo(name="r1", platform="nokia_srlinux", host="172.20.20.20", role="leaf"),
+            DeviceInfo(name="sw1", platform="nokia_srlinux", host="172.20.20.40", role="access"),
+        ]
+        self.neighbors = [
+            LldpNeighbor(device="r0", interface="ethernet-1/1", neighbor="r1", neighbor_interface="ethernet-1/49"),
+            LldpNeighbor(device="r1", interface="ethernet-1/49", neighbor="r0", neighbor_interface="ethernet-1/1"),
+            LldpNeighbor(device="r1", interface="ethernet-1/1", neighbor="sw1", neighbor_interface="ethernet-1/1"),
+            LldpNeighbor(device="sw1", interface="ethernet-1/1", neighbor="r1", neighbor_interface="ethernet-1/1"),
+        ]
+        self.arp = [
+            ArpEntry(device="r0", interface="ethernet-1/1.0", ip_address="10.0.0.1", mac="1A:00:00:00:01:49"),
+            ArpEntry(device="r1", interface="ethernet-1/49.0", ip_address="10.0.0.0", mac="1A:00:00:00:00:01"),
+            ArpEntry(device="r1", interface="ethernet-1/1.0", ip_address=self.HOST2, mac=self.MAC2),
+            ArpEntry(device="r1", interface="ethernet-1/1.0", ip_address=self.HOST3, mac=self.MAC3),
+        ]
+        self.macs = [
+            MacEntry(device="sw1", network_instance="lan", mac=self.R1_MAC, interface="ethernet-1/1.0", entry_type="learnt"),
+            MacEntry(device="sw1", network_instance="lan", mac=self.MAC2, interface="ethernet-1/2.0", entry_type="learnt"),
+            MacEntry(device="sw1", network_instance="lan", mac=self.MAC3, interface="ethernet-1/3.0", entry_type="learnt"),
+        ]
+        self.interfaces = [
+            Interface(device="r0", name="ethernet-1/1.0", network_instance="default", mode="routed", addresses=["10.0.0.0/31"]),
+            Interface(device="r1", name="ethernet-1/49.0", network_instance="default", mode="routed", addresses=["10.0.0.1/31"]),
+            Interface(device="r1", name="ethernet-1/1.0", network_instance="default", mode="routed", addresses=["10.1.0.1/24"]),
+            *(
+                Interface(device="sw1", name=f"ethernet-1/{port}.0", network_instance="lan", mode="bridged")
+                for port in (1, 2, 3)
+            ),
+        ]
+
+        def route(device: str, prefix: str, protocol: str, hop: NextHop) -> Route:
+            return Route(device=device, network_instance="default", prefix=prefix, protocol=protocol, next_hops=[hop])
+
+        self.routes = {
+            "r0": [
+                route("r0", "10.0.0.0/31", "local", NextHop(interface="ethernet-1/1.0")),
+                route("r0", "10.0.0.0/32", "host", NextHop(action="receive")),
+                route("r0", "10.1.0.0/24", "static", NextHop(address="10.0.0.1")),
+            ],
+            "r1": [
+                route("r1", "10.0.0.0/31", "local", NextHop(interface="ethernet-1/49.0")),
+                route("r1", "10.0.0.1/32", "host", NextHop(action="receive")),
+                route("r1", "10.1.0.0/24", "local", NextHop(interface="ethernet-1/1.0")),
+                route("r1", "10.1.0.1/32", "host", NextHop(action="receive")),
+                route("r1", "0.0.0.0/0", "static", NextHop(address="10.0.0.0")),
+            ],
+        }
+
+    def topology(self, is_management: Any) -> Topology:
+        return build_topology(self.devices, self.neighbors, self.arp, [], is_management, self.macs, self.interfaces)
 
 
 class FakePlatform(Platform):

@@ -61,7 +61,7 @@ async def test_tool_results_go_back_to_the_model(chat_with: Any) -> None:
 
     first = ollama.requests[0]
     assert first["messages"][0]["role"] == "system" and "list_devices" in first["messages"][0]["content"]
-    assert len(first["tools"]) == 10 and first["options"] == {"num_ctx": 8192}
+    assert len(first["tools"]) == 11 and first["options"] == {"num_ctx": 8192}
     assert first["think"] is False and first["stream"] is True
     tool_message = ollama.messages(1)[-1]
     assert (tool_message["role"], tool_message["tool_name"], tool_message["tool_call_id"]) == ("tool", "lldp_neighbors", "call_1")

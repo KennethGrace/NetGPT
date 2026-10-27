@@ -244,12 +244,14 @@ pre code { background: none; padding: 0; }
 #map-graph .link.selected .wire { stroke-width: 5; }
 #map-graph .port { font-size: 10px; fill: var(--muted); text-anchor: middle; dominant-baseline: middle; visibility: hidden; }
 #map-graph .link.focus:not(.management) .port { visibility: visible; }
+#map-graph .port.network.beside { text-anchor: start; }
 #map-graph .note { font-size: 12px; fill: var(--accent); text-anchor: middle; font-style: italic; }
 
 #map-graph .node { cursor: grab; }
 #map-graph .body { fill: var(--surface); stroke: var(--fg); stroke-width: 2; }
 #map-graph .kind-host .body { fill: var(--muted); stroke: var(--surface); }
 #map-graph .kind-segment .body { stroke: var(--muted); }
+#map-graph .kind-subnet .body { stroke: var(--muted); }
 #map-graph .kind-neighbor .body { stroke-dasharray: 4 3; }
 #map-graph .node.lit .body { stroke: var(--accent); stroke-width: 3; fill: var(--lit-bg); }
 #map-graph .kind-host.lit .body { fill: var(--accent); }

@@ -65,6 +65,22 @@ class LldpNeighbor(BaseModel):
     neighbor_chassis_id: str | None = None
 
 
+class Interface(BaseModel):
+    """
+    One logical interface (a subinterface on most platforms): the network instance it
+    belongs to, whether it routes or bridges, and its addresses.
+    """
+
+    device: str
+    name: str = Field(description="For example ethernet-1/1.0 or GigabitEthernet0/1.")
+    network_instance: str | None = Field(None, description="The VRF, or the layer 2 network instance (bridge), it belongs to.")
+    mode: Literal["routed", "bridged"] = Field(
+        description="routed: it has addresses and routes packets. bridged: it switches frames in a layer 2 network instance."
+    )
+    addresses: list[str] = Field(default_factory=list, description="IPv4 addresses with prefix length, such as 192.168.12.1/24.")
+    oper_state: str | None = Field(None, description="For example up or down.")
+
+
 # Ethernet: layer 2 forwarding.
 
 

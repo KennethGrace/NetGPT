@@ -30,19 +30,21 @@ from netgpt import __version__
 from netgpt.guard import GuardError
 from netgpt.inventory import Inventory, InventoryError
 from netgpt.platforms import PLATFORMS, Platform, PlatformError
+from netgpt.platforms.base import UnsupportedError
 from netgpt.primitives import (
     ArpEntry,
     Collection,
     CommandOutput,
     DeviceError,
     DeviceInfo,
+    Interface,
     LldpNeighbor,
     MacEntry,
     PingResult,
     Route,
 )
 from netgpt.forwarding import ForwardingPath, TraceError, trace_path
-from netgpt.topology import PlaneChoice, Topology, build_topology, port_of
+from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_topology, port_of
 from netgpt.views import View, ViewError, describe, make_view
 
 logger = logging.getLogger("netgpt")
@@ -50,12 +52,12 @@ logger = logging.getLogger("netgpt")
 INSTRUCTIONS = """\
 NetGPT gives read-only access to the network devices in its inventory.
 Call list_devices first: every other tool takes device names from that list and cannot reach anything else.
-lldp_neighbors, arp_table, mac_table, and routes query many devices at once and return typed records,
-with per-device errors alongside the results. topology merges every device's LLDP and ARP tables into
-one graph of devices, hosts, and the links between them. forwarding_path follows the routing tables
-hop by hop to show where packets from a source to a destination go, and where they are lost. Use show
-for anything the typed tools don't cover; it accepts only read-only commands and says why when it
-refuses one.
+lldp_neighbors, interfaces, arp_table, mac_table, and routes query many devices at once and return typed
+records, with per-device errors alongside the results. topology merges them into one graph: at layer 2
+(the default) the cables, switches, and the port each host is plugged into; at layer 3 the routers and
+the networks between them. forwarding_path follows the routing tables hop by hop to show where packets
+from a source to a destination go, and where they are lost. Use show for anything the typed tools don't
+cover; it accepts only read-only commands and says why when it refuses one.
 """
 
 DISPLAY_INSTRUCTIONS = """\
@@ -63,8 +65,10 @@ The user sees a map of the network beside the chat. Call display whenever a pict
 topology, where a host is attached, the path between two points, where a problem is. Focus on the
 part of the network the answer is about and highlight the answer itself; the rest of the network
 stays on the map, dimmed and pushed aside. For the way traffic goes between two points, give display a
-path (source and destination) and the server traces it through the routing tables. Refer to the map in
-your answer rather than describing every link in words.
+path (source and destination) and the server traces it through the routing tables. layer 2 (the
+default) draws the cabling: switches, and which port each host is plugged into. layer 3 draws the
+routers and the networks between them, without the switches. Refer to the map in your answer rather
+than describing every link in words.
 """
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
@@ -158,25 +162,50 @@ def build_server(
         pattern = platforms.get(inventory.get(device).platform, Platform).management_interfaces
         return pattern is not None and pattern.match(port_of(interface)) is not None
 
-    async def gather_topology() -> Topology:
-        (neighbors, lldp_errors), (bindings, arp_errors) = await asyncio.gather(
+    def optional(query: Callable[[Platform], Awaitable[list[PrimitiveT]]]) -> Callable[[Platform], Awaitable[list[PrimitiveT]]]:
+        """A query the topology can do without, on a platform that doesn't support it yet."""
+
+        async def tolerant(platform: Platform) -> list[PrimitiveT]:
+            try:
+                return await query(platform)
+            except UnsupportedError:
+                return []
+
+        return tolerant
+
+    async def gather_topology() -> tuple[Topology, list[Interface]]:
+        """The layer 2 graph, and every device's interfaces, which layer 3 and the path walk need too."""
+        (neighbors, lldp_errors), (bindings, arp_errors), (macs, mac_errors), (found, interface_errors) = await asyncio.gather(
             collect(None, lambda platform: platform.lldp_neighbors()),
             collect(None, lambda platform: platform.arp_table()),
+            collect(None, optional(lambda platform: platform.mac_table())),
+            collect(None, optional(lambda platform: platform.interfaces())),
         )
-        # A device that can't be reached fails both queries the same way; report it once.
-        errors = list({(error.device, error.error): error for error in lldp_errors + arp_errors}.values())
-        return build_topology(list_devices(), neighbors, bindings, errors, is_management)
+        # A device that can't be reached fails every query the same way; report it once.
+        failures = lldp_errors + arp_errors + mac_errors + interface_errors
+        errors = list({(error.device, error.error): error for error in failures}.values())
+        return build_topology(list_devices(), neighbors, bindings, errors, is_management, macs, found), found
 
-    async def trace(source: str, destination: str, network_instance: str) -> tuple[Topology, ForwardingPath]:
-        """Trace a path, returning the topology it was traced on as well."""
-        topology, (routes, failures) = await asyncio.gather(
+    def at_layer(topology: Topology, found: list[Interface], layer: Layer, network_instance: str) -> Topology:
+        return topology if layer == "l2" else build_l3(list_devices(), topology, found, is_management, network_instance)
+
+    async def trace(
+        source: str, destination: str, network_instance: str
+    ) -> tuple[Topology, list[Interface], ForwardingPath]:
+        """Trace a path, returning the topology it was traced on, and the interfaces, as well."""
+        (topology, found), (routes, failures) = await asyncio.gather(
             gather_topology(), collect(None, lambda platform: platform.routes(network_instance))
         )
         tables: dict[str, list[Route]] = {}
         for route in routes:
             tables.setdefault(route.device, []).append(route)
-        unreadable = {failure.device: failure.error for failure in failures}
-        return topology, trace_path(topology, tables, unreadable, source, destination, network_instance)
+        # A switch with no interface in the network instance has no routing table there to read.
+        answered = {interface.device for interface in found}
+        present = {interface.device for interface in found if interface.network_instance == network_instance}
+        unreadable = {
+            failure.device: failure.error for failure in failures if failure.device in present or failure.device not in answered
+        }
+        return topology, found, trace_path(topology, tables, unreadable, source, destination, network_instance)
 
     @server.tool(annotations=READ_ONLY)
     def list_devices() -> list[DeviceInfo]:
@@ -208,6 +237,15 @@ def build_server(
         return Collection[LldpNeighbor](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
+    async def interfaces(devices: DeviceNames = None) -> Collection[Interface]:
+        """
+        Return each device's logical interfaces: the network instance (VRF or bridge) each is in,
+        whether it routes or bridges, its IPv4 addresses, and whether it is up. Omit devices to query all of them.
+        """
+        items, errors = await collect(devices, lambda platform: platform.interfaces())
+        return Collection[Interface](items=items, errors=errors)
+
+    @server.tool(annotations=READ_ONLY)
     async def mac_table(devices: DeviceNames = None) -> Collection[MacEntry]:
         """Return layer 2 forwarding (MAC table) entries. Omit devices to query all of them."""
         items, errors = await collect(devices, lambda platform: platform.mac_table())
@@ -226,14 +264,17 @@ def build_server(
         return Collection[Route](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
-    async def topology(plane: PlaneChoice = "data") -> Topology:
+    async def topology(plane: PlaneChoice = "data", layer: Layer = "l2", network_instance: str = "default") -> Topology:
         """
-        Return the network as a graph merged from every device's LLDP and ARP tables:
-        devices, LLDP neighbors outside the inventory, hosts found by ARP, and shared
-        segments, with the links between them and the evidence for each. The data
-        plane is the default; the management network rarely matters to a question.
+        Return the network as a graph merged from every device's LLDP, ARP, and MAC tables and
+        interfaces, with the evidence for every node and link. layer l2 (the default) is the
+        cabling: devices, LLDP neighbors outside the inventory, shared segments, and hosts on the
+        switch port their MAC is behind. layer l3 is the routing in one network instance: routers,
+        the networks (subnets) they are on, and the hosts on those networks; switches drop out, and
+        a network between just two routers is a link between them. The data plane is the default;
+        the management network rarely matters to a question.
         """
-        return (await gather_topology()).on_plane(plane)
+        return at_layer(*await gather_topology(), layer, network_instance).on_plane(plane)
 
     @server.tool(annotations=READ_ONLY)
     async def forwarding_path(source: str, destination: str, network_instance: str = "default") -> ForwardingPath:
@@ -246,7 +287,7 @@ def build_server(
         Nothing is sent on the network: the path is read from the devices' state.
         """
         try:
-            return (await trace(source, destination, network_instance))[1]
+            return (await trace(source, destination, network_instance))[2]
         except TraceError as error:
             raise ToolError(str(error)) from error
 
@@ -260,6 +301,8 @@ def build_server(
             path: Annotated[PathEnds | None, BeforeValidator(as_path_ends)] = None,
             notes: dict[str, str] | None = None,
             plane: PlaneChoice = "data",
+            layer: Layer = "l2",
+            network_instance: str = "default",
         ) -> Annotated[CallToolResult, View]:
             """
             Draw the network on the user's map. The whole network is always drawn: nodes in
@@ -267,16 +310,19 @@ def build_server(
             aside. Omit focus to show the whole network. highlight marks the answer itself.
             path takes a source and a destination: the server traces the way packets go
             between them through the routing tables and highlights it hop by hop, with
-            where it is lost if it is. Name nodes by device name or host address, and links
+            where it is lost if it is. layer l2 (the default) draws the cabling and switches;
+            l3 draws routers and the networks (subnets) between them, in network_instance.
+            Name nodes by device name, host address, or network (192.168.12.0/24), and links
             by their two nodes (leaf1--spine1) or by one end (leaf1:ethernet-1/49). notes
             attach a few words to a node or link, keyed by its name.
             """
             try:
                 if path is not None:
-                    topology, traced = await trace(path.source, path.destination, "default")
+                    topology, found, traced = await trace(path.source, path.destination, network_instance)
                 else:
-                    topology, traced = await gather_topology(), None
-                view = make_view(topology, title, focus or [], highlight or [], notes or {}, plane, traced)
+                    (topology, found), traced = await gather_topology(), None
+                graph = at_layer(topology, found, layer, network_instance)
+                view = make_view(graph, title, focus or [], highlight or [], notes or {}, plane, traced)
             except (TraceError, ViewError) as error:
                 raise ToolError(str(error)) from error
             # The model reads a summary; the page draws the view from the structured content.

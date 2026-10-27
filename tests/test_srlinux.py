@@ -21,9 +21,9 @@ def lab_password(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NETGPT_TEST_PASSWORD", "not-used-by-the-mock")
 
 
-def leaf1(fixtures: dict[str, str]) -> tuple[SRLinuxPlatform, list[str]]:
+def leaf1(fixtures: dict[str, str], name: str = "leaf1") -> tuple[SRLinuxPlatform, list[str]]:
     transport, requests = replay(fixtures)
-    device = Device(name="leaf1", host="172.20.20.21", platform="nokia_srlinux", credentials="lab")
+    device = Device(name=name, host="172.20.20.21", platform="nokia_srlinux", credentials="lab")
     credentials = Credentials(username="admin", password_env="NETGPT_TEST_PASSWORD")
     return SRLinuxPlatform(device, credentials, transport=transport), requests
 
@@ -51,6 +51,34 @@ async def test_mac_table_without_bridging_is_empty() -> None:
     platform, _ = leaf1({"/network-instance": "mac_table_empty.json"})
     async with platform:
         assert await platform.mac_table() == []
+
+
+@pytest.mark.anyio
+async def test_a_switch_bridges_its_ports_and_learns_where_each_mac_is() -> None:
+    # Recorded from switch1, which bridges ethernet-1/1 to 1/3 in the mac-vrf 'lan'.
+    platform, _ = leaf1({"/interface": "lab/switch1/interfaces.json", "/network-instance": "lab/switch1/mac_table.json"}, "switch1")
+    async with platform:
+        interfaces = await platform.interfaces()
+        macs = await platform.mac_table()
+    assert [(i.name, i.network_instance, i.mode, i.addresses) for i in interfaces] == [
+        ("ethernet-1/1.0", "lan", "bridged", []),
+        ("ethernet-1/2.0", "lan", "bridged", []),
+        ("ethernet-1/3.0", "lan", "bridged", []),
+        ("mgmt0.0", "mgmt", "routed", ["172.20.20.41/24"]),
+    ]
+    assert ("lan", "AA:C1:AB:FE:3F:C0", "ethernet-1/3.0", "learnt") in {
+        (m.network_instance, m.mac, m.interface, m.entry_type) for m in macs
+    }
+
+
+@pytest.mark.anyio
+async def test_a_router_routes_its_ports() -> None:
+    platform, requests = leaf1({"/interface": "lab/leaf1/interfaces.json"})
+    async with platform:
+        interfaces = {i.name: i for i in await platform.interfaces()}
+    assert (interfaces["ethernet-1/49.0"].mode, interfaces["ethernet-1/49.0"].addresses) == ("routed", ["192.168.0.1/31"])
+    assert (interfaces["ethernet-1/1.0"].network_instance, interfaces["ethernet-1/1.0"].oper_state) == ("default", "up")
+    assert len(requests) == 1  # one call, five narrow paths
 
 
 @pytest.mark.anyio

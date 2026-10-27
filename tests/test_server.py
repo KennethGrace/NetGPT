@@ -22,8 +22,8 @@ async def test_every_tool_is_annotated_read_only(client: Client) -> None:
     async with client:
         tools = (await client.list_tools()).tools
     assert {tool.name for tool in tools} == {
-        "list_devices", "show", "lldp_neighbors", "mac_table", "arp_table", "routes", "topology", "forwarding_path",
-        "ping", "ping_sweep",
+        "list_devices", "show", "lldp_neighbors", "interfaces", "mac_table", "arp_table", "routes", "topology",
+        "forwarding_path", "ping", "ping_sweep",
     }
     assert all(tool.annotations and tool.annotations.read_only_hint for tool in tools)
 

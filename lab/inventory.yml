@@ -16,6 +16,7 @@ devices:
   - {name: spine1, host: 172.20.20.11, platform: nokia_srlinux, credentials: srlinux-lab, role: spine, tls_ca: clab-netgpt/.tls/ca/ca.pem}
   - {name: leaf1,  host: 172.20.20.21, platform: nokia_srlinux, credentials: srlinux-lab, role: leaf,  tls_ca: clab-netgpt/.tls/ca/ca.pem}
   - {name: leaf2,  host: 172.20.20.22, platform: nokia_srlinux, credentials: srlinux-lab, role: leaf,  tls_ca: clab-netgpt/.tls/ca/ca.pem}
+  - {name: switch1, host: 172.20.20.41, platform: nokia_srlinux, credentials: srlinux-lab, role: access, tls_ca: clab-netgpt/.tls/ca/ca.pem}
 
 # The NetGPT host may ping sweep the lab's management network.
 sweep_networks:

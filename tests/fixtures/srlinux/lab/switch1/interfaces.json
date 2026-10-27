@@ -1,0 +1,142 @@
+{
+ "result": [
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "subinterface": [
+      {
+       "index": 0,
+       "type": "srl_nokia-interfaces:bridged"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/2",
+     "subinterface": [
+      {
+       "index": 0,
+       "type": "srl_nokia-interfaces:bridged"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/3",
+     "subinterface": [
+      {
+       "index": 0,
+       "type": "srl_nokia-interfaces:bridged"
+      }
+     ]
+    },
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/2",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/3",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    },
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "address": [
+         {
+          "ip-prefix": "172.20.20.41/24"
+         }
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "srl_nokia-network-instance:network-instance": [
+    {
+     "name": "lan",
+     "type": "srl_nokia-network-instance:mac-vrf"
+    },
+    {
+     "name": "mgmt",
+     "type": "srl_nokia-network-instance:ip-vrf"
+    }
+   ]
+  },
+  {
+   "srl_nokia-network-instance:network-instance": [
+    {
+     "name": "lan",
+     "interface": [
+      {
+       "name": "ethernet-1/1.0"
+      },
+      {
+       "name": "ethernet-1/2.0"
+      },
+      {
+       "name": "ethernet-1/3.0"
+      }
+     ]
+    },
+    {
+     "name": "mgmt",
+     "interface": [
+      {
+       "name": "mgmt0.0"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

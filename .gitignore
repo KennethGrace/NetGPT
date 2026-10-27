@@ -35,3 +35,6 @@ certs
 
 # containerlab lab directories (generated on deploy, contain node TLS keys)
 lab/clab-*/
+
+# Local lab images and other files that stay on this machine
+.local/

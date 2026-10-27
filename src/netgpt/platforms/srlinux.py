@@ -16,11 +16,20 @@ import httpx
 from netgpt.guard import NOKIA_SRLINUX
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms.base import Platform, PlatformError
-from netgpt.primitives import ArpEntry, LldpNeighbor, MacEntry, NextHop, PingResult, Route
+from netgpt.primitives import ArpEntry, Interface, LldpNeighbor, MacEntry, NextHop, PingResult, Route
 
 NETWORK_INSTANCE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 PING_COUNTS = re.compile(r"(\d+) packets transmitted, (\d+) received")
 PING_RTT = re.compile(r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/")
+
+# Each subinterface's type, state, and addresses, and which network instance (and kind of instance) it is in.
+INTERFACE_PATHS = [
+    "/interface[name=*]/subinterface[index=*]/type",
+    "/interface[name=*]/subinterface[index=*]/oper-state",
+    "/interface[name=*]/subinterface[index=*]/ipv4/address[ip-prefix=*]/ip-prefix",
+    "/network-instance[name=*]/type",
+    "/network-instance[name=*]/interface[name=*]/name",
+]
 
 # What SR Linux's next-hop types do with a packet; any other type forwards it.
 NEXT_HOP_ACTIONS = {"extract": "receive", "broadcast": "receive", "blackhole": "drop", "drop": "drop", "reject": "drop"}
@@ -117,6 +126,11 @@ class SRLinuxPlatform(Platform):
         result = await self._rpc("get", {"commands": [{"path": path, "datastore": "state"}]})
         return strip_module_prefixes(result[0]) if result else {}
 
+    async def _get_states(self, paths: list[str]) -> list[dict[str, Any]]:
+        """Fetch several paths from the state datastore in one call, with module prefixes removed."""
+        result = await self._rpc("get", {"commands": [{"path": path, "datastore": "state"} for path in paths]})
+        return [strip_module_prefixes(item) for item in result]
+
     async def _run_checked_cli(self, command: str) -> str:
         result = await self._rpc("cli", {"commands": [command], "output-format": "text"})
         return "".join(str(item) for item in result)
@@ -149,6 +163,46 @@ class SRLinuxPlatform(Platform):
             for subinterface in as_list(interface.get("subinterface"))
             for neighbor in as_list(subinterface.get("ipv4", {}).get("arp", {}).get("neighbor"))
         ]
+
+    async def interfaces(self) -> list[Interface]:
+        # Narrow paths rather than whole subinterfaces, which carry ARP tables and counters.
+        types, states, addresses, instance_types, members = await self._get_states(INTERFACE_PATHS)
+
+        def by_subinterface(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+            return {
+                f"{interface['name']}.{subinterface['index']}": subinterface
+                for interface in as_list(state.get("interface"))
+                for subinterface in as_list(interface.get("subinterface"))
+            }
+
+        kinds = {
+            instance["name"]: str(instance.get("type", "")).split(":")[-1]
+            for instance in as_list(instance_types.get("network-instance"))
+        }
+        instance_of = {
+            member["name"]: instance["name"]
+            for instance in as_list(members.get("network-instance"))
+            for member in as_list(instance.get("interface"))
+        }
+        modes, operational, prefixes = by_subinterface(types), by_subinterface(states), by_subinterface(addresses)
+        found = []
+        for name in modes | operational | prefixes:
+            instance = instance_of.get(name)
+            declared = str(modes.get(name, {}).get("type", "")).split(":")[-1]
+            bridged = declared == "bridged" or (not declared and kinds.get(instance or "") == "mac-vrf")
+            found.append(
+                Interface(
+                    device=self.device.name,
+                    name=name,
+                    network_instance=instance,
+                    mode="bridged" if bridged else "routed",
+                    addresses=[
+                        address["ip-prefix"] for address in as_list(prefixes.get(name, {}).get("ipv4", {}).get("address"))
+                    ],
+                    oper_state=operational.get(name, {}).get("oper-state"),
+                )
+            )
+        return found
 
     async def mac_table(self) -> list[MacEntry]:
         state = await self._get_state("/network-instance[name=*]/bridge-table/mac-table/mac")

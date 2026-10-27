@@ -2,10 +2,11 @@
 
 // The network map: draws the views the model makes with the display tool.
 //
-// A view is the network graph plus the model's choices. Every node and link is in
-// focus, near the focus, or context, and some are highlighted. The layout is a
-// force simulation (d3-force): nodes push each other apart like bubbles and links
-// pull like springs. The view sets the forces. Focus is pulled to the middle in
+// A view is the network graph, at layer 2 (cables and switches) or layer 3
+// (routers, and the networks between them, drawn as pills), plus the model's
+// choices. Every node and link is in focus, near the focus, or context, and some
+// are highlighted. The layout is a force simulation (d3-force): nodes push each
+// other apart like bubbles and links pull like springs. The view sets the forces. Focus is pulled to the middle in
 // tiers (spines above leaves above hosts), near nodes ring it, and context is
 // pushed out to the edge and dimmed. Showing another view changes the forces, not
 // the nodes, so the network glides into its new shape and every node stays the
@@ -32,11 +33,13 @@ const netmap = (() => {
     neighbor: { focus: 16, near: 12, context: 9 },
     host: { focus: 10, near: 8, context: 6 },
     segment: { focus: 9, near: 8, context: 6 },
+    subnet: { focus: 12, near: 10, context: 7 },
   };
   const TIERS = {
     core: 0, "super-spine": 0, superspine: 0,
     spine: 1, aggregation: 1, distribution: 1, border: 1,
-    leaf: 2, access: 2, edge: 2, tor: 2,
+    leaf: 2, edge: 2, tor: 2,
+    access: 3,
   };
   const TIER_GAP = 120;
   const PULL = { focus: 0.14, near: 0.03, context: 0 }; // toward the middle, in tiers
@@ -105,30 +108,52 @@ const netmap = (() => {
   const short = (name) => SHORT.reduce((text, [pattern, abbreviation]) => text.replace(pattern, abbreviation), name);
 
   function tiers(view) {
-    // Devices by role. Anything else sits a tier below what it hangs off, except a
-    // management segment, which goes above everything: it is out of band.
+    // Devices in rows by role, with no empty rows for roles the view doesn't have.
+    // Anything else sits a row below what it hangs off, except a management segment,
+    // which goes above everything (it is out of band), and a network between routers
+    // in two rows, which goes between them.
     const tier = new Map();
-    const kinds = { device: 0, segment: 1, neighbor: 2, host: 3 };
+    const kinds = { device: 0, segment: 1, subnet: 2, neighbor: 3, host: 4 };
     const ordered = [...view.nodes].sort((a, b) => kinds[a.kind] - kinds[b.kind]);
+    const role = (node) => TIERS[(node.role || "").toLowerCase()] ?? 1.5;
+    const rows = [...new Set(ordered.filter((node) => node.kind === "device").map(role))].sort((a, b) => a - b);
     for (const node of ordered) {
       if (node.kind === "device") {
-        tier.set(node.id, TIERS[(node.role || "").toLowerCase()] ?? 1.5);
+        tier.set(node.id, rows.indexOf(role(node)));
         continue;
       }
       const attached = view.links
         .flatMap((link) => (link.a.node === node.id ? [link.b.node] : link.b.node === node.id ? [link.a.node] : []))
         .map((id) => tier.get(id))
         .filter((value) => value !== undefined);
+      const [low, high] = [Math.min(...attached), Math.max(...attached)];
       if (node.kind === "segment" && node.plane === "management") tier.set(node.id, Math.min(0, ...attached) - 1);
-      else tier.set(node.id, attached.length ? Math.max(...attached) + 1 : 3);
+      else if (node.kind === "subnet" && high > low) tier.set(node.id, (low + high) / 2);
+      else tier.set(node.id, attached.length ? high + 1 : 3);
     }
     return tier;
+  }
+
+  // How far a node's body reaches to the side: a network is drawn wider than it is tall.
+  const reach = (node) => (node.data.kind === "subnet" ? node.radius * 1.6 : node.radius);
+
+  function endLabel(end) {
+    // At layer 3 an end is its address, just the host part where the network is a /24 or smaller.
+    if (end.address) {
+      const [address, length] = end.address.split("/");
+      return Number(length) >= 24 ? `.${address.split(".").pop()}` : address;
+    }
+    return end.interface ? short(end.interface) : "";
   }
 
   function nodeShape(data) {
     const group = shape("g", { class: `node kind-${data.kind}` });
     group.dataset.id = data.id;
-    group.append(data.kind === "segment" ? shape("rect", { class: "body", transform: "rotate(45)" }) : shape("circle", { class: "body" }));
+    const body = {
+      segment: () => shape("rect", { class: "body", transform: "rotate(45)" }),
+      subnet: () => shape("rect", { class: "body" }),
+    }[data.kind];
+    group.append(body ? body() : shape("circle", { class: "body" }));
     if (data.kind === "device" && data.role) group.append(shape("text", { class: "glyph", dy: "0.35em" }, data.role[0].toUpperCase()));
     group.append(shape("text", { class: "label" }, data.label), shape("text", { class: "note" }), shape("circle", { class: "pin", r: 4 }));
     nodeLayer.append(group);
@@ -141,8 +166,9 @@ const netmap = (() => {
     group.append(
       shape("line", { class: "hit" }),
       shape("line", { class: "wire" }),
-      shape("text", { class: "port" }, data.a.interface ? short(data.a.interface) : ""),
-      shape("text", { class: "port" }, data.b.interface ? short(data.b.interface) : ""),
+      shape("text", { class: "port" }, endLabel(data.a)),
+      shape("text", { class: "port" }, endLabel(data.b)),
+      shape("text", { class: "port network" }, data.subnet || ""),
       shape("text", { class: "note" }),
     );
     linkLayer.append(group);
@@ -168,7 +194,8 @@ const netmap = (() => {
     selected = null;
     document.body.classList.add("map-open");
     panel.hidden = false;
-    heading.textContent = { data: view.title, management: `${view.title} · management plane`, all: `${view.title} · all planes` }[view.plane];
+    const planes = { data: "", management: " · management plane", all: " · all planes" }[view.plane];
+    heading.textContent = `${view.title}${planes}${view.layer === "l3" ? " · layer 3" : ""}`;
 
     const tier = tiers(view);
     const lit = new Set(view.highlight);
@@ -230,7 +257,7 @@ const netmap = (() => {
       .nodes([...nodes.values()])
       .force("link", d3.forceLink(links).id((node) => node.id).distance((link) => LENGTH[link.emphasis]).strength((link) => SPRING[link.emphasis]))
       .force("charge", d3.forceManyBody().strength((node) => CHARGE[node.emphasis]).distanceMax(600))
-      .force("collide", d3.forceCollide((node) => node.radius + 22))
+      .force("collide", d3.forceCollide((node) => reach(node) + 22))
       .force("x", d3.forceX(0).strength((node) => PULL[node.emphasis] / 2))
       .force("y", d3.forceY((node) => node.tierY).strength((node) => PULL[node.emphasis]))
       .force("ring", d3.forceRadial((node) => (node.emphasis === "near" ? core + 60 : core + 190)).strength((node) => RING[node.emphasis]))
@@ -251,7 +278,7 @@ const netmap = (() => {
     for (const left of shown) {
       for (const right of shown) {
         if (left === right || right.x < left.x || Math.abs(right.y - left.y) > 32) continue;
-        const room = left.radius + 12 + textWidth(left) + right.radius;
+        const room = reach(left) + 12 + textWidth(left) + reach(right);
         const gap = right.x - left.x;
         if (gap < room) {
           const push = (room - gap) * alpha * 0.3;
@@ -292,21 +319,22 @@ const netmap = (() => {
           .join(" "),
       );
       const pin = element.querySelector(".pin");
-      pin.setAttribute("cx", (-node.radius * 0.75).toFixed(1));
+      pin.setAttribute("cx", (-reach(node) * 0.75).toFixed(1));
       pin.setAttribute("cy", (-node.radius * 0.75).toFixed(1));
       const body = element.querySelector(".body");
-      if (data.kind === "segment") {
-        const side = node.radius * 1.5;
-        for (const [name, value] of Object.entries({ x: -side / 2, y: -side / 2, width: side, height: side })) body.setAttribute(name, value);
-      } else {
-        body.setAttribute("r", node.radius);
-      }
+      const box = (width, height, round = 0) => {
+        const sizes = { x: -width / 2, y: -height / 2, width, height, rx: round };
+        for (const [name, value] of Object.entries(sizes)) body.setAttribute(name, value);
+      };
+      if (data.kind === "segment") box(node.radius * 1.5, node.radius * 1.5);
+      else if (data.kind === "subnet") box(reach(node) * 2, node.radius * 1.5, node.radius * 0.75);
+      else body.setAttribute("r", node.radius);
       // Labels go to the right: in a tiered drawing, links mostly leave a node up or down.
       const label = element.querySelector(".label");
-      label.setAttribute("x", node.radius + 7);
+      label.setAttribute("x", reach(node) + 7);
       label.setAttribute("dy", "0.35em");
       const note = element.querySelector(".note");
-      note.setAttribute("x", node.radius + 7);
+      note.setAttribute("x", reach(node) + 7);
       note.setAttribute("y", 17);
       note.textContent = node.emphasis === "context" ? "" : node.note;
     }
@@ -350,6 +378,13 @@ const netmap = (() => {
       const note = element.querySelector(".note");
       note.setAttribute("x", ((a.x + b.x) / 2).toFixed(1));
       note.setAttribute("y", ((a.y + b.y) / 2 - 8).toFixed(1));
+      // A network's prefix sits beside its link, off the line and clear of the ends' addresses.
+      let [across, down] = [-(b.y - a.y) / length, (b.x - a.x) / length];
+      if (across < 0 || (across === 0 && down < 0)) [across, down] = [-across, -down];
+      const network = element.querySelector(".network");
+      network.setAttribute("x", ((a.x + b.x) / 2 + across * 10).toFixed(1));
+      network.setAttribute("y", ((a.y + b.y) / 2 + down * 10 + 4).toFixed(1));
+      network.classList.toggle("beside", across > 0.5);
     }
     for (const node of nodes.values()) node.element.setAttribute("transform", `translate(${node.x.toFixed(1)},${node.y.toFixed(1)})`);
     aim(false);
@@ -364,8 +399,8 @@ const netmap = (() => {
     let bottom = -Infinity;
     for (const node of nodes.values()) {
       // Room for the label and note on the right.
-      left = Math.min(left, node.x - node.radius - 30);
-      right = Math.max(right, node.x + node.radius + 12 + textWidth(node));
+      left = Math.min(left, node.x - reach(node) - 30);
+      right = Math.max(right, node.x + reach(node) + 12 + textWidth(node));
       top = Math.min(top, node.y - node.radius - 25);
       bottom = Math.max(bottom, node.y + node.radius + 30);
     }
@@ -458,9 +493,13 @@ const netmap = (() => {
       evidence(data.evidence);
     } else if (link) {
       const data = link.data;
-      const end = (side) => (side.interface ? `${side.node} ${side.interface}` : side.node);
+      const end = (side) => [side.node, side.interface, side.address].filter(Boolean).join(" ");
       inspector.append(html("h3", "", `${end(data.a)} ↔ ${end(data.b)}`));
-      inspector.append(html("p", "kind", `${data.plane} plane`));
+      inspector.append(html("p", "kind", [`${data.plane} plane`, data.subnet].filter(Boolean).join(" · ")));
+      const bridging = [data.a, data.b].filter((side) => side.bridges && side.bridges.length);
+      if (bridging.length) {
+        inspector.append(html("p", "kind", bridging.map((side) => `${side.node} bridges it in ${side.bridges.join(", ")}`).join("; ") + "."));
+      }
       if (data.one_sided) inspector.append(html("p", "failed", "Only one end reports this link, though both were asked."));
       if (link.note) inspector.append(html("p", "remark", link.note));
       evidence(data.evidence);

@@ -5,7 +5,9 @@ following each device's routing table, the way the devices themselves would.
 At each device the walk takes the longest route matching the destination,
 resolves the route's next hop down to an interface (a static route's next hop is
 often just an address, reached through another route), and follows the cable on
-that interface to the next node. The walk ends where the packet is delivered, or
+that interface to the next node, through any switches in the way (their MAC
+tables placed every host on the port it is behind, so the walk knows which way
+each one bridges). The walk ends where the packet is delivered, or
 where it would be lost: no route, a route that drops it, a loop, a next hop
 nothing answers for, or a device NetGPT can't ask. Nothing is sent on the
 network; the path is read from the devices' state.
@@ -14,18 +16,22 @@ network; the path is read from the devices' state.
 from __future__ import annotations
 
 import ipaddress
+from collections import defaultdict, deque
 from ipaddress import IPv4Address
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from netgpt.primitives import DeviceError, NextHop, Route
-from netgpt.topology import Topology, TopologyNode, port_of
+from netgpt.topology import LinkEnd, Topology, TopologyLink, TopologyNode, port_of
 
 MAX_HOPS = 32
 MAX_RECURSION = 8
 
 Outcome = Literal["delivered", "no_route", "dropped", "loop", "unresolved", "left_inventory", "unreadable"]
+
+# The way to a node across a link, as (link, node reached) steps.
+Steps = list[tuple[str, str]]
 
 
 class TraceError(ValueError):
@@ -36,7 +42,7 @@ class Hop(BaseModel):
     """One node on a forwarding path, and what it does with the packet."""
 
     node: str = Field(description="The node's ID in the topology.")
-    route: Route | None = Field(None, description="The route that matched on this device. None for hosts.")
+    route: Route | None = Field(None, description="The route that matched on this device. None for hosts and switches.")
     interfaces: list[str] = Field(default_factory=list, description="The interfaces the packet leaves by.")
     next: list[str] = Field(default_factory=list, description="The next nodes; more than one for equal-cost paths.")
     note: str = Field(description="What happens here, in a few words.")
@@ -61,7 +67,10 @@ class ForwardingPath(BaseModel):
         steps = []
         for hop in self.hops:
             if hop.next:
-                reason = f" ({hop.route.protocol} {hop.route.prefix})" if hop.route else ""
+                if hop.route is not None:
+                    reason = f" ({hop.route.protocol} {hop.route.prefix})"
+                else:  # a switch says which port it bridges out of; a source host says nothing
+                    reason = f" (bridges out {', '.join(hop.interfaces)})" if hop.interfaces else ""
                 steps.append(f"{hop.node}{reason} → {', '.join(hop.next)}")
             elif hop.route is not None or hop.node in self.trouble:
                 steps.append(f"{hop.node} ({hop.note})")
@@ -130,7 +139,10 @@ class _Walk:
         self.unreadable = unreadable
         self.destination = destination
         self.kinds = {node.id: node.kind for node in topology.nodes}
-        self.link_ends = {link.id: (link.a.node, link.b.node) for link in topology.links}
+        self.ends: dict[str, list[tuple[TopologyLink, LinkEnd, LinkEnd]]] = defaultdict(list)
+        for link in topology.links:
+            self.ends[link.a.node].append((link, link.a, link.b))
+            self.ends[link.b.node].append((link, link.b, link.a))
         self.owner: dict[str, str] = {}
         for node in topology.nodes:
             for address in node.addresses:
@@ -141,31 +153,64 @@ class _Walk:
         self.trouble: list[str] = []
         self.endings: list[tuple[Outcome, str]] = []
 
-    def on_path(self, *nodes: str, links: list[str] = ()) -> None:
-        """Add nodes to the path, and links with any shared segment they pass through."""
-        for link in links:
-            for end in self.link_ends[link]:
-                if self.kinds.get(end) == "segment":
-                    nodes += (end,)
+    def on_path(self, *nodes: str, steps: Steps = ()) -> None:
+        """Add nodes to the path, and the links (and nodes) of steps taken."""
+        for link, node in steps:
             if link not in self.links:
                 self.links.append(link)
+            nodes += (node,)
         for node in nodes:
             if node not in self.nodes:
                 self.nodes.append(node)
 
-    def neighbors(self, node: str) -> dict[str, list[str]]:
-        """The nodes linked to a node, each with the links that reach it; through a shared segment, its members."""
-        found: dict[str, list[str]] = {}
-        for link, (a, b) in self.link_ends.items():
-            if node in (a, b):
-                other = b if a == node else a
-                found[other] = [link]
-                if self.kinds.get(other) == "segment":
-                    for member_link, ends in self.link_ends.items():
-                        if other in ends and node not in ends:
-                            member = ends[1] if ends[0] == other else ends[0]
-                            found[member] = [link, member_link]
+    def beyond(self, link: TopologyLink, far: LinkEnd, origin: str) -> dict[str, Steps]:
+        """
+        Where a frame sent across a link can get to: the node at the far end and,
+        where that end is a shared segment or a switch's bridged port, everything
+        beyond it in the same layer 2 network. Each node comes with the steps that
+        reach it.
+        """
+        found: dict[str, Steps] = {far.node: [(link.id, far.node)]}
+        queue = deque([far])
+        while queue:
+            entered = queue.popleft()
+            if self.kinds.get(entered.node) == "segment":
+                bridges = None
+            elif entered.bridges:
+                bridges = set(entered.bridges)
+            else:
+                continue  # A routed port, a host, or a node that doesn't say: the frame stops here.
+            for onward, here, there in self.ends[entered.node]:
+                if there.node in found or there.node == origin:
+                    continue
+                if bridges is not None and not bridges & set(here.bridges):
+                    continue
+                found[there.node] = [*found[entered.node], (onward.id, there.node)]
+                queue.append(there)
         return found
+
+    def neighbors(self, node: str) -> dict[str, Steps]:
+        """Everything a node reaches at layer 2: what it is linked to, and what is beyond any switch or segment."""
+        found: dict[str, Steps] = {}
+        for link, _, there in self.ends[node]:
+            for reached, steps in self.beyond(link, there, node).items():
+                found.setdefault(reached, steps)
+        return found
+
+    def bridged(self, sender: str, steps: Steps) -> str | None:
+        """
+        Put the switches a frame crosses on the path as hops of their own, and
+        return the first node after the sender (segments are passed through).
+        """
+        through = [(link, node) for link, node in steps if self.kinds.get(node) != "segment"]
+        for (_, switch), (onward, after) in zip(through, through[1:]):
+            out = next((here.interface for link, here, _ in self.ends[switch] if link.id == onward), None)
+            hop = self.hop(switch, f"bridges it out {out}" if out else "bridges it on")
+            if out and out not in hop.interfaces:
+                hop.interfaces.append(out)
+            if after not in hop.next:
+                hop.next.append(after)
+        return through[0][1] if through else None
 
     def hop(self, node: str, note: str, route: Route | None = None) -> Hop:
         if node not in self.hops:
@@ -179,34 +224,29 @@ class _Walk:
         if outcome != "delivered" and node not in self.trouble:
             self.trouble.append(node)
 
-    def across(self, device: str, interface: str, address: str, connected: bool) -> tuple[str | None, list[str]]:
+    def across(self, device: str, interface: str, address: str, connected: bool) -> tuple[str | None, Steps]:
         """
-        The node at the far end of a device's interface that the packet goes to, and
-        the links it crosses. On a shared segment, or where several nodes hang off one
-        port, the address picks the node. For a connected network the destination
-        must actually be there; across a cable to a next router, the cable decides.
+        The node out of a device's interface that the packet goes to, and the steps
+        that reach it. Through a shared segment or a switch, the address picks the
+        node. For a connected network the destination must actually be there; across
+        a cable straight to a next router, the cable decides.
         """
         port = port_of(interface)
-        candidates: dict[str, list[str]] = {}
-        for link in self.topology.links:
-            for here, there in ((link.a, link.b), (link.b, link.a)):
-                if here.node != device or here.interface is None or port_of(here.interface) != port:
-                    continue
-                if self.kinds.get(there.node) == "segment":
-                    for member, links in self.neighbors(there.node).items():
-                        if member != device:
-                            candidates[member] = [link.id, *links]
-                else:
-                    candidates[there.node] = [link.id]
+        cabled = [(link, there) for link, here, there in self.ends[device] if here.interface and port_of(here.interface) == port]
+        candidates: dict[str, Steps] = {}
+        for link, there in cabled:
+            for reached, steps in self.beyond(link, there, device).items():
+                candidates.setdefault(reached, steps)
         owner = self.owner.get(address)
         if owner in candidates:
             return owner, candidates[owner]
         if connected:
             return None, []
-        if len(candidates) == 1:
-            return next(iter(candidates.items()))
+        if len(cabled) == 1 and self.kinds.get(cabled[0][1].node) != "segment" and not cabled[0][1].bridges:
+            link, there = cabled[0]
+            return there.node, [(link.id, there.node)]
         # No cable seen on that port: the address's owner, if anything answers for it.
-        return (owner, []) if not candidates else (None, [])
+        return (owner, []) if not cabled else (None, [])
 
     def walk(self, device: str, came_from: tuple[str, ...]) -> None:
         if device in came_from:
@@ -241,7 +281,7 @@ class _Walk:
             if interface not in hop.interfaces:
                 hop.interfaces.append(interface)
             connected = neighbor is None
-            node, links = self.across(device, interface, neighbor or str(self.destination), connected)
+            node, steps = self.across(device, interface, neighbor or str(self.destination), connected)
             if node is None:
                 if connected:
                     detail = f"{self.destination} is on {device}'s network on {interface}, but nothing there answers ARP for it."
@@ -249,9 +289,10 @@ class _Walk:
                     detail = f"{device} sends to {neighbor} on {interface}, but NetGPT can't tell which node that is."
                 self.end("unresolved", device, detail)
                 continue
-            if node not in hop.next:
-                hop.next.append(node)
-            self.on_path(links=links)
+            first = self.bridged(device, steps) or node
+            if first not in hop.next:
+                hop.next.append(first)
+            self.on_path(steps=steps)
             if connected:
                 self.hop(node, "destination" if self.kinds.get(node) != "device" else f"owns {self.destination}")
                 self.end("delivered", node, f"Delivered to {node}.")
@@ -260,6 +301,26 @@ class _Walk:
             else:
                 self.hop(node, "outside the inventory")
                 self.end("left_inventory", node, f"{device} hands the packet to {node}, which NetGPT can't ask about its routes.")
+
+
+def _same_network(
+    walk: _Walk,
+    attached: dict[str, Steps],
+    routes: dict[str, list[Route]],
+    connected: list[str],
+    address: IPv4Address | None,
+) -> str | None:
+    """
+    The network a source and destination share, when the destination is within reach
+    at layer 2 and on the same network as the source, as a router on it sees it.
+    """
+    if address is None or walk.owner.get(str(walk.destination)) not in attached:
+        return None
+    for router in connected:
+        route = longest_match(routes.get(router, []), address)
+        if route is not None and walk.destination in ipaddress.IPv4Network(route.prefix, strict=False):
+            return route.prefix
+    return None
 
 
 def _find(topology: Topology, name: str) -> TopologyNode | None:
@@ -299,6 +360,8 @@ def trace_path(
     target = _destination(topology, destination)
     walk = _Walk(topology, routes, unreadable, target)
     devices = [node.id for node in topology.nodes if node.kind == "device"]
+    # A device with no routing table here only switches: it is never where a host's packets enter.
+    routers = [device for device in devices if routes.get(device) or device in unreadable]
     start = _find(topology, source)
     if start is not None and start.kind == "device":
         gateways = [start.id]
@@ -312,18 +375,34 @@ def trace_path(
                 f"The source '{source}' is not an address or a node NetGPT knows. "
                 f"Nodes: {', '.join(node.id for node in topology.nodes)}."
             )
-        # A host sends through a device on its own network: one it is attached to.
-        connected = [d for d in devices if address and is_connected(longest_match(routes.get(d, []), address))]
+        # A host sends through a router on its own network: one it reaches at layer 2.
+        connected = [d for d in routers if address and is_connected(longest_match(routes.get(d, []), address))]
         if start is not None:
             attached = walk.neighbors(start.id)
-            gateways = [d for d in attached if d in devices and (d in connected or not connected)]
-            walk.hop(start.id, "source").next = list(gateways)
-            for gateway in gateways:
-                walk.on_path(links=attached[gateway])
+            sending = walk.hop(start.id, "source")
+            if (local := _same_network(walk, attached, routes, connected, address)) is not None:
+                # The destination is on the host's own network: the host reaches it directly, no router.
+                steps = attached[walk.owner[str(target)]]
+                sending.next.append(walk.bridged(start.id, steps) or steps[-1][1])
+                walk.on_path(steps=steps)
+                walk.hop(steps[-1][1], "destination")
+                switches = [node for _, node in steps[:-1] if walk.kinds.get(node) == "device"]
+                through = f", bridged by {', '.join(switches)}" if switches else ""
+                walk.end("delivered", steps[-1][1], f"{target} is on {source}'s own network, {local}: reached directly{through}.")
+                gateways = []
+            else:
+                gateways = [d for d in attached if d in routers and (d in connected or not connected)]
+                for gateway in gateways:
+                    first = walk.bridged(start.id, attached[gateway]) or gateway
+                    if first not in sending.next:
+                        sending.next.append(first)
+                    walk.on_path(steps=attached[gateway])
+                if not gateways:
+                    raise TraceError(f"Can't tell where {source} enters the network: no device is connected to its network.")
         else:
             gateways = connected
-        if not gateways:
-            raise TraceError(f"Can't tell where {source} enters the network: no device is connected to its network.")
+            if not gateways:
+                raise TraceError(f"Can't tell where {source} enters the network: no device is connected to its network.")
 
     for gateway in gateways:
         walk.walk(gateway, ())

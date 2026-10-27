@@ -12,9 +12,9 @@
          "neighbor": [
           {
            "ipv4-address": "192.168.0.1",
-           "link-layer-address": "1A:C8:02:FF:00:31",
+           "link-layer-address": "1A:22:03:FF:00:31",
            "origin": "dynamic",
-           "expiration-time": "2026-10-27T08:09:10.382Z",
+           "expiration-time": "2026-10-27T22:17:23.322Z",
            "group-based-policy-tag": 0,
            "datapath-programming": {
             "status": "success"
@@ -36,9 +36,9 @@
          "neighbor": [
           {
            "ipv4-address": "192.168.0.3",
-           "link-layer-address": "1A:EF:03:FF:00:31",
+           "link-layer-address": "1A:12:04:FF:00:31",
            "origin": "dynamic",
-           "expiration-time": "2026-10-27T08:09:10.803Z",
+           "expiration-time": "2026-10-27T22:17:23.132Z",
            "group-based-policy-tag": 0,
            "datapath-programming": {
             "status": "success"
@@ -62,7 +62,7 @@
            "ipv4-address": "172.20.20.1",
            "link-layer-address": "4E:A1:A0:FD:D3:8E",
            "origin": "dynamic",
-           "expiration-time": "2026-10-27T08:31:47.312Z",
+           "expiration-time": "2026-10-27T22:24:38.511Z",
            "group-based-policy-tag": 0,
            "datapath-programming": {
             "status": "success"

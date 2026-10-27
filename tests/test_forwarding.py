@@ -1,6 +1,7 @@
 """
-Tests for forwarding paths, walked through the routing tables recorded on the
-lab's three SR Linux devices, plus a small two-spine fabric for equal-cost paths.
+Tests for forwarding paths, walked through the tables recorded on the lab's SR
+Linux devices (a spine, two leaves, and a switch behind leaf2), plus a small
+two-spine fabric for equal-cost paths and a small switched network.
 """
 
 from __future__ import annotations
@@ -11,11 +12,12 @@ import pytest
 
 from netgpt.forwarding import TraceError, trace_path
 from netgpt.primitives import ArpEntry, DeviceInfo, LldpNeighbor, NextHop, Route
-from netgpt.topology import Topology, build_topology
+from netgpt.topology import Topology, build_l3, build_topology
+from netgpt.views import make_view
 
-from fakes import LAB, recorded_lab
+from fakes import LAB, SwitchedNetwork, recorded_lab
 
-HOST1, HOST2 = "192.168.11.2", "192.168.12.2"
+HOST1, HOST2, HOST3 = "192.168.11.2", "192.168.12.2", "192.168.12.3"
 LabState = tuple[Topology, dict[str, list[Route]]]
 
 
@@ -26,8 +28,8 @@ def is_management(device: str, interface: str) -> bool:
 @pytest.fixture
 async def lab(monkeypatch: pytest.MonkeyPatch) -> LabState:
     monkeypatch.setenv("NETGPT_TEST_PASSWORD", "not-used-by-the-mock")
-    neighbors, bindings, routes = await recorded_lab()
-    return build_topology(LAB, neighbors, bindings, [], is_management), routes
+    recorded = await recorded_lab()
+    return recorded.topology(is_management), recorded.routes
 
 
 def matched(path, node: str) -> str:
@@ -40,16 +42,19 @@ async def test_host_to_host_follows_each_routing_table(lab: LabState) -> None:
     topology, routes = lab
     path = trace_path(topology, routes, {}, HOST1, HOST2)
     assert path.outcome == "delivered"
-    assert path.nodes == [HOST1, "leaf1", "spine1", "leaf2", HOST2]
+    assert path.nodes == [HOST1, "leaf1", "spine1", "leaf2", "switch1", HOST2]
     assert [matched(path, device) for device in ("leaf1", "spine1", "leaf2")] == [
         "static 192.168.0.0/16", "static 192.168.12.0/24", "local 192.168.12.0/24",
     ]
     # leaf1's static next hop is only an address; its /31 says which interface reaches it.
-    assert [hop.interfaces for hop in path.hops[1:4]] == [["ethernet-1/49.0"], ["ethernet-1/2.0"], ["ethernet-1/1.0"]]
-    assert len(path.links) == 4 and path.trouble == []
+    # switch1 routes nothing: its MAC table says host2 is out ethernet-1/2.
+    assert [hop.interfaces for hop in path.hops[1:5]] == [
+        ["ethernet-1/49.0"], ["ethernet-1/2.0"], ["ethernet-1/1.0"], ["ethernet-1/2"],
+    ]
+    assert len(path.links) == 5 and path.trouble == []
     assert path.summary() == (
         f"{HOST1} → leaf1; leaf1 (static 192.168.0.0/16) → spine1; spine1 (static 192.168.12.0/24) → leaf2; "
-        f"leaf2 (local 192.168.12.0/24) → {HOST2}. Delivered to {HOST2}."
+        f"leaf2 (local 192.168.12.0/24) → switch1; switch1 (bridges out ethernet-1/2) → {HOST2}. Delivered to {HOST2}."
     )
 
 
@@ -57,8 +62,16 @@ async def test_host_to_host_follows_each_routing_table(lab: LabState) -> None:
 async def test_the_return_path_is_its_own_walk(lab: LabState) -> None:
     topology, routes = lab
     path = trace_path(topology, routes, {}, HOST2, HOST1)
-    assert (path.outcome, path.nodes) == ("delivered", [HOST2, "leaf2", "spine1", "leaf1", HOST1])
+    assert (path.outcome, path.nodes) == ("delivered", [HOST2, "switch1", "leaf2", "spine1", "leaf1", HOST1])
     assert matched(path, "spine1") == "static 192.168.11.0/24"
+
+
+@pytest.mark.anyio
+async def test_the_lab_hosts_behind_switch1_reach_each_other_directly(lab: LabState) -> None:
+    topology, routes = lab
+    path = trace_path(topology, routes, {}, HOST2, HOST3)
+    assert (path.outcome, path.nodes) == ("delivered", [HOST2, "switch1", HOST3])
+    assert "leaf2" not in path.nodes
 
 
 @pytest.mark.anyio
@@ -139,3 +152,52 @@ def test_equal_cost_paths_branch_and_meet_again() -> None:
     assert path.hops[0].next == ["spine1", "spine2"]
     assert path.hops[0].interfaces == ["ethernet-1/49.0", "ethernet-1/50.0"]
     assert set(path.nodes) == {"leaf1", "spine1", "spine2", "leaf2", HOST2} and len(path.links) == 5
+
+
+# ---- Across a switch
+
+
+def test_a_path_through_a_switch_bridges_out_the_port_the_host_is_on() -> None:
+    network = SwitchedNetwork()
+    path = trace_path(network.topology(is_management), network.routes, {}, "r0", network.HOST3)
+    assert (path.outcome, path.nodes) == ("delivered", ["r0", "r1", "sw1", network.HOST3])
+    switch = next(hop for hop in path.hops if hop.node == "sw1")
+    assert (switch.route, switch.note, switch.next) == (None, "bridges it out ethernet-1/3", [network.HOST3])
+    assert next(hop for hop in path.hops if hop.node == "r1").next == ["sw1"]
+    assert "10.1.0.2--sw1:ethernet-1/2" not in path.links  # the other host's port isn't on the way
+    assert path.summary() == (
+        "r0 (static 10.1.0.0/24) → r1; r1 (local 10.1.0.0/24) → sw1; sw1 (bridges out ethernet-1/3) → 10.1.0.3. "
+        "Delivered to 10.1.0.3."
+    )
+
+
+def test_a_host_behind_a_switch_sends_through_its_router() -> None:
+    network = SwitchedNetwork()
+    path = trace_path(network.topology(is_management), network.routes, {}, network.HOST2, "10.0.0.0")
+    assert (path.outcome, path.nodes) == ("delivered", [network.HOST2, "sw1", "r1", "r0"])
+    assert [(hop.node, hop.next) for hop in path.hops[:2]] == [(network.HOST2, ["sw1"]), ("sw1", ["r1"])]
+
+
+def test_hosts_on_one_network_reach_each_other_without_the_router() -> None:
+    network = SwitchedNetwork()
+    path = trace_path(network.topology(is_management), network.routes, {}, network.HOST2, network.HOST3)
+    assert (path.outcome, path.nodes) == ("delivered", [network.HOST2, "sw1", network.HOST3])
+    assert path.detail == "10.1.0.3 is on 10.1.0.2's own network, 10.1.0.0/24: reached directly, bridged by sw1."
+
+
+def test_a_switch_is_not_a_way_into_the_network() -> None:
+    # sw1 has no routing table; even an unknown source on its LAN enters through r1.
+    network = SwitchedNetwork()
+    path = trace_path(network.topology(is_management), network.routes, {}, "10.1.0.77", "10.0.0.0")
+    assert path.outcome == "delivered" and path.nodes[:2] == ["r1", "r0"]
+
+
+def test_on_the_layer_3_map_a_path_crosses_networks_not_switches() -> None:
+    network = SwitchedNetwork()
+    l2 = network.topology(is_management)
+    l3 = build_l3(network.devices, l2, network.interfaces, is_management)
+    view = make_view(l3, "r0 to host3", [], [], {}, path=trace_path(l2, network.routes, {}, "r0", network.HOST3))
+    assert set(view.highlight) == {
+        "r0", "r1", "10.1.0.0/24", network.HOST3,
+        "r0:ethernet-1/1.0--r1:ethernet-1/49.0", "10.1.0.0/24--r1:ethernet-1/1.0", "10.1.0.0/24--10.1.0.3",
+    }

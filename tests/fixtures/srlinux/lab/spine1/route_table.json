@@ -14,15 +14,15 @@
       "metric": 0,
       "preference": 0,
       "active": true,
-      "last-app-update": "2026-10-27T00:09:38.224Z",
-      "next-hop-group": "1203207087253",
+      "last-app-update": "2026-10-27T18:17:18.786Z",
+      "next-hop-group": "1209733327453",
       "next-hop-group-network-instance": "default",
       "resilient-hash": false,
       "dynamic-load-balancing": false,
       "fib-programming": {
        "suppressed": false,
        "last-successful-operation-type": "add",
-       "last-successful-operation-timestamp": "2026-10-27T00:09:38.225Z",
+       "last-successful-operation-timestamp": "2026-10-27T18:17:18.787Z",
        "pending-operation-type": "none",
        "last-failed-operation-type": "none"
       }
@@ -38,15 +38,15 @@
       "metric": 0,
       "preference": 0,
       "active": true,
-      "last-app-update": "2026-10-27T00:09:38.224Z",
-      "next-hop-group": "1203207087255",
+      "last-app-update": "2026-10-27T18:17:18.786Z",
+      "next-hop-group": "1209733327455",
       "next-hop-group-network-instance": "default",
       "resilient-hash": false,
       "dynamic-load-balancing": false,
       "fib-programming": {
        "suppressed": false,
        "last-successful-operation-type": "add",
-       "last-successful-operation-timestamp": "2026-10-27T00:09:38.225Z",
+       "last-successful-operation-timestamp": "2026-10-27T18:17:18.787Z",
        "pending-operation-type": "none",
        "last-failed-operation-type": "none"
       }
@@ -62,15 +62,15 @@
       "metric": 0,
       "preference": 0,
       "active": true,
-      "last-app-update": "2026-10-27T00:09:38.770Z",
-      "next-hop-group": "1203207087256",
+      "last-app-update": "2026-10-27T18:17:19.362Z",
+      "next-hop-group": "1209733327456",
       "next-hop-group-network-instance": "default",
       "resilient-hash": false,
       "dynamic-load-balancing": false,
       "fib-programming": {
        "suppressed": false,
        "last-successful-operation-type": "add",
-       "last-successful-operation-timestamp": "2026-10-27T00:09:38.771Z",
+       "last-successful-operation-timestamp": "2026-10-27T18:17:19.363Z",
        "pending-operation-type": "none",
        "last-failed-operation-type": "none"
       }
@@ -86,15 +86,15 @@
       "metric": 0,
       "preference": 0,
       "active": true,
-      "last-app-update": "2026-10-27T00:09:38.770Z",
-      "next-hop-group": "1203207087258",
+      "last-app-update": "2026-10-27T18:17:19.363Z",
+      "next-hop-group": "1209733327458",
       "next-hop-group-network-instance": "default",
       "resilient-hash": false,
       "dynamic-load-balancing": false,
       "fib-programming": {
        "suppressed": false,
        "last-successful-operation-type": "add",
-       "last-successful-operation-timestamp": "2026-10-27T00:09:38.771Z",
+       "last-successful-operation-timestamp": "2026-10-27T18:17:19.363Z",
        "pending-operation-type": "none",
        "last-failed-operation-type": "none"
       }
@@ -110,15 +110,15 @@
       "metric": 1,
       "preference": 5,
       "active": true,
-      "last-app-update": "2026-10-27T00:09:38.225Z",
-      "next-hop-group": "1203207087251",
+      "last-app-update": "2026-10-27T18:17:18.787Z",
+      "next-hop-group": "1209733327451",
       "next-hop-group-network-instance": "default",
       "resilient-hash": false,
       "dynamic-load-balancing": false,
       "fib-programming": {
        "suppressed": false,
        "last-successful-operation-type": "add",
-       "last-successful-operation-timestamp": "2026-10-27T00:09:38.225Z",
+       "last-successful-operation-timestamp": "2026-10-27T18:17:18.787Z",
        "pending-operation-type": "none",
        "last-failed-operation-type": "none"
       }
@@ -134,15 +134,15 @@
       "metric": 1,
       "preference": 5,
       "active": true,
-      "last-app-update": "2026-10-27T00:09:38.771Z",
-      "next-hop-group": "1203207087252",
+      "last-app-update": "2026-10-27T18:17:19.363Z",
+      "next-hop-group": "1209733327452",
       "next-hop-group-network-instance": "default",
       "resilient-hash": false,
       "dynamic-load-balancing": false,
       "fib-programming": {
        "suppressed": false,
        "last-successful-operation-type": "add",
-       "last-successful-operation-timestamp": "2026-10-27T00:09:38.771Z",
+       "last-successful-operation-timestamp": "2026-10-27T18:17:19.363Z",
        "pending-operation-type": "none",
        "last-failed-operation-type": "none"
       }
@@ -209,154 +209,154 @@
    },
    "srl_nokia-ip-route-tables:next-hop-group": [
     {
-     "index": "1203207087251",
+     "index": "1209733327451",
      "group-name-alias": "leaf1",
      "backup-next-hop-group": "0",
      "backup-active": false,
      "fib-programming": {
       "last-successful-operation-type": "modify",
-      "last-successful-operation-timestamp": "2026-10-27T00:09:38.225Z",
+      "last-successful-operation-timestamp": "2026-10-27T18:17:18.787Z",
       "pending-operation-type": "none",
       "last-failed-operation-type": "none"
      },
      "next-hop": [
       {
        "id": 0,
-       "next-hop": "1203207087252",
+       "next-hop": "1209733327452",
        "resolved": "true",
        "resource-allocation-failed": false
       }
      ]
     },
     {
-     "index": "1203207087252",
+     "index": "1209733327452",
      "group-name-alias": "leaf2",
      "backup-next-hop-group": "0",
      "backup-active": false,
      "fib-programming": {
       "last-successful-operation-type": "modify",
-      "last-successful-operation-timestamp": "2026-10-27T00:09:38.771Z",
+      "last-successful-operation-timestamp": "2026-10-27T18:17:19.363Z",
       "pending-operation-type": "none",
       "last-failed-operation-type": "none"
      },
      "next-hop": [
       {
        "id": 0,
-       "next-hop": "1203207087256",
+       "next-hop": "1209733327456",
        "resolved": "true",
        "resource-allocation-failed": false
       }
      ]
     },
     {
-     "index": "1203207087253",
+     "index": "1209733327453",
      "backup-next-hop-group": "0",
      "backup-active": false,
      "fib-programming": {
       "last-successful-operation-type": "add",
-      "last-successful-operation-timestamp": "2026-10-27T00:09:38.225Z",
+      "last-successful-operation-timestamp": "2026-10-27T18:17:18.787Z",
       "pending-operation-type": "none",
       "last-failed-operation-type": "none"
      },
      "next-hop": [
       {
        "id": 0,
-       "next-hop": "1203207087250",
+       "next-hop": "1209733327450",
        "resolved": "not-applicable",
        "resource-allocation-failed": false
       }
      ]
     },
     {
-     "index": "1203207087254",
+     "index": "1209733327454",
      "backup-next-hop-group": "0",
      "backup-active": false,
      "fib-programming": {
       "last-successful-operation-type": "add",
-      "last-successful-operation-timestamp": "2026-10-27T00:09:38.225Z",
+      "last-successful-operation-timestamp": "2026-10-27T18:17:18.787Z",
       "pending-operation-type": "none",
       "last-failed-operation-type": "none"
      },
      "next-hop": [
       {
        "id": 0,
-       "next-hop": "1203207087251",
+       "next-hop": "1209733327451",
        "resolved": "not-applicable",
        "resource-allocation-failed": false
       }
      ]
     },
     {
-     "index": "1203207087255",
+     "index": "1209733327455",
      "backup-next-hop-group": "0",
      "backup-active": false,
      "fib-programming": {
       "last-successful-operation-type": "add",
-      "last-successful-operation-timestamp": "2026-10-27T00:09:38.225Z",
+      "last-successful-operation-timestamp": "2026-10-27T18:17:18.787Z",
       "pending-operation-type": "none",
       "last-failed-operation-type": "none"
      },
      "next-hop": [
       {
        "id": 0,
-       "next-hop": "1203207087253",
+       "next-hop": "1209733327453",
        "resolved": "not-applicable",
        "resource-allocation-failed": false
       }
      ]
     },
     {
-     "index": "1203207087256",
+     "index": "1209733327456",
      "backup-next-hop-group": "0",
      "backup-active": false,
      "fib-programming": {
       "last-successful-operation-type": "add",
-      "last-successful-operation-timestamp": "2026-10-27T00:09:38.771Z",
+      "last-successful-operation-timestamp": "2026-10-27T18:17:19.363Z",
       "pending-operation-type": "none",
       "last-failed-operation-type": "none"
      },
      "next-hop": [
       {
        "id": 0,
-       "next-hop": "1203207087254",
+       "next-hop": "1209733327454",
        "resolved": "not-applicable",
        "resource-allocation-failed": false
       }
      ]
     },
     {
-     "index": "1203207087257",
+     "index": "1209733327457",
      "backup-next-hop-group": "0",
      "backup-active": false,
      "fib-programming": {
       "last-successful-operation-type": "add",
-      "last-successful-operation-timestamp": "2026-10-27T00:09:38.771Z",
+      "last-successful-operation-timestamp": "2026-10-27T18:17:19.363Z",
       "pending-operation-type": "none",
       "last-failed-operation-type": "none"
      },
      "next-hop": [
       {
        "id": 0,
-       "next-hop": "1203207087255",
+       "next-hop": "1209733327455",
        "resolved": "not-applicable",
        "resource-allocation-failed": false
       }
      ]
     },
     {
-     "index": "1203207087258",
+     "index": "1209733327458",
      "backup-next-hop-group": "0",
      "backup-active": false,
      "fib-programming": {
       "last-successful-operation-type": "add",
-      "last-successful-operation-timestamp": "2026-10-27T00:09:38.771Z",
+      "last-successful-operation-timestamp": "2026-10-27T18:17:19.363Z",
       "pending-operation-type": "none",
       "last-failed-operation-type": "none"
      },
      "next-hop": [
       {
        "id": 0,
-       "next-hop": "1203207087257",
+       "next-hop": "1209733327457",
        "resolved": "not-applicable",
        "resource-allocation-failed": false
       }
@@ -365,28 +365,28 @@
    ],
    "srl_nokia-ip-route-tables:next-hop": [
     {
-     "index": "1203207087250",
+     "index": "1209733327450",
      "resource-allocation-failed": false,
      "type": "srl_nokia-ip-route-tables:direct",
      "ip-address": "192.168.0.0",
      "subinterface": "ethernet-1/1.0"
     },
     {
-     "index": "1203207087251",
+     "index": "1209733327451",
      "resource-allocation-failed": false,
      "type": "srl_nokia-ip-route-tables:direct",
      "ip-address": "192.168.0.1",
      "subinterface": "ethernet-1/1.0"
     },
     {
-     "index": "1203207087252",
+     "index": "1209733327452",
      "resource-allocation-failed": false,
      "type": "srl_nokia-ip-route-tables:indirect",
      "ip-address": "192.168.0.1",
      "indirect": {
       "resolved": true,
       "resolving-route": {
-       "next-hop-group": "1203207087254",
+       "next-hop-group": "1209733327454",
        "ip-prefix": "192.168.0.0/31",
        "route-type": "srl_nokia-common:local",
        "route-owner": "net_inst_mgr"
@@ -394,33 +394,33 @@
      }
     },
     {
-     "index": "1203207087253",
+     "index": "1209733327453",
      "resource-allocation-failed": false,
      "type": "srl_nokia-ip-route-tables:extract"
     },
     {
-     "index": "1203207087254",
+     "index": "1209733327454",
      "resource-allocation-failed": false,
      "type": "srl_nokia-ip-route-tables:direct",
      "ip-address": "192.168.0.2",
      "subinterface": "ethernet-1/2.0"
     },
     {
-     "index": "1203207087255",
+     "index": "1209733327455",
      "resource-allocation-failed": false,
      "type": "srl_nokia-ip-route-tables:direct",
      "ip-address": "192.168.0.3",
      "subinterface": "ethernet-1/2.0"
     },
     {
-     "index": "1203207087256",
+     "index": "1209733327456",
      "resource-allocation-failed": false,
      "type": "srl_nokia-ip-route-tables:indirect",
      "ip-address": "192.168.0.3",
      "indirect": {
       "resolved": true,
       "resolving-route": {
-       "next-hop-group": "1203207087257",
+       "next-hop-group": "1209733327457",
        "ip-prefix": "192.168.0.2/31",
        "route-type": "srl_nokia-common:local",
        "route-owner": "net_inst_mgr"
@@ -428,7 +428,7 @@
      }
     },
     {
-     "index": "1203207087257",
+     "index": "1209733327457",
      "resource-allocation-failed": false,
      "type": "srl_nokia-ip-route-tables:extract"
     }
