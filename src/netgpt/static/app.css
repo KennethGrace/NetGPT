@@ -209,6 +209,8 @@ pre code { background: none; padding: 0; }
 #map-graph { flex: 1; min-height: 0; width: 100%; touch-action: none; user-select: none; }
 #map-inspector { font-size: 13px; padding: 0 16px 10px; max-height: 35%; overflow-y: auto; }
 #map-inspector h3 { font-size: 14px; margin: 6px 0 2px; overflow-wrap: anywhere; }
+#map-inspector .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+#map-inspector button { font-size: 12px; padding: 1px 8px; }
 #map-inspector p { margin: 2px 0; overflow-wrap: anywhere; }
 #map-inspector .kind, #map-inspector .addresses, #map-inspector .hint { color: var(--muted); }
 #map-inspector .failed { color: var(--error); }
@@ -260,6 +262,9 @@ pre code { background: none; padding: 0; }
 #map-graph .label { font-size: 13px; fill: var(--fg); }
 #map-graph .node .note { text-anchor: start; }
 #map-graph .context .label { font-size: 11px; }
+#map-graph .pin { display: none; fill: var(--fg); stroke: var(--surface); stroke-width: 1.5; }
+#map-graph .node.pinned .pin { display: inline; }
+#map-graph .guides line { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
 
 .view-chip { display: block; margin: 6px 0; font-size: 13px; color: var(--accent); border-color: var(--accent); }
 .view-chip::before { content: "◇ "; }

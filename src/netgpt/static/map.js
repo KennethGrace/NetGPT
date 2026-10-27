@@ -11,6 +11,11 @@
 // the nodes, so the network glides into its new shape and every node stays the
 // node you were looking at.
 //
+// The viewer can pin nodes: a node dropped after a drag stays where it was put,
+// and the forces arrange everything else around it. Pins are the viewer's layout,
+// not the model's: they hold across views, per plane, and are kept in this
+// browser's storage so a reload keeps them.
+//
 // Device data reaches the map only as text: through textContent and attributes.
 
 const netmap = (() => {
@@ -40,22 +45,45 @@ const netmap = (() => {
   const SPRING = { focus: 0.8, near: 0.4, context: 0.1 };
   const LENGTH = { focus: 100, near: 120, context: 120 };
   const CHAR_WIDTH = 7; // roughly, for the 12–13px label and note text
+  const SNAP = 8; // screen pixels: a dragged node this close to a pinned node's row or column joins it
+  const DOUBLE_TAP = 400; // milliseconds
+  const PINS = "netgpt.map.pins";
   const SHORT = [
     [/^ethernet-/i, "e"], [/^TenGigabitEthernet/i, "Te"], [/^GigabitEthernet/i, "Gi"],
     [/^FastEthernet/i, "Fa"], [/^HundredGigE/i, "Hu"], [/^Ethernet/i, "Eth"], [/^Port-channel/i, "Po"],
   ];
 
   const linkLayer = shape("g", { class: "links" });
+  const guideLayer = shape("g", { class: "guides" });
   const nodeLayer = shape("g", { class: "nodes" });
-  svg.append(linkLayer, nodeLayer);
+  svg.append(linkLayer, guideLayer, nodeLayer);
 
   const nodes = new Map(); // by ID, kept across views so each node keeps its place
   const linkShapes = new Map();
+  const pins = loadPins(); // {plane: {node ID: [x, y]}}
   let links = [];
   let current = null; // the view on the map
   let selected = null; // the ID of the node or link in the inspector
   let camera = null; // the viewBox, eased toward the drawing as it moves
   let dragging = null;
+  let tapped = null; // the last node clicked without a drag, and when, to tell a double click
+
+  function loadPins() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(PINS));
+      return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function savePins() {
+    try {
+      localStorage.setItem(PINS, JSON.stringify(pins));
+    } catch {
+      // Storage is off or full: the pins last until the page is reloaded.
+    }
+  }
 
   const simulation = d3.forceSimulation().alphaDecay(0.025).velocityDecay(0.35).on("tick", draw).on("end", () => aim(true));
   simulation.stop();
@@ -102,7 +130,7 @@ const netmap = (() => {
     group.dataset.id = data.id;
     group.append(data.kind === "segment" ? shape("rect", { class: "body", transform: "rotate(45)" }) : shape("circle", { class: "body" }));
     if (data.kind === "device" && data.role) group.append(shape("text", { class: "glyph", dy: "0.35em" }, data.role[0].toUpperCase()));
-    group.append(shape("text", { class: "label" }, data.label), shape("text", { class: "note" }));
+    group.append(shape("text", { class: "label" }, data.label), shape("text", { class: "note" }), shape("circle", { class: "pin", r: 4 }));
     nodeLayer.append(group);
     return group;
   }
@@ -149,6 +177,7 @@ const netmap = (() => {
     const middle = focus.reduce((sum, node) => sum + tier.get(node.id), 0) / (focus.length || 1);
     const core = 60 + 50 * Math.sqrt(focus.length);
 
+    const pinned = pins[view.plane] || {};
     const next = new Map();
     for (const data of view.nodes) {
       const node = nodes.get(data.id) || { id: data.id, element: nodeShape(data), ...place(data, view, tier, middle) };
@@ -161,6 +190,13 @@ const netmap = (() => {
         tierY: (tier.get(data.id) - middle) * TIER_GAP,
       });
       node.radius = RADIUS[data.kind][node.emphasis];
+      const at = pinned[data.id];
+      if (Array.isArray(at) && at.length === 2 && at.every(Number.isFinite)) {
+        node.x = node.fx = at[0];
+        node.y = node.fy = at[1];
+      } else {
+        node.fx = node.fy = null;
+      }
       next.set(data.id, node);
     }
     for (const [id, node] of nodes) if (!next.has(id)) node.element.remove();
@@ -226,14 +262,14 @@ const netmap = (() => {
     }
   }
 
-  function settle() {
+  function settle(alpha = 1) {
     if (still.matches) {
-      simulation.stop().alpha(1);
+      simulation.stop().alpha(alpha);
       for (let tick = 0; tick < 400; tick += 1) simulation.tick();
       draw();
       aim(true);
     } else {
-      simulation.alpha(1).restart();
+      simulation.alpha(Math.max(alpha, simulation.alpha())).restart();
     }
   }
 
@@ -249,11 +285,15 @@ const netmap = (() => {
           node.lit && "lit",
           node.trouble && "trouble",
           data.error && "failed",
+          isPinned(node) && "pinned",
           selected === node.id && "selected",
         ]
           .filter(Boolean)
           .join(" "),
       );
+      const pin = element.querySelector(".pin");
+      pin.setAttribute("cx", (-node.radius * 0.75).toFixed(1));
+      pin.setAttribute("cy", (-node.radius * 0.75).toFixed(1));
       const body = element.querySelector(".body");
       if (data.kind === "segment") {
         const side = node.radius * 1.5;
@@ -340,6 +380,58 @@ const netmap = (() => {
     svg.setAttribute("viewBox", `${camera.x.toFixed(1)} ${camera.y.toFixed(1)} ${camera.width.toFixed(1)} ${camera.height.toFixed(1)}`);
   }
 
+  // ---- Pinning
+
+  const isPinned = (node) => node.fx != null;
+
+  function pin(node, x, y) {
+    // In whole units, so the node is where storage will put it back.
+    node.fx = Math.round(x);
+    node.fy = Math.round(y);
+    (pins[current.plane] ||= {})[node.id] = [node.fx, node.fy];
+    savePins();
+  }
+
+  function unpin(node) {
+    node.fx = node.fy = null;
+    if (pins[current.plane]) delete pins[current.plane][node.id];
+    savePins();
+  }
+
+  function repinned() {
+    // Let the rest of the drawing find its place around the change.
+    settle(0.3);
+    inspect(selected);
+  }
+
+  function togglePin(node) {
+    if (isPinned(node)) unpin(node);
+    else pin(node, node.x, node.y);
+    repinned();
+  }
+
+  function unpinAll() {
+    for (const node of nodes.values()) node.fx = node.fy = null;
+    delete pins[current.plane];
+    savePins();
+    repinned();
+  }
+
+  function align(node, { x, y }) {
+    // A node dragged near a pinned node's row or column snaps into line with it,
+    // and a guide shows the line, so pinned nodes are easy to set out in rows.
+    const reach = SNAP / svg.getScreenCTM().a;
+    const nearest = (values, target) =>
+      values.reduce((best, value) => (Math.abs(value - target) < Math.min(reach, Math.abs((best ?? Infinity) - target)) ? value : best), null);
+    const others = [...nodes.values()].filter((other) => other !== node && isPinned(other));
+    const column = nearest(others.map((other) => other.fx), x);
+    const row = nearest(others.map((other) => other.fy), y);
+    guideLayer.replaceChildren();
+    if (column !== null) guideLayer.append(shape("line", { x1: column, x2: column, y1: camera.y, y2: camera.y + camera.height }));
+    if (row !== null) guideLayer.append(shape("line", { x1: camera.x, x2: camera.x + camera.width, y1: row, y2: row }));
+    return { x: column ?? x, y: row ?? y };
+  }
+
   // ---- Selecting and dragging
 
   function inspect(id) {
@@ -350,7 +442,12 @@ const netmap = (() => {
     const link = id && links.find((candidate) => candidate.id === id);
     if (node) {
       const data = node.data;
-      inspector.append(html("h3", "", data.label));
+      const head = html("div", "head");
+      const toggle = html("button", "", isPinned(node) ? "Unpin" : "Pin here");
+      toggle.type = "button";
+      toggle.addEventListener("click", () => togglePin(node));
+      head.append(html("h3", "", data.label), toggle);
+      inspector.append(head);
       const kind = data.kind === "device" ? [data.role, data.platform].filter(Boolean).join(" · ") || "device" : data.kind;
       inspector.append(html("p", "kind", kind));
       if (data.addresses.length) inspector.append(html("p", "addresses", data.addresses.join(", ")));
@@ -370,7 +467,16 @@ const netmap = (() => {
     } else if (current) {
       if (current.path) inspector.append(html("p", current.path.outcome === "delivered" ? "remark" : "failed", current.path.detail));
       for (const error of current.errors) inspector.append(html("p", "failed", `${error.device}: ${error.error}`));
-      inspector.append(html("p", "hint", "Select a node or link to see the evidence for it. Drag a node to move it."));
+      inspector.append(html("p", "hint", "Select a node or link for the evidence. Drag a node to pin it; double-click to pin or let go."));
+      const count = [...nodes.values()].filter(isPinned).length;
+      if (count) {
+        const pinned = html("p", "hint", `${count} pinned. `);
+        const release = html("button", "", "Unpin all");
+        release.type = "button";
+        release.addEventListener("click", unpinAll);
+        pinned.append(release);
+        inspector.append(pinned);
+      }
     }
   }
 
@@ -401,15 +507,16 @@ const netmap = (() => {
     if (!element) return;
     event.preventDefault();
     element.setPointerCapture(event.pointerId);
-    dragging = { node: nodes.get(element.dataset.id), x: event.clientX, y: event.clientY, moved: false };
+    const node = nodes.get(element.dataset.id);
+    dragging = { node, x: event.clientX, y: event.clientY, moved: false, was: [node.fx, node.fy] };
   });
 
   nodeLayer.addEventListener("pointermove", (event) => {
     if (!dragging) return;
     if (!dragging.moved && Math.hypot(event.clientX - dragging.x, event.clientY - dragging.y) < 4) return;
     dragging.moved = true;
-    const { x, y } = point(event);
     const node = dragging.node;
+    const { x, y } = align(node, point(event));
     node.fx = x;
     node.fy = y;
     if (still.matches) {
@@ -421,15 +528,26 @@ const netmap = (() => {
     }
   });
 
-  function release() {
+  function release(event) {
     if (!dragging) return;
-    const { node, moved } = dragging;
+    const { node, moved, was } = dragging;
     dragging = null;
-    // Let go, and the forces take the node back: the view still decides the shape.
-    node.fx = null;
-    node.fy = null;
+    guideLayer.replaceChildren();
     simulation.alphaTarget(0);
-    if (!moved) inspect(node.id);
+    if (moved) {
+      // Where a dragged node is dropped, it stays; the forces arrange the rest around it.
+      // A drag the browser cancels puts the node back as it was.
+      if (event.type === "pointercancel") [node.fx, node.fy] = was;
+      else pin(node, node.fx, node.fy);
+      tapped = null;
+      repinned();
+    } else if (tapped && tapped.id === node.id && event.timeStamp - tapped.time < DOUBLE_TAP) {
+      tapped = null;
+      togglePin(node);
+    } else {
+      tapped = { id: node.id, time: event.timeStamp };
+      inspect(node.id);
+    }
   }
   nodeLayer.addEventListener("pointerup", release);
   nodeLayer.addEventListener("pointercancel", release);
@@ -447,6 +565,8 @@ const netmap = (() => {
     simulation.stop();
     nodeLayer.replaceChildren();
     linkLayer.replaceChildren();
+    guideLayer.replaceChildren();
+    dragging = tapped = null;
     nodes.clear();
     linkShapes.clear();
     links = [];
