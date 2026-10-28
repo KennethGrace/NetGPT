@@ -14,7 +14,7 @@ import httpx
 import pytest
 from mcp import Client
 
-from netgpt.chat import Chat, ChatError, ChatObserver, plain_schema, supports_thinking
+from netgpt.chat import OUT_OF_TOOLS, Chat, ChatError, ChatObserver, plain_schema, supports_thinking
 
 from fakes import ScriptedOllama, calls, says
 
@@ -138,8 +138,19 @@ async def test_conversation_carries_over_until_reset(chat_with: Any) -> None:
 
 
 @pytest.mark.anyio
-async def test_endless_tool_calls_give_up_and_leave_history_clean(chat_with: Any) -> None:
-    ollama = ScriptedOllama(*(calls("list_devices", {}, f"call_{n}") for n in range(3)))
+async def test_running_out_of_tool_calls_still_gets_an_answer(chat_with: Any) -> None:
+    script = [calls("list_devices", {}, f"call_{n}") for n in range(3)]
+    ollama = ScriptedOllama(*script, says("Four devices, from what I found."))
+    chat = await chat_with(ollama, max_rounds=3)
+    assert await chat.ask("How many devices?") == "Four devices, from what I found."
+    last = ollama.requests[-1]
+    assert last["tools"] == [] and last["messages"][-1] == {"role": "user", "content": OUT_OF_TOOLS}
+    assert [message["role"] for message in chat.messages] == ["system", "user", *["assistant", "tool"] * 3, "user", "assistant"]
+
+
+@pytest.mark.anyio
+async def test_a_model_that_only_calls_tools_gives_up_and_leaves_history_clean(chat_with: Any) -> None:
+    ollama = ScriptedOllama(*(calls("list_devices", {}, f"call_{n}") for n in range(4)))
     chat = await chat_with(ollama, max_rounds=3)
     with pytest.raises(ChatError, match="still calling tools after 3 turns"):
         await chat.ask("Loop forever")

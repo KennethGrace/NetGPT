@@ -48,6 +48,7 @@ from netgpt.chat import (
     DEFAULT_MODEL,
     DEFAULT_OLLAMA,
     Chat,
+    OUT_OF_TOOLS,
     ChatError,
     TerminalObserver,
     ollama_post,
@@ -195,6 +196,8 @@ async def play_round(chat: Chat, inventory: Inventory, fault: Fault) -> dict[str
         "rubric": rubric(fault, answer),
         "seconds": round(seconds, 1),
         "replies": sum(message["role"] == "assistant" for message in chat.messages) if answer is not None else None,
+        # Whether the answer came from the reply with no tools offered, after every other reply called tools.
+        "last_word": answer is not None and any(message["content"] == OUT_OF_TOOLS for message in chat.messages),
         "tool_calls": watcher.calls,
         "tool_errors": watcher.errors,
         "answer": answer,
@@ -205,9 +208,10 @@ async def play_round(chat: Chat, inventory: Inventory, fault: Fault) -> dict[str
 def show_round(record: dict[str, Any]) -> None:
     fault = gremlin.FAULTS[record["fault"]]
     disagreement = f"; the rubric said {record['rubric']}" if record.get("rubric", record["verdict"]) != record["verdict"] else ""
+    last_word = ", answered when out of tool calls" if record.get("last_word") else ""
     print(
         f"{fault.name}: {record['verdict'].upper()} in {record['seconds']:.0f} s, "
-        f"{len(record['tool_calls'])} tool calls ({record['tool_errors']} errors){disagreement}"
+        f"{len(record['tool_calls'])} tool calls ({record['tool_errors']} errors){last_word}{disagreement}"
     )
     print(f"  answer: {' '.join((record['answer'] or record['error']).split())}")
     if record.get("reason"):
@@ -275,7 +279,7 @@ def scoreboard(answers: bool) -> None:
     names = list(gremlin.FAULTS)
     print(
         f"{'model':<20} {'netgpt':<14}{'replies':>8}" + "".join(f"{name:>12}" for name in names)
-        + f"{'found':>8}{'partly':>8}{'no answer':>11}{'median s':>10}"
+        + f"{'found':>8}{'partly':>8}{'no answer':>11}{'last word':>11}{'median s':>10}"
     )
     for (model, version, limit), rounds in groups.items():
         cells = []
@@ -285,10 +289,11 @@ def scoreboard(answers: bool) -> None:
         found = sum(record["verdict"] == "found" for record in rounds)
         partly = sum(record["verdict"] == "partly" for record in rounds)
         unanswered = sum(record["verdict"] == "no answer" for record in rounds)
+        last_word = sum(bool(record.get("last_word")) for record in rounds)
         median = statistics.median(record["seconds"] for record in rounds)
         print(
             f"{model:<20} {version:<14}{f'≤{limit}':>8}" + "".join(f"{cell:>12}" for cell in cells)
-            + f"{f'{found}/{len(rounds)}':>8}{partly:>8}{unanswered:>11}{median:>10.0f}"
+            + f"{f'{found}/{len(rounds)}':>8}{partly:>8}{unanswered:>11}{last_word:>11}{median:>10.0f}"
         )
     if answers:
         for record in records:

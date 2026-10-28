@@ -58,6 +58,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **Accept the shapes models send instead of failing validation:** a string for a list, an object keyed by names (`as_names`), `[source, destination]` for a path, and link names with either end first or written `node:interface`.
 - **Write errors that say what to do next:** "Name one of leaf2's addresses: ..." gets a correct retry.
 - **Watch gemma4's narration:** it returns an empty turn after tool results when its tool-calling reply also narrated, so `Chat.ask` strips that text from history.
+- **Don't throw away an investigation.** When every reply to a question has gone on tool calls, `Chat.ask` asks once more with no tools offered (`OUT_OF_TOOLS`), so what the model found becomes an answer.
 
 ## Testing
 
