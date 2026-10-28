@@ -218,6 +218,18 @@ class _Walk:
         self.on_path(node)
         return self.hops[node]
 
+    def cycle(self, devices: tuple[str, ...]) -> str:
+        """A loop's devices in order, each with the route that sends the packet on to the next."""
+
+        def by(device: str) -> str:
+            route = self.hops[device].route
+            return f" ({route.protocol} {route.prefix})" if route else ""
+
+        if len(devices) == 1:
+            return f"{devices[0]} sends it back to itself{by(devices[0])}"
+        steps = [f"{device} sends it to {after}{by(device)}" for device, after in zip(devices, devices[1:])]
+        return f"{', '.join(steps)}, and {devices[-1]} sends it back to {devices[0]}{by(devices[-1])}"
+
     def end(self, outcome: Outcome, node: str, detail: str) -> None:
         if (outcome, detail) not in self.endings:
             self.endings.append((outcome, detail))
@@ -250,7 +262,12 @@ class _Walk:
 
     def walk(self, device: str, came_from: tuple[str, ...]) -> None:
         if device in came_from:
-            self.end("loop", device, f"The packet comes back to {device}: a forwarding loop.")
+            # Every route in the loop is a fact, and any of them could be the mistake, so name them all.
+            cycle = came_from[came_from.index(device):]
+            self.end("loop", device, f"A forwarding loop: {self.cycle(cycle)}.")
+            for node in cycle:
+                if node not in self.trouble:
+                    self.trouble.append(node)
             return
         if len(came_from) >= MAX_HOPS:
             self.end("loop", device, f"The path is longer than {MAX_HOPS} hops.")
@@ -321,6 +338,19 @@ def _same_network(
         if route is not None and walk.destination in ipaddress.IPv4Network(route.prefix, strict=False):
             return route.prefix
     return None
+
+
+def _home(routes: dict[str, list[Route]], routers: list[str], address: IPv4Address) -> str:
+    """Where an address's network is connected: where a lost packet should have been heading."""
+    homes = []
+    for device in routers:
+        route = longest_match(routes.get(device, []), address)
+        if route is not None and is_connected(route):
+            interfaces = ", ".join(hop.interface for hop in route.next_hops if hop.interface)
+            homes.append(f"{device} ({route.prefix} on {interfaces})")
+    if not homes:
+        return f"None of the devices has {address} on a connected network."
+    return f"{address}'s network is connected to {' and '.join(homes)}."
 
 
 def _find(topology: Topology, name: str) -> TopologyNode | None:
@@ -410,6 +440,9 @@ def trace_path(
     failures = [(outcome, detail) for outcome, detail in walk.endings if outcome != "delivered"]
     outcome: Outcome = failures[0][0] if failures else "delivered"
     detail = " ".join(dict.fromkeys(detail for _, detail in (failures or walk.endings)))
+    if outcome in ("loop", "no_route", "dropped"):
+        # A routing decision lost the packet; where the destination really is shows which decision was wrong.
+        detail = f"{detail} {_home(routes, routers, target)}"
     if start is None:
         detail = f"{source} isn't on the map; its network is connected to {', '.join(gateways)}. {detail}"
     return ForwardingPath(
