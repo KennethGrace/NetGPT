@@ -49,5 +49,12 @@ def commands_run() -> list[str]:
 
 
 @pytest.fixture
+def counter_reads() -> dict[str, int]:
+    """How many times the fake platform has read each device's interface counters during this test."""
+    FakePlatform.counter_reads = {}
+    return FakePlatform.counter_reads
+
+
+@pytest.fixture
 def client(inventory: Inventory, commands_run: list[str]) -> Client:
     return Client(build_server(inventory, platforms={"fake": FakePlatform}))

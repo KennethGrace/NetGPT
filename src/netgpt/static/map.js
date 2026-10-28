@@ -17,6 +17,15 @@
 // not the model's: they hold across views, per plane, and are kept in this
 // browser's storage so a reload keeps them.
 //
+// While NetGPT polls, the links carry their traffic, drawn the way network
+// weathermaps draw it: a lane for each direction beside the wire, on the right as
+// the traffic travels, ending in an arrowhead. A lane's color is its share of the
+// port's speed, from a one-hue ramp (--load-1 to -5 in app.css), and a focused
+// link's lanes are labeled with their rates. A port that counted errors in the
+// last few minutes gets a warning sign and the count beside its name. Selecting a
+// link or a device charts its ports. Like the pins, the traffic is the viewer's
+// to hide.
+//
 // Device data reaches the map only as text: through textContent and attributes.
 
 const netmap = (() => {
@@ -25,6 +34,7 @@ const netmap = (() => {
   const svg = document.getElementById("map-graph");
   const heading = document.getElementById("map-title");
   const inspector = document.getElementById("map-inspector");
+  const trafficButton = document.getElementById("map-traffic");
   const still = matchMedia("(prefers-reduced-motion: reduce)");
 
   // Layout units; the camera scales the drawing to fit the panel.
@@ -51,6 +61,13 @@ const netmap = (() => {
   const SNAP = 8; // screen pixels: a dragged node this close to a pinned node's row or column joins it
   const DOUBLE_TAP = 400; // milliseconds
   const PINS = "netgpt.map.pins";
+  const TRAFFIC = "netgpt.map.traffic";
+  // A lane's color, by its share of the port's speed: under 10%, 10–25%, 25–50%, 50–75%, and 75% or more.
+  const BANDS = [10, 25, 50, 75];
+  const BAND_NAMES = ["under 10%", "10–25%", "25–50%", "50–75%", "75% or more"];
+  const LANE = 4.5; // how far each direction's lane runs beside the wire
+  const CHART_MINUTES = 15;
+  const CHART_PORTS = 6; // as many as a chart has colors for
   const SHORT = [
     [/^ethernet-/i, "e"], [/^TenGigabitEthernet/i, "Te"], [/^GigabitEthernet/i, "Gi"],
     [/^FastEthernet/i, "Fa"], [/^HundredGigE/i, "Hu"], [/^Ethernet/i, "Eth"], [/^Port-channel/i, "Po"],
@@ -70,6 +87,13 @@ const netmap = (() => {
   let camera = null; // the viewBox, eased toward the drawing as it moves
   let dragging = null;
   let tapped = null; // the last node clicked without a drag, and when, to tell a double click
+  let traffic = null; // the latest rates by device:port, from /api/traffic
+  let trafficShown = loadChoice();
+  let polling = true; // until the server says NetGPT doesn't poll
+  let pollEvery = 30; // seconds between polls, as the server says
+  let errorMinutes = 5; // how far back the errors on the map go, as the server says
+  let trafficAsked = 0;
+  let trafficAt = 0;
 
   function loadPins() {
     try {
@@ -85,6 +109,22 @@ const netmap = (() => {
       localStorage.setItem(PINS, JSON.stringify(pins));
     } catch {
       // Storage is off or full: the pins last until the page is reloaded.
+    }
+  }
+
+  function loadChoice() {
+    try {
+      return localStorage.getItem(TRAFFIC) !== "hidden";
+    } catch {
+      return true;
+    }
+  }
+
+  function saveChoice() {
+    try {
+      localStorage.setItem(TRAFFIC, trafficShown ? "shown" : "hidden");
+    } catch {
+      // As with the pins: the choice lasts until the page is reloaded.
     }
   }
 
@@ -160,15 +200,26 @@ const netmap = (() => {
     return group;
   }
 
+  function portLabel(end) {
+    // The port's name, and room after it for a warning when the port counts errors.
+    const label = shape("text", { class: "port" });
+    label.append(shape("tspan", {}, endLabel(end)), shape("tspan", { class: "flag" }));
+    return label;
+  }
+
   function linkShape(data) {
     const group = shape("g", { class: "link" });
     group.dataset.id = data.id;
     group.append(
       shape("line", { class: "hit" }),
       shape("line", { class: "wire" }),
-      shape("text", { class: "port" }, endLabel(data.a)),
-      shape("text", { class: "port" }, endLabel(data.b)),
+      shape("path", { class: "lane" }),
+      shape("path", { class: "lane" }),
+      portLabel(data.a),
+      portLabel(data.b),
       shape("text", { class: "port network" }, data.subnet || ""),
+      shape("text", { class: "rate" }),
+      shape("text", { class: "rate" }),
       shape("text", { class: "note" }),
     );
     linkLayer.append(group);
@@ -262,6 +313,9 @@ const netmap = (() => {
       .force("y", d3.forceY((node) => node.tierY).strength((node) => PULL[node.emphasis]))
       .force("ring", d3.forceRadial((node) => (node.emphasis === "near" ? core + 60 : core + 190)).strength((node) => RING[node.emphasis]))
       .force("labels", labelRoom);
+    // After the link force, which turns each link's ends from names into nodes.
+    retraffic();
+    if (polling && trafficShown && Date.now() - trafficAsked >= pollEvery * 1000) refreshTraffic();
     settle();
     inspect(null);
   }
@@ -357,6 +411,7 @@ const netmap = (() => {
   }
 
   function draw() {
+    const rates = []; // each rate label, its link, and where it could go
     for (const link of links) {
       const { source: a, target: b, element } = link;
       for (const line of element.querySelectorAll("line")) {
@@ -385,7 +440,14 @@ const netmap = (() => {
       network.setAttribute("x", ((a.x + b.x) / 2 + across * 10).toFixed(1));
       network.setAttribute("y", ((a.y + b.y) / 2 + down * 10 + 4).toFixed(1));
       network.classList.toggle("beside", across > 0.5);
+      const [laneA, laneB] = element.querySelectorAll(".lane");
+      const [rateA, rateB] = element.querySelectorAll(".rate");
+      const [ux, uy] = [(b.x - a.x) / length, (b.y - a.y) / length];
+      const flows = link.flows || [];
+      rates.push([rateA, link, lane(laneA, a, b, ux, uy, length, flows[0])]);
+      rates.push([rateB, link, lane(laneB, b, a, -ux, -uy, length, flows[1])]);
     }
+    placeRates(rates);
     for (const node of nodes.values()) node.element.setAttribute("transform", `translate(${node.x.toFixed(1)},${node.y.toFixed(1)})`);
     aim(false);
   }
@@ -414,6 +476,277 @@ const netmap = (() => {
     }
     svg.setAttribute("viewBox", `${camera.x.toFixed(1)} ${camera.y.toFixed(1)} ${camera.width.toFixed(1)} ${camera.height.toFixed(1)}`);
   }
+
+  function edge(node, ux, uy) {
+    // How far a node's body reaches in a direction: a circle, a network's wide box, or a segment's diamond.
+    const [across, down] = [Math.abs(ux) || 1e-9, Math.abs(uy) || 1e-9];
+    if (node.data.kind === "subnet") return Math.min(reach(node) / across, (node.radius * 0.75) / down);
+    if (node.data.kind === "segment") return (node.radius * 1.06) / (across + down);
+    return node.radius;
+  }
+
+  function crowding(x, y, self) {
+    // How near a point comes to any other link's wire.
+    let nearest = Infinity;
+    for (const link of links) {
+      if (link === self) continue;
+      const { source: a, target: b } = link;
+      const [dx, dy] = [b.x - a.x, b.y - a.y];
+      const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+      nearest = Math.min(nearest, Math.hypot(a.x + t * dx - x, a.y + t * dy - y));
+    }
+    return nearest;
+  }
+
+  function lane(path, from, to, ux, uy, length, flow) {
+    // One direction's lane runs on the right of the wire as it travels, from body to
+    // body, and ends in a barb on the outside. Returns the places its rate could go:
+    // beside it near its start, or near its end, leaving the middle of the link to
+    // notes and network prefixes.
+    const start = edge(from, ux, uy) + 3;
+    const end = length - edge(to, -ux, -uy) - 3;
+    if (!flow || end - start < 16) {
+      path.setAttribute("d", "");
+      return [];
+    }
+    const [nx, ny] = [-uy, ux];
+    const at = (along, side) => [from.x + ux * along + nx * side, from.y + uy * along + ny * side];
+    const point = (along, side) => at(along, side).map((value) => value.toFixed(1)).join(",");
+    path.setAttribute("d", `M${point(start, LANE)}L${point(end, LANE)}M${point(end - 7, LANE + 4)}L${point(end, LANE)}`);
+    const anchor = nx > 0.5 ? "start" : nx < -0.5 ? "end" : "middle";
+    const baseline = ny > 0.5 ? "hanging" : ny < -0.5 ? "auto" : "middle";
+    const along = Math.min(28, (end - start) * 0.3);
+    return [start + along, end - along].map((distance) => {
+      const [x, y] = at(distance, LANE + 7);
+      return { x, y, anchor, baseline };
+    });
+  }
+
+  function textBox(x, y, width, height, anchor = "middle", baseline = "middle") {
+    const left = anchor === "start" ? x : anchor === "end" ? x - width : x - width / 2;
+    const top = baseline === "hanging" ? y : baseline === "auto" ? y - height : y - height / 2;
+    return { left, top, right: left + width, bottom: top + height };
+  }
+
+  const overlap = (one, two) =>
+    Math.max(0, Math.min(one.right, two.right) - Math.max(one.left, two.left)) *
+    Math.max(0, Math.min(one.bottom, two.bottom) - Math.max(one.top, two.top));
+
+  function placeRates(rates) {
+    // Each shown rate goes at whichever end of its lane covers least of what is already
+    // drawn: nodes and their names, port names and prefixes, other links' wires, and
+    // the rates placed before it. Text widths are estimated, which is close enough.
+    const taken = [];
+    for (const node of nodes.values()) {
+      taken.push(textBox(node.x, node.y, reach(node) * 2, node.radius * 2));
+      taken.push(textBox(node.x + reach(node) + 7, node.y, node.data.label.length * CHAR_WIDTH, 14, "start"));
+    }
+    for (const link of links) {
+      const named = link.emphasis === "focus" && link.data.plane !== "management";
+      for (const text of link.element.querySelectorAll(".port")) {
+        if (!text.textContent || !(named || text.classList.contains("flagged"))) continue;
+        const anchor = text.classList.contains("beside") ? "start" : "middle";
+        taken.push(textBox(Number(text.getAttribute("x")), Number(text.getAttribute("y")), text.textContent.length * 6, 11, anchor));
+      }
+    }
+    for (const [label, link, options] of rates) {
+      if (!options.length) continue;
+      const width = label.textContent.length * 6.5;
+      const boxes = options.map(({ x, y, anchor, baseline }) => textBox(x, y, width, 11, anchor, baseline));
+      const costs = boxes.map((box) => {
+        const covered = taken.reduce((sum, other) => sum + overlap(box, other), 0);
+        return covered + (crowding((box.left + box.right) / 2, (box.top + box.bottom) / 2, link) < 8 ? 200 : 0);
+      });
+      const best = link.emphasis === "focus" && costs[1] < costs[0] ? 1 : 0;
+      const { x, y, anchor, baseline } = options[best];
+      label.setAttribute("x", x.toFixed(1));
+      label.setAttribute("y", y.toFixed(1));
+      label.setAttribute("text-anchor", anchor);
+      label.setAttribute("dominant-baseline", baseline);
+      if (link.emphasis === "focus") taken.push(boxes[best]);
+    }
+  }
+
+  // ---- Traffic
+
+  const portOf = (name) => name.replace(/\.\d+$/, ""); // a subinterface's traffic is its port's
+  const band = (percent) => (percent == null ? 0 : 1 + BANDS.filter((limit) => percent >= limit).length);
+
+  function measured(end) {
+    // The latest rates of the port at one end of a link, if NetGPT polls it.
+    return traffic && end.interface ? traffic.get(`${end.node}:${portOf(end.interface)}`) : undefined;
+  }
+
+  function sending(from, to) {
+    // What one end of a link sends: what left its port, or failing that, what arrived at the far end's.
+    const here = measured(from);
+    if (here) return { mbps: here.out_mbps, percent: here.out_percent, speed: here.speed };
+    const there = measured(to);
+    if (there) return { mbps: there.in_mbps, percent: there.in_percent, speed: there.speed };
+    return null;
+  }
+
+  function rateText(mbps, long = false) {
+    // 38.2M on the map, 38.2 Mbit/s in the inspector: always three figures, so 47.0M sits evenly beside 47.1M.
+    if (!mbps) return long ? "0 bit/s" : "0";
+    const [value, unit] = mbps >= 1e6 ? [mbps / 1e6, "T"] : mbps >= 1000 ? [mbps / 1000, "G"] : mbps >= 1 ? [mbps, "M"] : [mbps * 1000, "k"];
+    const shown = value.toPrecision(3);
+    return long ? `${shown} ${unit}bit/s` : `${shown}${unit}`;
+  }
+
+  const clock = (milliseconds) =>
+    new Date(milliseconds).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+
+  function retraffic() {
+    // Work out each link's two directions from the latest rates, and flag the ports that counted errors.
+    const shown = trafficShown && traffic;
+    for (const link of links) {
+      const { a, b } = link.data;
+      link.flows = shown ? [sending(a, b), sending(b, a)] : [null, null];
+      const lanes = link.element.querySelectorAll(".lane");
+      const rates = link.element.querySelectorAll(".rate");
+      link.flows.forEach((flow, index) => {
+        lanes[index].setAttribute("class", flow ? `lane u${band(flow.percent)}` : "lane");
+        rates[index].textContent = flow ? rateText(flow.mbps) : "";
+      });
+      const labels = link.element.querySelectorAll(".port");
+      [a, b].forEach((end, index) => {
+        const port = shown && measured(end);
+        const errors = port ? port.in_errors + port.out_errors : 0;
+        labels[index].querySelector(".flag").textContent = errors ? ` ⚠ ${errors}` : "";
+        labels[index].classList.toggle("flagged", errors > 0);
+      });
+    }
+    draw();
+    const panel = inspector.querySelector(".traffic");
+    if (panel) panel.replaceWith(trafficLines(selected));
+  }
+
+  async function refreshTraffic() {
+    trafficAsked = Date.now();
+    let body;
+    try {
+      const response = await fetch("api/traffic");
+      if (response.status === 404) {
+        // NetGPT isn't polling: there is no traffic to show, now or later.
+        polling = false;
+        trafficButton.hidden = true;
+        return;
+      }
+      if (!response.ok) return;
+      body = await response.json();
+    } catch {
+      return; // Keep showing the last rates; the next try may get through.
+    }
+    const first = !traffic || !traffic.size;
+    pollEvery = body.interval;
+    errorMinutes = body.minutes;
+    traffic = new Map(body.ports.map((port) => [`${port.device}:${port.interface}`, port]));
+    trafficAt = Date.now();
+    trafficButton.hidden = false;
+    retraffic();
+    // The first rates can chart whatever is already selected.
+    if (first && current) inspect(selected);
+  }
+
+  function devicePorts(id) {
+    // A device's ports that the map's links name and NetGPT polls.
+    const found = new Map();
+    for (const link of links) {
+      for (const end of [link.data.a, link.data.b]) {
+        const port = end.node === id && measured(end);
+        if (port) found.set(`${port.device}:${port.interface}`, port);
+      }
+    }
+    return [...found.values()];
+  }
+
+  function counted(panel, port) {
+    // What a port counted going wrong in the last few minutes. Errors get the warning; discards are only told.
+    const told = [
+      [port.in_errors, "input error"],
+      [port.out_errors, "output error"],
+      [port.in_discards, "input discard"],
+      [port.out_discards, "output discard"],
+    ]
+      .filter(([count]) => count > 0)
+      .map(([count, name]) => `${count} ${name}${count === 1 ? "" : "s"}`);
+    if (!told.length) return;
+    const text = `${port.device} ${port.interface} counted ${told.join(", ")} in the last ${errorMinutes} minutes.`;
+    const errors = port.in_errors + port.out_errors > 0;
+    panel.append(html("p", errors ? "warned" : "kind", errors ? `⚠ ${text}` : text));
+  }
+
+  function laneKey(level) {
+    const key = shape("svg", { class: "lane-key", viewBox: "0 0 22 10", width: "22", height: "10", "aria-hidden": "true" });
+    key.append(shape("path", { class: `lane u${level}`, d: "M2,6L20,6M13,2L20,6" }));
+    return key;
+  }
+
+  function legend(panel) {
+    panel.append(html("p", "hint", "Each link has a lane for each direction, on the right as the traffic travels."));
+    const row = html("p", "traffic-legend");
+    row.append(html("span", "", "Share of port speed:"));
+    BAND_NAMES.forEach((name, index) => {
+      const item = html("span", "item");
+      item.append(laneKey(index + 1), document.createTextNode(name));
+      row.append(item);
+    });
+    const flag = html("span", "item");
+    flag.append(html("span", "flag", "⚠"), document.createTextNode(`errors, last ${errorMinutes} minutes`));
+    row.append(flag, html("span", "", `Updated ${clock(trafficAt)}, every ${pollEvery} s.`));
+    panel.append(row);
+  }
+
+  function trafficLines(id) {
+    // The inspector's account of the traffic: a link's two directions, the errors at a
+    // device's ports, or with nothing selected, how to read the lanes.
+    const panel = html("div", "traffic");
+    if (!trafficShown || !polling) return panel;
+    if (!traffic) {
+      panel.append(html("p", "hint", "Traffic: waiting for the first rates."));
+      return panel;
+    }
+    const link = id && links.find((candidate) => candidate.id === id);
+    if (link) {
+      const { a, b } = link.data;
+      link.flows.forEach((flow, index) => {
+        if (!flow) return;
+        const [from, to] = index ? [b.node, a.node] : [a.node, b.node];
+        const share = flow.percent == null ? "" : `, ${Number(flow.percent.toPrecision(2))}% of ${flow.speed}`;
+        panel.append(html("p", "", `${from} → ${to}: ${rateText(flow.mbps, true)}${share}`));
+      });
+      for (const port of new Set([measured(a), measured(b)])) if (port) counted(panel, port);
+    } else if (id && nodes.has(id)) {
+      for (const port of devicePorts(id)) counted(panel, port);
+    } else {
+      legend(panel);
+    }
+    return panel;
+  }
+
+  function chartOf(ports) {
+    // The selected link's or device's ports over the last minutes, kept live by chart.js.
+    if (!trafficShown || !ports.length) return false;
+    const names = ports.slice(0, CHART_PORTS).map((port) => `${port.device}:${port.interface}`);
+    const chart = { title: `Last ${CHART_MINUTES} minutes`, metric: "traffic", unit: "Mbit/s", minutes: CHART_MINUTES, interval: pollEvery };
+    netchart.add(inspector, { ...chart, ports: names, lines: [] }, { height: 150 });
+    return true;
+  }
+
+  trafficButton.setAttribute("aria-pressed", String(trafficShown));
+  trafficButton.addEventListener("click", () => {
+    trafficShown = !trafficShown;
+    saveChoice();
+    trafficButton.setAttribute("aria-pressed", String(trafficShown));
+    retraffic();
+    inspect(selected);
+    if (trafficShown) refreshTraffic();
+  });
+
+  setInterval(() => {
+    if (current && polling && trafficShown && !panel.hidden && Date.now() - trafficAsked >= pollEvery * 1000) refreshTraffic();
+  }, 5000);
 
   // ---- Pinning
 
@@ -475,6 +808,7 @@ const netmap = (() => {
     inspector.replaceChildren();
     const node = id && nodes.get(id);
     const link = id && links.find((candidate) => candidate.id === id);
+    let charted = false;
     if (node) {
       const data = node.data;
       const head = html("div", "head");
@@ -490,6 +824,8 @@ const netmap = (() => {
       const hop = current.path && current.path.hops.find((candidate) => candidate.node === id);
       if (hop && hop.route) inspector.append(html("p", node.trouble ? "failed" : "remark", forwarding(hop)));
       else if (node.note) inspector.append(html("p", node.trouble ? "failed" : "remark", node.note));
+      inspector.append(trafficLines(id));
+      charted = chartOf(devicePorts(id));
       evidence(data.evidence);
     } else if (link) {
       const data = link.data;
@@ -502,6 +838,9 @@ const netmap = (() => {
       }
       if (data.one_sided) inspector.append(html("p", "failed", "Only one end reports this link, though both were asked."));
       if (link.note) inspector.append(html("p", "remark", link.note));
+      inspector.append(trafficLines(id));
+      // One port tells both directions; the far end's would only say the same again.
+      charted = chartOf([measured(data.a) || measured(data.b)].filter(Boolean));
       evidence(data.evidence);
     } else if (current) {
       if (current.path) inspector.append(html("p", current.path.outcome === "delivered" ? "remark" : "failed", current.path.detail));
@@ -516,7 +855,9 @@ const netmap = (() => {
         pinned.append(release);
         inspector.append(pinned);
       }
+      inspector.append(trafficLines(null));
     }
+    inspector.classList.toggle("charted", charted);
   }
 
   function forwarding(hop) {

@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import ipaddress
 import logging
 import os
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import Annotated, TypeVar
+from typing import Annotated, Any, TypeVar
 
 import icmplib
 from mcp.server.mcpserver import MCPServer
@@ -29,7 +30,8 @@ from pydantic import BaseModel, BeforeValidator, Field
 from netgpt import __version__
 from netgpt.guard import GuardError
 from netgpt.inventory import Inventory, InventoryError
-from netgpt.platforms import PLATFORMS, Platform, PlatformError
+from netgpt.platforms import PLATFORMS, Platform, PlatformError, platform_for
+from netgpt.platforms import connect as connect_to
 from netgpt.platforms.base import UnsupportedError
 from netgpt.primitives import (
     ArpEntry,
@@ -38,12 +40,14 @@ from netgpt.primitives import (
     DeviceError,
     DeviceInfo,
     Interface,
+    InterfaceTraffic,
     LldpNeighbor,
     MacEntry,
     PingResult,
     Route,
 )
 from netgpt.forwarding import ForwardingPath, TraceError, trace_path
+from netgpt.statistics import DEFAULT_INTERVAL, DEFAULT_WINDOW, MAX_CHART_PORTS, Chart, ChartError, Metric, Poller, describe_chart
 from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_topology, port_of
 from netgpt.views import View, ViewError, describe, make_view
 
@@ -61,6 +65,12 @@ from a source to a destination go, and where they are lost. Use show for anythin
 cover; it accepts only read-only commands and says why when it refuses one.
 """
 
+STATISTICS_INSTRUCTIONS = """\
+interface_traffic reads the interface counters NetGPT polls every {interval:g} seconds: how much each port
+sends and receives, how busy it is as a share of its speed, and the errors, discards, and link flaps
+counted lately.
+"""
+
 DISPLAY_INSTRUCTIONS = """\
 The user sees a map of the network beside the chat. Call display whenever a picture helps: the
 topology, where a host is attached, the path between two points, where a problem is. Focus on the
@@ -70,6 +80,14 @@ path (source and destination) and the server traces it through the routing table
 default) draws the cabling: switches, and which port each host is plugged into. layer 3 draws the
 routers and the networks between them, without the switches. Refer to the map in your answer rather
 than describing every link in words.
+"""
+
+CHART_INSTRUCTIONS = """\
+Call chart to draw ports' traffic, utilization, or errors over time in the conversation. The chart keeps
+updating as NetGPT polls, so use it whenever the answer is about how busy something is, or how its errors
+change, and refer to it rather than listing numbers. The map shows traffic too: beside each link, a lane
+for each direction, colored by its share of the port's speed and labeled with its rate, and a warning sign
+with a count on any port that counted errors in the last 5 minutes. Selecting a link or device charts it.
 """
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
@@ -105,6 +123,18 @@ DeviceNames = Annotated[
 ]
 
 
+Minutes = Annotated[
+    float, Field(description=f"How far back to look, in minutes. NetGPT keeps the last {DEFAULT_WINDOW / 60:g} minutes.")
+]
+
+
+ChartPorts = Annotated[
+    list[str],
+    BeforeValidator(as_names),
+    Field(description="Ports as device:port (leaf1:ethernet-1/49), links as device--device, or devices for all their ports."),
+]
+
+
 class PathEnds(BaseModel):
     """The two ends of a path to trace."""
 
@@ -120,27 +150,39 @@ def as_path_ends(value: object) -> object:
 
 
 def build_server(
-    inventory: Inventory, platforms: dict[str, type[Platform]] = PLATFORMS, display: bool = False
+    inventory: Inventory,
+    platforms: dict[str, type[Platform]] = PLATFORMS,
+    display: bool = False,
+    statistics: Poller | None = None,
 ) -> MCPServer:
     """
     Build the MCP server for an inventory. Platforms can be swapped out for testing.
     display adds the tool that draws the network; only offer it to a client that can
-    show the drawing.
+    show the drawing. With a poller, the server polls interface counters while a
+    client is connected, and offers interface_traffic to read them.
     """
-    instructions = INSTRUCTIONS + (DISPLAY_INSTRUCTIONS if display else "")
-    server = MCPServer(name="netgpt", version=__version__, instructions=instructions)
+    instructions = (
+        INSTRUCTIONS
+        + (STATISTICS_INSTRUCTIONS.format(interval=statistics.interval) if statistics else "")
+        + (DISPLAY_INSTRUCTIONS if display else "")
+        + (CHART_INSTRUCTIONS if display and statistics else "")
+    )
+
+    @contextlib.asynccontextmanager
+    async def polling(_: MCPServer) -> AsyncIterator[dict[str, Any]]:
+        if statistics is None:
+            yield {}
+            return
+        async with statistics.running():
+            yield {}
+
+    server = MCPServer(name="netgpt", version=__version__, instructions=instructions, lifespan=polling)
 
     def platform_class(name: str) -> type[Platform]:
-        device = inventory.get(name)
-        platform = platforms.get(device.platform)
-        if platform is None:
-            supported = ", ".join(sorted(platforms))
-            raise InventoryError(f"Device {name} has platform '{device.platform}'; supported platforms: {supported}.")
-        return platform
+        return platform_for(inventory, name, platforms)
 
     def connect(name: str) -> Platform:
-        device = inventory.get(name)
-        return platform_class(name)(device, inventory.credentials_for(device))
+        return connect_to(inventory, name, platforms)
 
     async def collect(
         devices: list[str] | None,
@@ -212,6 +254,20 @@ def build_server(
             failure.device: failure.error for failure in failures if failure.device in present or failure.device not in answered
         }
         return topology, found, trace_path(topology, tables, unreadable, source, destination, network_instance)
+
+    async def link_port(name: str) -> str:
+        """A link named device--device, as the first device's port on it (from LLDP); any other name as it is."""
+        ends = [end.strip() for end in name.split("--")]
+        if len(ends) != 2:
+            return name
+        known = {device.name for device in inventory.devices}
+        if ends[0] not in known:
+            ends.reverse()
+        neighbors, _ = await collect([ends[0]], lambda platform: platform.lldp_neighbors())
+        ports = [neighbor.interface for neighbor in neighbors if neighbor.neighbor == ends[1]]
+        if not ports:
+            raise ChartError(f"LLDP shows no link from {ends[0]} to {ends[1]}. Name a port as device:port instead.")
+        return f"{ends[0]}:{ports[0]}"
 
     @server.tool(annotations=READ_ONLY)
     def list_devices() -> list[DeviceInfo]:
@@ -285,6 +341,22 @@ def build_server(
         items, errors = await collect(devices, lambda platform: platform.routes(network_instance))
         return Collection[Route](items=items, errors=errors)
 
+    if statistics is not None:
+
+        @server.tool(
+            annotations=READ_ONLY,
+            description=(
+                "Return each port's traffic and errors over the last minutes, from the interface counters NetGPT polls "
+                f"every {statistics.interval:g} seconds: megabits per second in and out between the latest two polls, the "
+                "same as a percent of the port's speed, the busiest interval's rates, and the errors, discards, and link "
+                "flaps counted. Use it to find busy or saturated links, and links that drop or damage packets. One call "
+                "covers every device; name devices only to leave the others out."
+            ),
+        )
+        def interface_traffic(devices: DeviceNames = None, minutes: Minutes = 15) -> Collection[InterfaceTraffic]:
+            items, errors = statistics.traffic(devices, minutes)
+            return Collection[InterfaceTraffic](items=items, errors=errors)
+
     @server.tool(annotations=READ_ONLY)
     async def topology(plane: PlaneChoice = "data", layer: Layer = "l2", network_instance: str = "default") -> Topology:
         """
@@ -351,6 +423,33 @@ def build_server(
             return CallToolResult(
                 content=[TextContent(type="text", text=describe(view))],
                 structured_content=view.model_dump(mode="json"),
+            )
+
+    if display and statistics is not None:
+
+        @server.tool(
+            name="chart",
+            annotations=READ_ONLY,
+            description=(
+                "Draw a chart in the conversation of ports' rates over the last minutes. It keeps updating every "
+                f"{statistics.interval:g} seconds as NetGPT polls. Name ports as device:port (leaf1:ethernet-1/49), a "
+                "link as device--device for the first device's port on it, or a device for all its ports except "
+                f"management; up to {MAX_CHART_PORTS} ports. metric is traffic "
+                "(Mbit/s in and out, the default), percent (of each port's speed), or errors (errors and discards in "
+                "each interval between polls, in and out)."
+            ),
+        )
+        async def chart(
+            title: str, ports: ChartPorts, metric: Metric = "traffic", minutes: Minutes = 15
+        ) -> Annotated[CallToolResult, Chart]:
+            try:
+                drawn = statistics.chart(title, [await link_port(name) for name in ports], metric, minutes)
+            except ChartError as error:
+                raise ToolError(str(error)) from error
+            # The model reads a summary; the page draws the chart from the structured content.
+            return CallToolResult(
+                content=[TextContent(type="text", text=describe_chart(drawn))],
+                structured_content=drawn.model_dump(mode="json"),
             )
 
     @server.tool(annotations=READ_ONLY)
@@ -429,12 +528,23 @@ def main() -> None:
         default=os.environ.get("NETGPT_INVENTORY"),
         help="Path to the inventory YAML file (default: $NETGPT_INVENTORY).",
     )
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=DEFAULT_INTERVAL,
+        help="Seconds between polls of every device's interface counters, which interface_traffic reads. "
+        "0 turns polling, and the tool, off (default: %(default)g).",
+    )
     parser.add_argument("--log-level", default="INFO", help="Logging level, written to stderr.")
     args = parser.parse_args()
     if args.inventory is None:
         parser.error("--inventory is required (or set NETGPT_INVENTORY).")
+    if args.poll_interval < 0:
+        parser.error("--poll-interval can't be negative; 0 turns polling off.")
 
     # stdout carries the MCP protocol, so logs must go to stderr.
     logging.basicConfig(level=args.log_level, stream=sys.stderr)
-    server = build_server(Inventory.load(Path(args.inventory)))
+    inventory = Inventory.load(Path(args.inventory))
+    statistics = Poller(inventory, interval=args.poll_interval) if args.poll_interval > 0 else None
+    server = build_server(inventory, statistics=statistics)
     server.run("stdio")

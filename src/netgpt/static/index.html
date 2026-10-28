@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="app.css">
   <script src="d3-force.js" defer></script>
   <script src="map.js" defer></script>
+  <script src="chart.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -19,7 +20,10 @@
       <button id="reset" type="button">New conversation</button>
     </header>
     <aside id="map" aria-label="Network map" hidden>
-      <h2 id="map-title"></h2>
+      <div class="map-head">
+        <h2 id="map-title"></h2>
+        <button id="map-traffic" type="button" aria-pressed="true" title="Show or hide each link's traffic" hidden>Traffic</button>
+      </div>
       <svg id="map-graph" role="img" aria-labelledby="map-title"></svg>
       <div id="map-inspector"></div>
     </aside>

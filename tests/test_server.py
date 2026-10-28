@@ -15,6 +15,7 @@ from netgpt.inventory import Inventory, InventoryError
 from netgpt.platforms import PlatformError
 from netgpt.primitives import PingResult
 from netgpt.server import build_server
+from netgpt.statistics import Poller
 
 from fakes import FakePlatform
 
@@ -91,6 +92,45 @@ async def test_every_table_tool_says_one_call_covers_every_device(client: Client
     for name in ("lldp_neighbors", "interfaces", "mac_table", "arp_table", "routes"):
         assert "One call covers every device" in tools[name].description
         assert "all in this one call" in tools[name].input_schema["properties"]["devices"]["description"]
+
+
+@pytest.mark.anyio
+async def test_a_polling_server_offers_interface_traffic_and_answers_from_its_samples(
+    inventory: Inventory, counter_reads: dict[str, int]
+) -> None:
+    now = [1000.0]
+    poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30, clock=lambda: now[0])
+    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, statistics=poller)) as client:
+        assert "polls every 30 seconds" in (client.instructions or "")
+        # Polls of our own, 30 seconds apart, rather than waiting for the server's.
+        await poller.poll()
+        now[0] += 30
+        await poller.poll()
+        result = await client.call_tool("interface_traffic", {"devices": ["leaf1", "broken"]})
+    items, errors = result.structured_content["items"], result.structured_content["errors"]
+    assert [(item["device"], item["interface"], item["in_mbps"], item["in_percent"]) for item in items] == [
+        ("leaf1", "ethernet-1/1", 10.0, 1.0)
+    ]
+    assert errors == [{"device": "broken", "error": "broken: connection refused"}]
+
+
+@pytest.mark.anyio
+async def test_only_a_page_that_can_draw_and_a_server_that_polls_offer_chart(inventory: Inventory, counter_reads: dict[str, int]) -> None:
+    def poller() -> Poller:
+        return Poller(inventory, platforms={"fake": FakePlatform}, interval=30)
+
+    for display, statistics, offered in [(True, poller(), True), (True, None, False), (False, poller(), False)]:
+        async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=display, statistics=statistics)) as client:
+            assert ("chart" in {tool.name for tool in (await client.list_tools()).tools}) is offered
+
+
+@pytest.mark.anyio
+async def test_a_chart_of_a_link_is_of_the_port_lldp_says_is_on_it(inventory: Inventory, counter_reads: dict[str, int]) -> None:
+    poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30)
+    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True, statistics=poller)) as client:
+        # The fake platform cables ethernet-1/49 to spine1, but has counters only for ethernet-1/1.
+        result = await client.call_tool("chart", {"title": "Uplink", "ports": ["spine1--leaf1"]})
+    assert result.is_error and "No polled port is called 'leaf1:ethernet-1/49'" in result.content[0].text
 
 
 @pytest.mark.anyio

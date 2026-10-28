@@ -18,7 +18,17 @@ from netgpt.guard import NOKIA_SRLINUX
 from netgpt.platforms import Platform, PlatformError
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms.srlinux import SRLinuxPlatform
-from netgpt.primitives import ArpEntry, DeviceInfo, Interface, LldpNeighbor, MacEntry, NextHop, PingResult, Route
+from netgpt.primitives import (
+    ArpEntry,
+    DeviceInfo,
+    Interface,
+    InterfaceCounters,
+    LldpNeighbor,
+    MacEntry,
+    NextHop,
+    PingResult,
+    Route,
+)
 from netgpt.topology import Topology, build_topology
 
 FIXTURES = Path(__file__).parent / "fixtures" / "srlinux"
@@ -173,6 +183,7 @@ class FakePlatform(Platform):
     management_interfaces = re.compile(r"^mgmt\d+$")
     commands_run: list[str] = []
     pings: list[tuple[str, str, int, str]] = []
+    counter_reads: dict[str, int] = {}
 
     async def _run_checked_cli(self, command: str) -> str:
         FakePlatform.commands_run.append(command)
@@ -188,6 +199,32 @@ class FakePlatform(Platform):
             raise PlatformError("broken: connection refused")
         host = {"leaf1": "198.51.100.11", "leaf2": "198.51.100.12"}[self.device.name]
         return [ArpEntry(device=self.device.name, interface="ethernet-1/1.0", ip_address=host, mac="02:00:00:00:00:01")]
+
+    async def interface_counters(self) -> list[InterfaceCounters]:
+        """
+        Each read finds 37,500,000 more octets in and 3,750,000 more out on ethernet-1/1, a
+        1G port, and two more errors in: 10 and 1 Mbit/s when the reads are 30 seconds apart.
+        """
+        if self.device.name == "broken":
+            raise PlatformError("broken: connection refused")
+        reads = FakePlatform.counter_reads[self.device.name] = FakePlatform.counter_reads.get(self.device.name, 0) + 1
+        return [
+            InterfaceCounters(
+                device=self.device.name,
+                interface="ethernet-1/1",
+                oper_state="up",
+                speed_bps=10**9,
+                in_octets=reads * 37_500_000,
+                out_octets=reads * 3_750_000,
+                in_packets=reads * 25_000,
+                out_packets=reads * 2_500,
+                in_errors=reads * 2,
+                out_errors=0,
+                in_discards=0,
+                out_discards=0,
+                carrier_transitions=1,
+            )
+        ]
 
     async def ping(self, destination: str, count: int, network_instance: str) -> PingResult:
         """Every network's .1 and .2 answer; nothing else does."""

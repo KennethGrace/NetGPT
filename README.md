@@ -22,12 +22,15 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
 | `ping_sweep`     | The addresses that answer ICMP in a network, pinged from a device (inside one of its network instances) or from the NetGPT host itself. |
+| `interface_traffic` | Each port's traffic in and out (Mbit/s, and percent of its speed), its busiest interval, and the errors, discards, and link flaps counted, from counters NetGPT polls. |
 
 The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call.
 
 `topology` draws the network at one of two layers. At layer 2 (the default) it is the cabling. Each cable is reconciled from both ends, and a link only one end reports is flagged. Each host hangs off the port it is plugged into: ARP says which port an address was heard on, and where a switch is in the way, the switch's MAC table says which of its ports the address is behind. If a switch has forgotten a MAC, the host is drawn behind the switch with no port, and the evidence says why. At layer 3 the graph is the routing in one network instance: routers, the networks their interfaces are on, and the hosts on those networks. Switches drop out, and a network between just two routers is drawn as a link between them. Both layers keep the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
 
 `forwarding_path` walks the routing tables the way the devices do. At each hop it takes the longest matching route, resolves the route's next hop down to an interface (a static route's next hop is often just an address), and follows the cable on that interface to the next device, through any switches in the way. Between two hosts on the same network, no router is involved: the path goes straight across the switch. It reports where the path ends: delivered, or lost, with the reason (no route, a route that drops the packet, a loop, a next hop nothing answers ARP for, or a device it couldn't read). It sends nothing on the network.
+
+`interface_traffic` reads from a poller, not from the devices directly. While a client is connected, NetGPT reads every device's interface counters every 30 seconds (`--poll-interval`; 0 turns polling and the tool off) and keeps the last hour in memory. A rate is the difference between two readings over the time between them. The second poll comes 5 seconds after the first, so there are rates almost at once. A counter that goes backwards was reset (the device restarted, or someone cleared it), and that interval isn't measured.
 
 ## Safety model
 
@@ -49,7 +52,7 @@ pytest
 
 ### A lab to talk to
 
-[`lab/`](lab/) holds a [containerlab](https://containerlab.dev) topology: one Nokia SR Linux spine and two leaves, with static routing across the fabric. A Linux host hangs off leaf1. Behind leaf2 is switch1, an SR Linux node that only bridges, with two hosts on its LAN. It needs [containerlab](https://containerlab.dev/install/) and Docker:
+[`lab/`](lab/) holds a [containerlab](https://containerlab.dev) topology: one Nokia SR Linux spine and two leaves, with static routing across the fabric. A Linux host hangs off leaf1. Behind leaf2 is switch1, an SR Linux node that only bridges, with two hosts on its LAN. The hosts keep traffic flowing with iperf3 ([`lab/traffic.sh`](lab/traffic.sh)), from host1 to host2 and from host3 to host1, at a rate that changes every minute, so the interface counters have something to count. It needs [containerlab](https://containerlab.dev/install/) and Docker:
 
 ```bash
 sudo containerlab deploy -t lab/netgpt.clab.yml
@@ -128,11 +131,21 @@ Anyone who can load the page can query the network, so every request needs a tok
 
 The page also has a map, drawn by a tool only the page offers: `display`. When a picture helps, such as for the topology, where a host is attached, or the path between two points, the model calls `display`. It draws the whole network from the devices' own tables, at layer 2 (cables, switches, and the port each host is on) or at layer 3 (routers and the networks between them), and it chooses which parts to focus on and highlight. Focused nodes move to the middle, and the rest of the network stays on the map, dimmed and pushed aside. The model can't draw anything the devices didn't report, and every name it uses is checked against the graph first. Click a node or link to see the evidence for it. Each view stays in the conversation as a button that brings it back.
 
+On a wide screen the map sits beside the conversation. On a phone they take turns on the whole screen: the header's **Map** button switches to the map, and **Chat** switches back. A new view doesn't take over the screen while an answer is coming. A dot on the button says something new is on the other side.
+
 Given a path (a source and a destination), `display` traces it through the routing tables and highlights it hop by hop, with the route each device used. At layer 2 the path runs through the switches, out the port each one bridges it to. At layer 3 it crosses the networks instead. Where a path is lost, the device that loses it turns red, with the reason.
 
 The layout is a force simulation ([d3-force](https://d3js.org/d3-force), included in the package): nodes repel each other and links act as springs. A view changes the forces, not the nodes, so moving from one view to the next glides the network into its new shape.
 
 You can pin nodes to lay the map out your way: say, a border leaf on top with the other leaves in a row below. A node you drag stays where you drop it, and the forces arrange everything else around it. Dropped near another pinned node's row or column, it snaps into line. Double-click a node to pin it where it is, or to let it go; the inspector has the same switch, plus "Unpin all". Pins are yours, not the model's: they hold across views, are kept per plane, and are saved in your browser.
+
+#### Charts
+
+When NetGPT polls (it does unless `--poll-interval 0`), the page also offers `chart`. Asked how busy something is, the model charts ports' traffic, utilization, or errors over the last minutes, right in the conversation. It names ports as `device:port`, a link as `leaf1--spine1`, or a device for all its ports. Each port gets its own color, with in drawn solid and out dashed. A chart keeps updating with every poll while it is on the page. Hovering shows every line's value at one poll, and the Data table under each chart has the same numbers.
+
+#### Traffic on the map
+
+While NetGPT polls, the map draws each link's traffic the way a network weathermap does. Beside the link runs a lane for each direction, on the right as the traffic travels, ending in an arrowhead. A lane's color is its share of the port's speed, from light (under 10%) to dark (75% or more), and focused links are labeled with their rates. A port that counted errors in the last 5 minutes gets ⚠ and the count beside its name. Select a link to read both directions in words, with a chart of the port; select a device to chart its ports on the map. The **Traffic** button hides it all, and the page remembers that choice.
 
 ## Inventory
 

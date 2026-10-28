@@ -82,6 +82,23 @@ async def test_a_router_routes_its_ports() -> None:
 
 
 @pytest.mark.anyio
+async def test_each_configured_port_reports_its_counters_and_speed() -> None:
+    platform, requests = leaf1({"/interface[name=*]/oper-state": "lab/leaf1/interface_counters.json"})
+    async with platform:
+        counters = {found.interface: found for found in await platform.interface_counters()}
+    # leaf1 lists 59 ports, but only the configured ones have counters.
+    assert {port: found.speed_bps for port, found in counters.items()} == {
+        "ethernet-1/1": 25 * 10**9,
+        "ethernet-1/49": 100 * 10**9,
+        "mgmt0": 10**9,
+    }
+    port = counters["ethernet-1/1"]
+    assert (port.oper_state, port.in_octets, port.out_octets, port.in_errors, port.in_discards) == ("up", 38886, 535210, 17, 23)
+    assert (port.carrier_transitions, counters["mgmt0"].carrier_transitions) == (0, 1)
+    assert len(requests) == 1  # one call, three narrow paths
+
+
+@pytest.mark.anyio
 async def test_routes_resolve_next_hops() -> None:
     platform, _ = leaf1({"/network-instance": "route_table.json"})
     async with platform:
