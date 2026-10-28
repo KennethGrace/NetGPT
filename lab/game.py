@@ -10,7 +10,7 @@ round and no map to draw on. Run it from the repository root with the lab deploy
     python lab/game.py --model gemma4:26b-mlx --ollama http://HOST:11434    # each fault once, in random order
     python lab/game.py --model ... --faults loop blackhole --rounds 3
     python lab/game.py --scoreboard                                         # add --answers to read them
-    python lab/game.py --rejudge --model ... --ollama ...                   # judge rounds no judge has seen
+    python lab/game.py --rejudge --model ... --ollama ...                   # judge every round again
 
 A judge model reads each answer beside what the gremlin broke, and decides whether
 the root cause the answer settles on is the right one: found, partly, or missed.
@@ -72,44 +72,50 @@ Users complained, and a troubleshooter investigated the network and wrote this d
 ---
 
 Did the diagnosis find what was broken? Go by the root cause it settles on, not everything it mentions on the way.
-- blamed_device: the one device the diagnosis names as the root cause. Write "none" if it settles on no device,
-  or hedges between several causes.
+- blamed_device: the device the diagnosis names as the root cause. Write "none" if it names no device.
 - blamed_problem: what the diagnosis says is wrong on that device.
+- also_blamed: any other devices the diagnosis says are misconfigured or need changing, or [] if none. A device
+  it only mentions on the way, as working correctly or as part of the path, is not blamed.
+- hedges: true if the diagnosis offers alternative causes ("either A or B", "check both") instead of settling
+  on one.
 - reason: how the blamed device and problem compare with what was broken.
 - verdict: "found" if the blamed device is {device} and the blamed problem is what was broken, in any words.
   "partly" if the blamed device is {device} but the problem is wrong, or too vague to fix. "missed" otherwise.
 """
 
 # Ollama holds the judge's reply to this schema. Naming what the diagnosis blames is easier than judging it,
-# so the judge does that first, and the verdict follows.
+# so the judge does that first, and the verdict follows. One string for the blame ran together "A and B" (both
+# wrong) with "A or B" (a hedge), so other devices and hedging have fields of their own.
 JUDGEMENT = {
     "type": "object",
     "properties": {
         "blamed_device": {"type": "string"},
         "blamed_problem": {"type": "string"},
+        "also_blamed": {"type": "array", "items": {"type": "string"}},
+        "hedges": {"type": "boolean"},
         "reason": {"type": "string"},
         "verdict": {"type": "string", "enum": ["found", "partly", "missed"]},
     },
-    "required": ["blamed_device", "blamed_problem", "reason", "verdict"],
+    "required": ["blamed_device", "blamed_problem", "also_blamed", "hedges", "reason", "verdict"],
 }
 
-# Every device a fault can be on: the names a judge's blamed_device is read for.
+# Every device a fault can be on: the names looked for in what the judge says is blamed.
 DEVICES = {fault.device for fault in gremlin.FAULTS.values()}
 
 
 class Watcher(TerminalObserver):
-    """Shows each tool call as it happens, and keeps count of them for the scoreboard."""
+    """Shows each tool call as it happens, and keeps them, with their arguments, for the scoreboard."""
 
     def __init__(self) -> None:
         super().__init__(verbose=False)
-        self.calls: list[str] = []
+        self.calls: list[dict[str, Any]] = []
         self.errors = 0
 
     def tool_call(
         self, name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None = None
     ) -> None:
         super().tool_call(name, arguments, result, is_error, structured)
-        self.calls.append(name)
+        self.calls.append({"name": name, "arguments": arguments})
         self.errors += is_error
 
 
@@ -145,13 +151,22 @@ async def judge(http: httpx.AsyncClient, model: str, fault: Fault, answer: str) 
     )
     try:
         judgement = json.loads(reply["message"]["content"])
-        blamed, verdict = judgement["blamed_device"].lower(), judgement["verdict"]
-        reason = f"blames {judgement['blamed_device']}: {judgement['blamed_problem']} {judgement['reason']}"
+        blamed = " ".join([judgement["blamed_device"], *judgement["also_blamed"]]).lower()
+        hedges, verdict = bool(judgement["hedges"]), judgement["verdict"]
+        also = f" and {', '.join(judgement['also_blamed'])}" if judgement["also_blamed"] else ""
+        reason = (
+            f"blames {judgement['blamed_device']}{also}{', hedging' if hedges else ''}: "
+            f"{judgement['blamed_problem']} {judgement['reason']}"
+        )
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         raise ChatError(f"The judge, {model}, gave no verdict: {reply.get('message')!r}") from error
-    # A diagnosis that blames another device, or several, missed, whatever the judge's verdict says.
-    if {device for device in DEVICES if device in blamed} != {fault.device}:
+    # A diagnosis that hedges, or doesn't blame the fault's device, missed, whatever the judge's verdict says. One
+    # that blames another device as well is at best partly right: following it would change something that isn't broken.
+    named = {device for device in DEVICES if device in blamed}
+    if hedges or fault.device not in named:
         verdict = "missed"
+    elif len(named) > 1 and verdict == "found":
+        verdict = "partly"
     return verdict, reason
 
 
@@ -203,6 +218,7 @@ async def play_round(chat: Chat, inventory: Inventory, fault: Fault) -> dict[str
         "replies": sum(message["role"] == "assistant" for message in chat.messages) if answer is not None else None,
         # Whether the answer came from the reply with no tools offered, after every other reply called tools.
         "last_word": answer is not None and any(message["content"] == OUT_OF_TOOLS for message in chat.messages),
+        # Names and arguments. Rounds played before the arguments were kept list only the names.
         "tool_calls": watcher.calls,
         "tool_errors": watcher.errors,
         "answer": answer,
@@ -252,19 +268,19 @@ def load_scoreboard() -> list[dict[str, Any]]:
 
 async def rejudge(args: argparse.Namespace) -> None:
     """
-    Judge every round on the scoreboard that no judge has seen. Rounds from before
-    there was a judge carry the rubric's verdict, which is kept as their rubric.
-    Don't run it while a game is playing: it rewrites the scoreboard.
+    Judge every round on the scoreboard again, so that after the judge changes, every
+    round is scored by the same judge. Prints the rounds whose verdict changed. Rounds
+    from before there was a judge carry the rubric's verdict, which is kept as their
+    rubric. Don't run it while a game is playing: it rewrites the scoreboard.
     """
     records = load_scoreboard()
     async with httpx.AsyncClient(base_url=args.ollama, timeout=httpx.Timeout(args.timeout, connect=10.0)) as http:
         for record in records:
-            if "judge" in record:
-                continue
+            before = record["verdict"]
             record.setdefault("rubric", record["verdict"])
             await judge_round(http, args.judge or args.model, record)
-            if record["answer"] is not None:
-                print(f"\n{record['when']} {record['model']}")
+            if record["verdict"] != before:
+                print(f"\n{record['when']} {record['model']} {record['version']}, was {before}")
                 show_round(record)
     SCOREBOARD.write_text("".join(json.dumps(record) + "\n" for record in records))
 
@@ -322,7 +338,7 @@ def main() -> None:
     parser.add_argument("--inventory", type=Path, default=Path("lab/inventory.yml"), help="The lab inventory.")
     parser.add_argument("--scoreboard", action="store_true", help="Print the scoreboard instead of playing.")
     parser.add_argument("--answers", action="store_true", help="With --scoreboard, print every answer and its cause.")
-    parser.add_argument("--rejudge", action="store_true", help="Judge the rounds no judge has seen, instead of playing.")
+    parser.add_argument("--rejudge", action="store_true", help="Judge every round again, instead of playing.")
     parser.add_argument("--log-level", default="WARNING", help="Logging level, written to stderr (default: %(default)s).")
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level, stream=sys.stderr)

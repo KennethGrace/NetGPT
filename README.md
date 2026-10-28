@@ -76,12 +76,12 @@ python lab/gremlin.py repair    # put it back
 python lab/gremlin.py check     # dry-run every fault; nothing is committed
 ```
 
-[`lab/game.py`](lab/game.py) plays the gremlin's game with a model and keeps score. Each round, the gremlin breaks a fault, and the model gets the complaint in a fresh conversation and investigates with NetGPT's tools. The game then puts the lab back and waits for it to answer again. A judge model reads each answer beside what the gremlin broke. It names the device the answer blames as the root cause, then decides: found, partly, or missed. An answer that blames another device has missed, however much it says along the way. The judge can be wrong too, so the scoreboard keeps every answer and the judge's reasons, for reading.
+[`lab/game.py`](lab/game.py) plays the gremlin's game with a model and keeps score. Each round, the gremlin breaks a fault, and the model gets the complaint in a fresh conversation and investigates with NetGPT's tools. The game then puts the lab back and waits for it to answer again. A judge model reads each answer beside what the gremlin broke. It names the devices the answer blames, and whether it hedges between causes, then decides: found, partly, or missed. An answer that blames another device, or hedges, has missed, however much it says along the way. One that blames the right device and an innocent one as well is at most partly right. The judge can be wrong too, so the scoreboard keeps every answer and the judge's reasons, for reading.
 
 ```bash
 python lab/game.py --model gemma4:26b --ollama http://127.0.0.1:11434   # each fault once, in random order
 python lab/game.py --scoreboard --answers
-python lab/game.py --rejudge --model gemma4:26b --ollama http://127.0.0.1:11434   # judge rounds no judge has seen
+python lab/game.py --rejudge --model gemma4:26b --ollama http://127.0.0.1:11434   # judge every round again
 ```
 
 ### Connect a client
