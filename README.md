@@ -67,6 +67,15 @@ mkdir -p ~/.config/netgpt && printf 'NokiaSrl1!' > ~/.config/netgpt/srlinux-lab.
 chmod 600 ~/.config/netgpt/srlinux-lab.password
 ```
 
+To see whether NetGPT can troubleshoot, let a gremlin loose in the lab. [`lab/gremlin.py`](lab/gremlin.py) breaks one thing at random: a port shut, an address mistyped, a host's switch port pulled from its LAN, a blackhole route, a routing loop, or a missing route back. It prints only the complaint a user would make ("host2 and host3 can't reach host1"). Several faults share a complaint, so the model has to investigate rather than guess. The gremlin writes configuration through the lab's own login; NetGPT stays read-only.
+
+```bash
+python lab/gremlin.py break     # then ask NetGPT about the complaint
+python lab/gremlin.py reveal    # what the gremlin broke
+python lab/gremlin.py repair    # put it back
+python lab/gremlin.py check     # dry-run every fault; nothing is committed
+```
+
 ### Connect a client
 
 The repository's [`.mcp.json`](.mcp.json) registers the server with Claude Code when it runs from the repository root. For other clients, the command is:

@@ -15,6 +15,7 @@ netgpt-mcp --inventory lab/inventory.yml
 netgpt-chat --inventory lab/inventory.yml --model gemma4:e4b --ollama http://127.0.0.1:11434
 netgpt-chat ... --web 127.0.0.1:8080    # sign-in token from $NETGPT_WEB_TOKEN, or printed
 python lab/record_fixtures.py           # re-record the lab's responses as test fixtures
+python lab/gremlin.py break|reveal|repair|check   # break one thing in the lab on purpose, and put it back
 ```
 
 ## Layout
@@ -83,6 +84,11 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Asking for routes in an instance a device lacks returns an empty list, not an error.
   - Each ping is a CLI session; about 16 at once is the most a sweep gains from.
 - **The web page reads its assets and inventory at startup.** Restart it after changing `static/` or `lab/inventory.yml`.
+- **The gremlin** (`lab/gremlin.py`) is the one thing here that writes to devices. It is a lab tool outside `src/`, and the model never reaches it.
+  - Each fault is SR Linux CLI: commands that break, commands that repair, the user's complaint, and the cause.
+  - `check` dry-runs every fault in a private candidate. The break must change something, and the break plus the repair must leave an empty `diff`.
+  - What it broke is kept in `lab/.gremlin.json` (gitignored) until it is repaired.
+  - A repaired interface takes a moment to come back. Wait before breaking the next thing, or the lab shows symptoms of both.
 
 ## The page
 
@@ -103,6 +109,10 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 1 is done: a bridging switch, and layer 2 and layer 3 views.
   - Phase 2 is a second vendor. Arista cEOS-lab is a container with a JSON API. Cisco IOL is legitimately available through CML-Free. This VM has no nested KVM, so images packaged as VMs (vJunos, Nexus 9000v, Cat8000v) need other hardware.
   - A second vendor will need port names normalized, so both ends of a cable match.
+- **Gremlin track** (can a model troubleshoot with these tools?):
+  - Phase 1 is done: `lab/gremlin.py`, six faults across all four devices, each checked live.
+  - Phase 2: the game. Break, ask the page the complaint, score the answer against the cause, and keep a scoreboard per model.
+  - Phase 3: fix what the scoreboard shows the tools or the chat missing.
 - **Frontends track:**
   - Phase 1: `netgpt-mcp` over HTTP, behind a token.
   - Phase 2: one login for the page and the endpoint.

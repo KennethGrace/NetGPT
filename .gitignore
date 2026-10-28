@@ -38,3 +38,6 @@ lab/clab-*/
 
 # Local lab images and other files that stay on this machine
 .local/
+
+# What the lab gremlin broke, until it is repaired
+lab/.gremlin.json
