@@ -16,7 +16,7 @@ import httpx
 from netgpt.guard import NOKIA_SRLINUX
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms.base import Platform, PlatformError
-from netgpt.primitives import ArpEntry, Interface, LldpNeighbor, MacEntry, NextHop, PingResult, Route
+from netgpt.primitives import ArpEntry, CommandOutput, Interface, LldpNeighbor, MacEntry, NextHop, PingResult, Route
 
 NETWORK_INSTANCE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 PING_COUNTS = re.compile(r"(\d+) packets transmitted, (\d+) received")
@@ -143,13 +143,17 @@ class SRLinuxPlatform(Platform):
         result = await self._rpc("get", {"commands": [{"path": path, "datastore": "state"} for path in paths]})
         return [strip_module_prefixes(item) for item in result]
 
-    async def _run_checked_cli(self, command: str) -> str:
+    async def show(self, command: str, max_chars: int = 50_000) -> CommandOutput:
+        # Only for show: ping's commands are built here, so its parse errors are about its arguments, not the CLI.
         try:
-            result = await self._rpc("cli", {"commands": [command], "output-format": "text"})
+            return await super().show(command, max_chars)
         except PlatformError as error:
             if "Parsing error" in str(error):
                 raise PlatformError(f"{error.args[0].rstrip()} {CLI_HINT}") from error
             raise
+
+    async def _run_checked_cli(self, command: str) -> str:
+        result = await self._rpc("cli", {"commands": [command], "output-format": "text"})
         return "".join(str(item) for item in result)
 
     async def lldp_neighbors(self) -> list[LldpNeighbor]:

@@ -1,0 +1,8 @@
+{
+ "error": {
+  "code": -1,
+  "message": "Error: Cli commands 'ping 192.168.12.2 network-instance lan -c 3 -W 1' failed with error 1: At line 1: Parsing error: While parsing 'ping': Wrong value for 'network-instance': Invalid value 'lan': Must be an existing network namespace\n"
+ },
+ "id": 1,
+ "jsonrpc": "2.0"
+}
