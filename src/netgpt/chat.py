@@ -55,6 +55,13 @@ OUT_OF_TOOLS = (
     "and say what you could not check."
 )
 
+# Added to the server's instructions. Small models make one tool call per reply, a reply each time, unless
+# told that one reply can make several; and the budget is counted in replies.
+SEVERAL_CALLS = (
+    "Each question allows {replies} replies that call tools. One reply can call several tools: when you need "
+    "several things that don't depend on each other (tables, paths, pings), ask for them all in the same reply."
+)
+
 
 class ChatError(RuntimeError):
     """The model or Ollama failed to produce an answer."""
@@ -193,7 +200,7 @@ class Chat:
     async def start(self) -> None:
         """Fetch the server's tools and instructions and begin an empty conversation."""
         self._tools = ollama_tools((await self._client.list_tools()).tools)
-        self._instructions = self._client.instructions or ""
+        self._instructions = f"{self._client.instructions or ''}\n{SEVERAL_CALLS.format(replies=self._max_rounds)}"
         self.reset()
 
     def reset(self) -> None:

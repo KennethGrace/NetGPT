@@ -149,6 +149,18 @@ async def test_running_out_of_tool_calls_still_gets_an_answer(chat_with: Any) ->
 
 
 @pytest.mark.anyio
+async def test_several_tool_calls_in_one_reply_spend_one_of_its_replies(chat_with: Any) -> None:
+    both = calls("list_devices", {})
+    both["tool_calls"].append({"id": "call_2", "function": {"name": "arp_table", "arguments": {}}})
+    ollama = ScriptedOllama(both, says("Four devices, and their ARP tables."))
+    chat = await chat_with(ollama, max_rounds=2)
+    assert await chat.ask("What devices are there, and what are they ARPing for?") == "Four devices, and their ARP tables."
+    assert "allows 2 replies that call tools" in ollama.requests[0]["messages"][0]["content"]
+    # Both results go back in one turn, and the answer needs no last word.
+    assert [message["role"] for message in chat.messages] == ["system", "user", "assistant", "tool", "tool", "assistant"]
+
+
+@pytest.mark.anyio
 async def test_a_model_that_only_calls_tools_gives_up_and_leaves_history_clean(chat_with: Any) -> None:
     ollama = ScriptedOllama(*(calls("list_devices", {}, f"call_{n}") for n in range(4)))
     chat = await chat_with(ollama, max_rounds=3)
