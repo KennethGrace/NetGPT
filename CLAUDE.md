@@ -16,6 +16,7 @@ netgpt-chat --inventory lab/inventory.yml --model gemma4:e4b --ollama http://127
 netgpt-chat ... --web 127.0.0.1:8080    # sign-in token from $NETGPT_WEB_TOKEN, or printed
 python lab/record_fixtures.py           # re-record the lab's responses as test fixtures
 python lab/gremlin.py break|reveal|repair|check   # break one thing in the lab on purpose, and put it back
+python lab/game.py --model M --ollama URL         # the gremlin's game: break, ask the model why, keep score
 ```
 
 ## Layout
@@ -88,7 +89,13 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Each fault is SR Linux CLI: commands that break, commands that repair, the user's complaint, and the cause.
   - `check` dry-runs every fault in a private candidate. The break must change something, and the break plus the repair must leave an empty `diff`.
   - What it broke is kept in `lab/.gremlin.json` (gitignored) until it is repaired.
-  - A repaired interface takes a moment to come back. Wait before breaking the next thing, or the lab shows symptoms of both.
+  - It breaks only a whole lab: `settle` waits until a set of pings from the leaves all answer. A repaired interface takes a moment to come back, and without the wait the lab shows symptoms of two faults. The pings also refill ARP and MAC tables.
+  - Hosts aren't in the inventory, so NetGPT knows them only by address. The game's question gives the addresses (`gremlin.HOSTS`).
+- **The game** (`lab/game.py`) runs the model in-process through `Chat`, with no `display` tool, a fresh conversation each round, and the lab always repaired in a `finally`. Rounds go to `lab/.scoreboard.jsonl` (gitignored), marked with the NetGPT commit (`-dirty` when `src/` has changes) and the reply limit.
+  - **Keywords can't tell blame.** A `loop` answer that names spine1 and says "loop" passed the keyword rubric while blaming leaf1. So a judge model scores each answer, and the rubric is kept beside it.
+  - **The judge names the blamed device first,** through Ollama's `format` schema, and the code refuses `found` or `partly` unless that is the fault's device. Before that, the judge passed the same wrong answer.
+  - **Write each fault's cause so blame is unambiguous** ("leaf1's route is as it should be"). The judge reads it literally.
+  - **After changing the judge,** check it against answers with known verdicts, then `--rejudge`. A judge change does not replay the rounds.
 
 ## The page
 
@@ -111,8 +118,12 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - A second vendor will need port names normalized, so both ends of a cable match.
 - **Gremlin track** (can a model troubleshoot with these tools?):
   - Phase 1 is done: `lab/gremlin.py`, six faults across all four devices, each checked live.
-  - Phase 2: the game. Break, ask the page the complaint, score the answer against the cause, and keep a scoreboard per model.
-  - Phase 3: fix what the scoreboard shows the tools or the chat missing.
+  - Phase 2 is done: `lab/game.py` breaks a fault, asks the model the complaint, has a judge score the answer against the cause, and keeps a scoreboard per model, NetGPT commit, and reply limit.
+  - Phase 3: fix what the scoreboard shows the tools or the chat missing. The first games, with gemma4 26b and 2 rounds of each fault, showed:
+    - With 10 replies (the page's default), nothing was found: 11 of 13 rounds ran out of replies. With 20 replies, 5 of 12 were found.
+    - `port-down` and `renumbered` were never answered, even with 20 replies. Both take the hosts out of leaf2's ARP table.
+    - 2 of 3 `loop` answers blamed leaf1's route. The forwarding walk flags leaf1 (where the packet comes back) as the trouble, not spine1.
+    - When the model reaches for `show`, it guesses Cisco syntax (`show interfaces`, `show mac-address-table`) on SR Linux.
 - **Frontends track:**
   - Phase 1: `netgpt-mcp` over HTTP, behind a token.
   - Phase 2: one login for the page and the endpoint.
