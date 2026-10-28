@@ -32,7 +32,7 @@ python lab/game.py --model M --ollama URL         # the gremlin's game: break, a
 - `src/netgpt/views.py`: turns the model's choices into a `View` of the graph. `describe` is the text the model reads back.
 - `src/netgpt/server.py`: the MCP tools. `display` exists only when `build_server(display=True)`.
 - `src/netgpt/chat.py`, `web.py`: the Ollama tool loop, and the web page's server.
-- `src/netgpt/static/`: the page. `map.js` is the map on vendored d3-force, and `chart.js` draws charts in the conversation.
+- `src/netgpt/static/`: the page. `map.js` is the map on vendored d3-force, with each link's traffic, and `chart.js` draws charts in the conversation and the map's inspector.
 - `lab/`: the containerlab lab (SR Linux spine, two leaves, a bridging switch, Linux hosts) and its inventory.
 - `api/`, `www/`: the 2023 v0.3 app, kept for reference only. Never deploy it: its API accepts any bearer token.
 
@@ -50,7 +50,7 @@ python lab/game.py --model M --ollama URL         # the gremlin's game: break, a
 - **Layer 2:** LLDP gives cables. A port hearing several LLDP neighbors is a shared segment. For each ARP entry, `locate` follows the address from the port it was heard on through switches' MAC tables to the port it is plugged into. A forgotten MAC leaves the host behind the switch with no port.
 - **Layer 3:** routers, subnets (from routed interfaces), and the hosts on them. Switches drop out. A /30 or /31 between two routers becomes a link with `subnet` set.
 - **Forwarding walk:** longest match, recursive next-hop resolution, then the cable. `beyond` crosses shared segments and bridged ports, and each switch crossed becomes a hop. Hosts on the same network reach each other without the router.
-- **Statistics:** while a client is connected, the server's lifespan runs the `Poller`: every device's interface counters every 30 seconds, the second poll 5 seconds after the first, and an hour of samples in memory. A rate is the difference of two readings over the time between them, and a counter that goes backwards is a reset, so that interval isn't measured. `interface_traffic` exists only when the server polls; the game's server doesn't. `chart` needs polling and the page: its structured content is a `Chart`, which the page draws in the conversation and asks `/api/chart` for again every poll.
+- **Statistics:** while a client is connected, the server's lifespan runs the `Poller`: every device's interface counters every 30 seconds, the second poll 5 seconds after the first, and an hour of samples in memory. A rate is the difference of two readings over the time between them, and a counter that goes backwards is a reset, so that interval isn't measured. `interface_traffic` exists only when the server polls; the game's server doesn't. `chart` needs polling and the page: its structured content is a `Chart`, which the page draws in the conversation and asks `/api/chart` for again every poll. The map asks `/api/traffic` every poll for each port's latest rates and its errors over the last 5 minutes.
 - **Model and page:** a `display` result gives the model `describe(view)` as text and gives the page the whole view as structured content. The chat keeps it under `_structured` and strips that before Ollama sees the history.
 
 ## Small models
@@ -115,6 +115,10 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **Device data reaches the DOM only as text:** `textContent` and attributes, never HTML.
 - **Pins are the viewer's, not the model's.** They are kept per plane in `localStorage`, and every access is wrapped in `try`.
 - **Chart colors** are six `--series-n` tokens in `app.css`, one per port in a fixed order, checked for both modes against the page's own surfaces. Three of the light ones are under 3:1 contrast, so every chart has a Data table, and values never wear a series color.
+- **Traffic on the map** is a weathermap: each link gets a lane per direction, on the right as it travels. A lane's color is its share of port speed, in five bands from the `--load-n` ramp. That ramp is one hue (teal, since blue means highlighted), checked as an ordinal ramp in both modes. A direction is the sending port's out counter, or else the receiving port's in. A subinterface's traffic is its port's.
+  - Rate labels go at whichever end of their lane overlaps least with what is already drawn.
+  - Errors get ⚠ and a count, in the warn color. Discards are only told in the inspector.
+  - The lab's links run far under 10% of their virtual speeds, so every lane there is the lightest band. To see the others, check against a copy whose ports claim 100M.
 
 ## Style
 
@@ -145,7 +149,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
     - Play more rounds of each fault. Two or three is a small sample, and the same fault scores very differently from round to round.
 - **NMS track** (poll statistics and show them on the page, beside the agent):
   - Phase 1, polling: `InterfaceCounters` from the drivers, the `Poller` (every 30 seconds by default, an hour in memory), `interface_traffic` for the model, and steady traffic in the lab.
-  - Phase 2, the page: charts in the conversation (`chart`, live, from the model), then utilization and errors on the map's links, and a time series for the selected link or device.
+  - Phase 2, the page: charts in the conversation (`chart`, live, from the model), traffic and errors on the map's links, and a chart of the selected link or device.
   - Phase 3, persistence: storage behind an interface, with TimescaleDB (PostgreSQL) in a compose dev environment under rootless podman. History survives restarts, with rollups and retention, and the tool reads past windows.
   - Phase 4, events: errors climbing, a link saturated or down, shown on the page and told to the agent.
   - Later: protocol state (OSPF, BGP; the lab runs static routes, so a Lab phase adds them first), Neo4j for the network as a graph over time, and gNMI streaming in place of polling.

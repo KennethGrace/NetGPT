@@ -85,7 +85,9 @@ than describing every link in words.
 CHART_INSTRUCTIONS = """\
 Call chart to draw ports' traffic, utilization, or errors over time in the conversation. The chart keeps
 updating as NetGPT polls, so use it whenever the answer is about how busy something is, or how its errors
-change, and refer to it rather than listing numbers.
+change, and refer to it rather than listing numbers. The map shows traffic too: beside each link, a lane
+for each direction, colored by its share of the port's speed and labeled with its rate, and a warning sign
+with a count on any port that counted errors in the last 5 minutes. Selecting a link or device charts it.
 """
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)

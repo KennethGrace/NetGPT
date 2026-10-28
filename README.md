@@ -141,6 +141,10 @@ You can pin nodes to lay the map out your way: say, a border leaf on top with th
 
 When NetGPT polls (it does unless `--poll-interval 0`), the page also offers `chart`. Asked how busy something is, the model charts ports' traffic, utilization, or errors over the last minutes, right in the conversation. It names ports as `device:port`, a link as `leaf1--spine1`, or a device for all its ports. Each port gets its own color, with in drawn solid and out dashed. A chart keeps updating with every poll while it is on the page. Hovering shows every line's value at one poll, and the Data table under each chart has the same numbers.
 
+#### Traffic on the map
+
+While NetGPT polls, the map draws each link's traffic the way a network weathermap does. Beside the link runs a lane for each direction, on the right as the traffic travels, ending in an arrowhead. A lane's color is its share of the port's speed, from light (under 10%) to dark (75% or more), and focused links are labeled with their rates. A port that counted errors in the last 5 minutes gets ⚠ and the count beside its name. Select a link to read both directions in words, with a chart of the port; select a device to chart its ports on the map. The **Traffic** button hides it all, and the page remembers that choice.
+
 ## Inventory
 
 ```yaml

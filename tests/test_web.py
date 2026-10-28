@@ -62,7 +62,7 @@ async def test_nothing_is_served_without_the_token(browser: Browser) -> None:
     page = await browser(ScriptedOllama(says("Never asked.")), signed_in=False)
     wrong = await page.get("/", params={"token": "guess"})
     assert wrong.status_code == 401 and "set-cookie" not in wrong.headers
-    paths = ["/", "/app.js", "/map.js", "/chart.js", "/d3-force.js", "/app.css", "/api/conversation"]
+    paths = ["/", "/app.js", "/map.js", "/chart.js", "/d3-force.js", "/app.css", "/api/conversation", "/api/traffic"]
     for method, path in [("GET", path) for path in paths] + [("POST", "/api/ask"), ("POST", "/api/reset"), ("POST", "/api/chart")]:
         response = await page.request(method, path, json={"question": "hi"} if method == "POST" else None)
         assert response.status_code == 401, path
@@ -188,7 +188,28 @@ async def test_a_chart_of_ports_nobody_polls_is_refused_with_the_ones_that_are(
 
 
 @pytest.mark.anyio
-async def test_without_a_poller_there_are_no_charts(browser: Browser) -> None:
+async def test_without_a_poller_there_are_no_charts_and_no_traffic_on_the_map(browser: Browser) -> None:
     page = await browser(ScriptedOllama())
     response = await page.post("/api/chart", json={"title": "x", "ports": ["leaf1"], "metric": "traffic", "minutes": 15})
     assert response.status_code == 404
+    assert (await page.get("/api/traffic")).status_code == 404
+
+
+@pytest.mark.anyio
+async def test_the_map_gets_every_polled_port_s_latest_rates_and_recent_errors(
+    browser: Browser, inventory: Inventory, counter_reads: dict[str, int]
+) -> None:
+    now = [1000.0]
+    poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30, clock=lambda: now[0])
+    page = await browser(ScriptedOllama(), statistics=poller)
+    assert (await page.get("/api/traffic")).json()["ports"] == []
+    for _ in range(3):
+        await poller.poll()
+        now[0] += 30
+    traffic = (await page.get("/api/traffic")).json()
+    assert (traffic["interval"], traffic["minutes"]) == (30, 5)
+    ports = {(port["device"], port["interface"]): port for port in traffic["ports"]}
+    assert set(ports) == {("leaf1", "ethernet-1/1"), ("leaf2", "ethernet-1/1")}
+    leaf1 = ports[("leaf1", "ethernet-1/1")]
+    # The rates are the last interval's; the errors are every interval's in the last five minutes.
+    assert (leaf1["in_mbps"], leaf1["out_mbps"], leaf1["in_percent"], leaf1["speed"], leaf1["in_errors"]) == (10.0, 1.0, 1.0, "1G", 4)

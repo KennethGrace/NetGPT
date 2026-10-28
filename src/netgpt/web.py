@@ -16,6 +16,8 @@ When the model calls display, its tool event carries the view, and the page draw
 it on the map (map.js, laid out by the vendored d3-force library). When it calls
 chart, the event carries the chart, which the page draws in the conversation
 (chart.js) and refreshes from /api/chart each time the poller has new samples.
+While NetGPT polls, the map also asks /api/traffic for every port's latest rates
+and recent errors, and draws them on the links.
 """
 
 from __future__ import annotations
@@ -49,6 +51,8 @@ ASSETS = {
     "app.css": "text/css",
 }
 COOKIE_MAX_AGE = 30 * 24 * 3600
+# The map marks the ports that counted errors this many minutes back.
+MAP_MINUTES = 5.0
 MAX_QUESTION_CHARS = 8000
 
 SECURITY_HEADERS = {
@@ -223,6 +227,13 @@ def build_app(chat: Chat, token: str, statistics: Poller | None = None) -> Starl
             return JSONResponse({"error": message}, status_code=400, headers=SECURITY_HEADERS)
         return JSONResponse(drawn.model_dump(mode="json"), headers=SECURITY_HEADERS)
 
+    async def traffic(request: Request) -> Response:
+        if statistics is None:
+            return JSONResponse({"error": "NetGPT isn't polling."}, status_code=404, headers=SECURITY_HEADERS)
+        items, _ = statistics.traffic(None, MAP_MINUTES)
+        ports = [item.model_dump(mode="json") for item in items]
+        return JSONResponse({"interval": statistics.interval, "minutes": MAP_MINUTES, "ports": ports}, headers=SECURITY_HEADERS)
+
     async def reset(request: Request) -> Response:
         if busy.locked():
             message = "Still answering; wait for the answer before starting over."
@@ -238,6 +249,7 @@ def build_app(chat: Chat, token: str, statistics: Poller | None = None) -> Starl
             Route("/api/ask", requires_sign_in(ask), methods=["POST"]),
             Route("/api/reset", requires_sign_in(reset), methods=["POST"]),
             Route("/api/chart", requires_sign_in(chart), methods=["POST"]),
+            Route("/api/traffic", requires_sign_in(traffic)),
         ]
     )
 

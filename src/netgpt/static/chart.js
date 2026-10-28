@@ -76,16 +76,16 @@ const netchart = (() => {
   }
 
   function draw(entry) {
-    const { figure, chart } = entry;
+    const { figure, chart, height } = entry;
     const plot = figure.querySelector(".chart-plot");
     const width = Math.max(plot.clientWidth || 600, 280);
-    const svg = shape("svg", "chart-svg", { viewBox: `0 0 ${width} ${HEIGHT}`, role: "img" });
+    const svg = shape("svg", "chart-svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
     svg.setAttribute("aria-label", `${chart.title}, ${chart.unit}`);
-    const inner = { left: MARGIN.left, right: width - MARGIN.right, top: MARGIN.top, bottom: HEIGHT - MARGIN.bottom };
+    const inner = { left: MARGIN.left, right: width - MARGIN.right, top: MARGIN.top, bottom: height - MARGIN.bottom };
 
     const points = chart.lines.flatMap((line) => line.points);
     if (!points.length) {
-      svg.append(shape("text", "chart-empty", { x: String(width / 2), y: String(HEIGHT / 2) }));
+      svg.append(shape("text", "chart-empty", { x: String(width / 2), y: String(height / 2) }));
       svg.lastChild.textContent = "No rates yet: waiting for the next poll.";
       plot.replaceChildren(svg);
       return;
@@ -108,7 +108,7 @@ const netchart = (() => {
     }
     const { ticks, withSeconds } = timeTicks(end - span, end);
     for (const tick of ticks) {
-      const label = shape("text", "tick x", { x: String(x(tick)), y: String(HEIGHT - 6) });
+      const label = shape("text", "tick x", { x: String(x(tick)), y: String(height - 6) });
       label.textContent = clock(tick, withSeconds);
       grid.append(label);
     }
@@ -239,8 +239,8 @@ const netchart = (() => {
     }
   }
 
-  // Draw a chart into the conversation and keep it live.
-  function add(parent, chart) {
+  // Draw a chart into the conversation, or the map's inspector, and keep it live.
+  function add(parent, chart, { height = HEIGHT } = {}) {
     const figure = element("figure", "chart");
     const heading = element("figcaption", "chart-heading");
     heading.append(element("strong", "", chart.title), element("span", "chart-unit"));
@@ -249,7 +249,7 @@ const netchart = (() => {
     readout.hidden = true;
     figure.append(heading, plot, readout, element("div", "chart-legend"), element("details", "chart-data"), element("div", "chart-caption"));
     parent.append(figure);
-    const entry = { figure, chart, asked: 0 };
+    const entry = { figure, chart, height, asked: 0 };
     live.add(entry);
     fill(entry, "Fetching the latest samples…");
     refresh(entry);

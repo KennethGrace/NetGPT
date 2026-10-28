@@ -20,6 +20,11 @@
   --series-4: #eda100;
   --series-5: #e87ba4;
   --series-6: #008300;
+  --load-1: #52c8b4;
+  --load-2: #31a593;
+  --load-3: #1d8374;
+  --load-4: #126357;
+  --load-5: #07453c;
   color-scheme: light;
 }
 
@@ -46,6 +51,11 @@
     --series-4: #c98500;
     --series-5: #d55181;
     --series-6: #008300;
+    --load-1: #0c665a;
+    --load-2: #118a7a;
+    --load-3: #27af9b;
+    --load-4: #5dd2bd;
+    --load-5: #9feddd;
     color-scheme: dark;
   }
 }
@@ -217,7 +227,10 @@ pre code { background: none; padding: 0; }
   border-bottom: 1px solid var(--border);
 }
 #map[hidden], body.map-hidden #map { display: none; }
-#map h2 { font-size: 15px; margin: 0; padding: 10px 16px 0; }
+.map-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px 0; }
+#map h2 { flex: 1; min-width: 0; font-size: 15px; margin: 0; }
+#map-traffic { font-size: 12px; padding: 1px 8px; }
+#map-traffic[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 #map-graph { flex: 1; min-height: 0; width: 100%; touch-action: none; user-select: none; }
 #map-inspector { font-size: 13px; padding: 0 16px 10px; max-height: 35%; overflow-y: auto; }
 #map-inspector h3 { font-size: 14px; margin: 6px 0 2px; overflow-wrap: anywhere; }
@@ -228,6 +241,9 @@ pre code { background: none; padding: 0; }
 #map-inspector .failed { color: var(--error); }
 #map-inspector .remark { color: var(--accent); font-style: italic; }
 #map-inspector .evidence { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
+#map-inspector .warned { color: var(--warn); }
+#map-inspector.charted { max-height: 60%; }
+#map-inspector figure.chart { margin: 6px 0; }
 
 @media (min-width: 1000px) {
   body.map-open:not(.map-hidden) { padding-right: 52vw; }
@@ -258,6 +274,22 @@ pre code { background: none; padding: 0; }
 #map-graph .link.focus:not(.management) .port { visibility: visible; }
 #map-graph .port.network.beside { text-anchor: start; }
 #map-graph .note { font-size: 12px; fill: var(--accent); text-anchor: middle; font-style: italic; }
+#map-graph .port .flag { fill: var(--warn); font-weight: 600; }
+#map-graph .link .port.flagged { visibility: visible; }
+#map-graph .rate { font-size: 10px; fill: var(--fg); font-variant-numeric: tabular-nums; visibility: hidden; }
+#map-graph .link.focus .rate { visibility: visible; }
+
+/* Traffic lanes: one per direction, colored by share of port speed from a one-hue ramp,
+   validated as an ordinal ramp against the surface in both modes. */
+.lane { fill: none; stroke: var(--edge); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.lane.u1 { stroke: var(--load-1); }
+.lane.u2 { stroke: var(--load-2); }
+.lane.u3 { stroke: var(--load-3); }
+.lane.u4 { stroke: var(--load-4); }
+.lane.u5 { stroke: var(--load-5); }
+.traffic-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; color: var(--muted); }
+.traffic-legend .item { display: inline-flex; align-items: center; gap: 4px; }
+.traffic-legend .flag { color: var(--warn); font-weight: 600; }
 
 #map-graph .node { cursor: grab; }
 #map-graph .body { fill: var(--surface); stroke: var(--fg); stroke-width: 2; }
