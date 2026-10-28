@@ -61,6 +61,8 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **Don't throw away an investigation.** When every reply to a question has gone on tool calls, `Chat.ask` asks once more with no tools offered (`OUT_OF_TOOLS`), so what the model found becomes an answer.
 - **A tool that flags one device gets that device blamed.** The forwarding walk once marked only where a loop closed, and the model blamed that router's correct route. Report every device a fact implicates, and the fact that decides between them: where the destination's network is actually connected.
 - **Models guess Cisco commands.** `show interfaces` on SR Linux wastes a reply, then a variation wastes another. The driver adds working examples to a parse error.
+- **Saying what a tool can do doesn't break a habit.** With "one call covers every device" in every table tool's description, gemma4 26b still asked one device at a time (71 of 76 table calls named devices).
+- **gemma4 makes one tool call per reply unless told it can make several.** In 46 game rounds it never made two. In one-reply tests it made several in 1 of 3 tries untold, and 2 of 3 told. `Chat.start` tells it, along with how many replies it has (`SEVERAL_CALLS`).
 
 ## Testing
 
@@ -96,9 +98,10 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Hosts aren't in the inventory, so NetGPT knows them only by address. The game's question gives the addresses (`gremlin.HOSTS`).
 - **The game** (`lab/game.py`) runs the model in-process through `Chat`, with no `display` tool, a fresh conversation each round, and the lab always repaired in a `finally`. Rounds go to `lab/.scoreboard.jsonl` (gitignored), marked with the NetGPT commit (plus `+` and a fingerprint of uncommitted changes to `src/`) and the reply limit.
   - **Keywords can't tell blame.** A `loop` answer that names spine1 and says "loop" passed the keyword rubric while blaming leaf1. So a judge model scores each answer, and the rubric is kept beside it.
-  - **The judge names the blamed device first,** through Ollama's `format` schema, and the code refuses `found` or `partly` unless that is the fault's device. Before that, the judge passed the same wrong answer.
+  - **The judge says what an answer blames before it decides,** through Ollama's `format` schema: the device, any other devices it says need changing (`also_blamed`), and whether it hedges. The code then overrides it: a hedge, or blame that misses the fault's device, is `missed`, and the right device with another beside it is at most `partly`. One field for the blame ran "A and B" (both wrong) together with "A or B" (a hedge).
   - **Write each fault's cause so blame is unambiguous** ("leaf1's route is as it should be"). The judge reads it literally.
-  - **After changing the judge,** check it against answers with known verdicts, then `--rejudge`. A judge change does not replay the rounds.
+  - **After changing the judge,** check it against answers with known verdicts, then `--rejudge`, which scores every round again and prints the ones that changed. A judge change does not replay the rounds.
+  - **The game measures the whole stack:** the tools, the chat's loop and reply limit, the model, and the judge. With one model on the board, a better tool and a better accommodation of that model look the same. Play a second model at the same NetGPT version, with the judge fixed (`--judge`), to tell them apart.
 
 ## The page
 
@@ -122,16 +125,18 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **Gremlin track** (can a model troubleshoot with these tools?):
   - Phase 1 is done: `lab/gremlin.py`, six faults across all four devices, each checked live.
   - Phase 2 is done: `lab/game.py` breaks a fault, asks the model the complaint, has a judge score the answer against the cause, and keeps a scoreboard per model, NetGPT commit, and reply limit.
-  - Phase 3: fix what the scoreboard shows the tools or the chat missing. The first games, with gemma4 26b and 2 rounds of each fault, showed:
-    - With 10 replies (the page's default), nothing was found: 11 of 13 rounds ran out of replies. With 20 replies, 5 of 12 were found.
-    - `port-down` and `renumbered` were never answered, even with 20 replies. Both take the hosts out of leaf2's ARP table.
-    - 2 of 3 `loop` answers blamed leaf1's route. The forwarding walk flags leaf1 (where the packet comes back) as the trouble, not spine1.
-    - When the model reaches for `show`, it guesses Cisco syntax (`show interfaces`, `show mac-address-table`) on SR Linux.
-  - Phase 3, first pass: an answer when replies run out, loops that name every device and where the destination is connected, and SR Linux examples on a parse error. With 10 replies: 9 of 12 found, 2 partly, none unanswered (from 0 of 13). 8 of the 12 answers came on the last reply, with no tools offered. The three changes were played together, so their shares are unknown.
-  - Still open:
-    - The model queries devices one call at a time (`routes` three times), where one call with no devices queries all of them.
-    - It read `network_instance: null` (a subinterface in no network instance) as an instance named "null".
-    - Two rounds of each fault is a small sample; the same fault scored very differently from round to round.
+  - Phase 3 (fix what the scoreboard shows the tools or the chat missing) is paused here. Every game so far is gemma4 26b with 10 replies, scored by the judge as it is now:
+    - Before Phase 3: 1 of 13 found. 11 rounds ran out of replies, and the walk flagged leaf1 for spine1's loop.
+    - First pass, 8 of 12: an answer when the replies run out, loops that name every router and where the destination is connected, and SR Linux examples on a parse error. 8 of the 12 answers came on the last reply, so most of the gain is the chat's, not the tools'.
+    - Telling the model one call covers every device: 13 of 18, about the same, and the calls didn't change.
+    - Not yet played: `SEVERAL_CALLS`, what a null network instance means (it had read one as an instance named "null"), and SR Linux's `show` examples kept off ping errors.
+  - The misses left are mostly misreadings with the facts in hand: a loop blamed on the leaves' /16 with "connected to leaf2" in the result, spine1's address read as leaf1's own, and host2 "on the wrong port" when its port was in no network instance.
+  - When it resumes:
+    - Play a second model (qwen3.8 27b) at the same NetGPT version, with the judge fixed, to tell tool gains from accommodations of gemma.
+    - Check the tools with no model: break each fault, make fixed tool calls, and check the deciding fact is in the output, unambiguous.
+    - `interfaces` reports oper-state but not admin-state, so a shut port and a pulled cable look the same.
+    - Play more rounds of each fault. Two or three is a small sample, and the same fault scores very differently from round to round.
+- **NMS track** (next): poll statistics from the devices and chart them on the page, beside the agent. Not yet planned.
 - **Frontends track:**
   - Phase 1: `netgpt-mcp` over HTTP, behind a token.
   - Phase 2: one login for the page and the endpoint.
