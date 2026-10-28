@@ -10,6 +10,11 @@
 // When the model calls display, its tool event carries a view, which the map
 // (map.js) draws. Each view leaves a chip in the conversation that brings it back.
 // When it calls chart, the event carries a chart, drawn in the conversation (chart.js).
+//
+// A wide screen shows the map beside the conversation. A narrow one has no room for
+// both, so they take turns on the whole screen, and the header's button switches
+// between them. A new view doesn't take the screen in the middle of an answer:
+// the button is marked instead, and the view's chip opens it.
 
 const conversation = document.getElementById("conversation");
 const composer = document.getElementById("composer");
@@ -19,6 +24,7 @@ const status = document.getElementById("status");
 const reset = document.getElementById("reset");
 const model = document.getElementById("model");
 const mapToggle = document.getElementById("map-toggle");
+const narrow = matchMedia("(max-width: 999px)");
 
 const EXAMPLES = [
   "Show me the network.",
@@ -30,6 +36,7 @@ let turn = null; // the reply being built, until its answer or error arrives
 let timer = null;
 let shown = ""; // the view on the map, as JSON, so a reload doesn't redraw it
 let latest = null; // the newest view replayed on load: [view, chip]
+let left = { scroll: 0, atEnd: true }; // where the conversation was when the map took the screen
 
 function node(tag, className, text) {
   const element = document.createElement(tag);
@@ -206,10 +213,17 @@ function handle(event, live) {
       if (event.view) {
         const chip = node("button", "view-chip", event.view.title);
         chip.type = "button";
-        chip.addEventListener("click", () => showView(event.view, chip));
+        chip.addEventListener("click", () => {
+          showView(event.view, chip);
+          if (narrow.matches) setScreen(true);
+        });
         reply().append(chip);
-        if (live) showView(event.view, chip);
-        else latest = [event.view, chip];
+        if (live) {
+          showView(event.view, chip);
+          if (!onMap()) markNew();
+        } else {
+          latest = [event.view, chip];
+        }
       }
       break;
     }
@@ -220,6 +234,7 @@ function handle(event, live) {
       block.dataset.kind = "answer";
       block.innerHTML = renderMarkdown(event.text);
       turn = null;
+      if (live && onMap()) markNew();
       break;
     }
     case "error": {
@@ -231,6 +246,7 @@ function handle(event, live) {
       }
       reply().append(node("div", "error", event.text));
       turn = null;
+      if (live && onMap()) markNew();
       break;
     }
   }
@@ -253,19 +269,59 @@ function showView(view, chip) {
   chip.classList.add("active");
   document.body.classList.remove("map-hidden");
   mapToggle.hidden = false;
-  mapToggle.setAttribute("aria-pressed", "true");
+  labelToggle();
 }
 
 function clearMap() {
   netmap.clear();
   shown = "";
+  setScreen(false);
   mapToggle.hidden = true;
+  mapToggle.classList.remove("fresh");
   document.body.classList.remove("map-hidden");
+  labelToggle();
+}
+
+const onMap = () => document.body.classList.contains("map-full");
+
+function labelToggle() {
+  // Wide, the button shows or hides the map beside the conversation. Narrow, it names
+  // the screen it leads to, so it isn't a toggle with a pressed state.
+  const fresh = mapToggle.classList.contains("fresh");
+  const name = narrow.matches && onMap() ? "Chat" : "Map";
+  mapToggle.textContent = name;
+  if (fresh) mapToggle.setAttribute("aria-label", `${name}, with something new`);
+  else mapToggle.removeAttribute("aria-label");
+  if (narrow.matches) mapToggle.removeAttribute("aria-pressed");
+  else mapToggle.setAttribute("aria-pressed", String(!document.body.classList.contains("map-hidden")));
+}
+
+function markNew() {
+  // On a narrow screen, what arrives on the screen out of sight marks the button that leads to it.
+  if (!narrow.matches) return;
+  mapToggle.classList.add("fresh");
+  labelToggle();
+}
+
+function setScreen(map) {
+  // On a narrow screen: give the whole screen to the map, or back to the conversation.
+  if (map === onMap()) return;
+  if (map) left = { scroll: window.scrollY, atEnd: window.innerHeight + window.scrollY >= document.body.scrollHeight - 120 };
+  document.body.classList.toggle("map-full", map);
+  mapToggle.classList.remove("fresh");
+  labelToggle();
+  if (!map) window.scrollTo(0, left.atEnd ? document.body.scrollHeight : left.scroll);
+  // Charts drawn while out of sight had no width to fit; this redraws them.
+  window.dispatchEvent(new Event("resize"));
 }
 
 mapToggle.addEventListener("click", () => {
-  const hidden = document.body.classList.toggle("map-hidden");
-  mapToggle.setAttribute("aria-pressed", String(!hidden));
+  if (narrow.matches) {
+    setScreen(!onMap());
+    return;
+  }
+  document.body.classList.toggle("map-hidden");
+  labelToggle();
 });
 
 narrow.addEventListener("change", () => {
@@ -282,6 +338,7 @@ narrow.addEventListener("change", () => {
 function setBusy(busy, label = "Answering") {
   send.disabled = busy;
   reset.disabled = busy;
+  mapToggle.classList.toggle("busy", busy);
   clearInterval(timer);
   status.classList.toggle("live", busy);
   status.textContent = "";

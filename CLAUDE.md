@@ -113,6 +113,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 
 - **The CSP is strict** (`script-src 'self'; style-src 'self'`). No inline scripts or styles. Style through classes in `app.css`, since a stylesheet rule beats an SVG presentation attribute.
 - **Device data reaches the DOM only as text:** `textContent` and attributes, never HTML.
+- **Narrow screens (under 1000px) show the map or the conversation, not both.** `body.map-full` gives the map the screen. The header button names the screen it leads to, so it has no pressed state there. A live view or answer marks it `fresh` instead of switching screens. A view's chip opens the map.
 - **Pins are the viewer's, not the model's.** They are kept per plane in `localStorage`, and every access is wrapped in `try`.
 - **Chart colors** are six `--series-n` tokens in `app.css`, one per port in a fixed order, checked for both modes against the page's own surfaces. Three of the light ones are under 3:1 contrast, so every chart has a Data table, and values never wear a series color.
 - **Traffic on the map** is a weathermap: each link gets a lane per direction, on the right as it travels. A lane's color is its share of port speed, in five bands from the `--load-n` ramp. That ramp is one hue (teal, since blue means highlighted), checked as an ordinal ramp in both modes. A direction is the sending port's out counter, or else the receiving port's in. A subinterface's traffic is its port's.

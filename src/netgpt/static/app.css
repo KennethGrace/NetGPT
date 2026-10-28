@@ -120,6 +120,19 @@ button:disabled { opacity: 0.5; cursor: default; }
 #reset, #map-toggle:not([hidden]) { margin-left: auto; white-space: nowrap; }
 #map-toggle:not([hidden]) + #reset { margin-left: 0; }
 #map-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+/* On a narrow screen: a dot on the button when the other screen has something new, pulsing while the answer comes. */
+#map-toggle.fresh::after, body.map-full #map-toggle.busy::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 1px;
+}
+body.map-full #map-toggle.busy::after { animation: pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { #map-toggle.busy::after { animation: none; } }
 
 main { padding-top: 16px; padding-bottom: 160px; }
 
@@ -217,16 +230,23 @@ pre code { background: none; padding: 0; }
 @keyframes pulse { 50% { opacity: 0.25; } }
 @media (prefers-reduced-motion: reduce) { #status.live::before { animation: none; } }
 
-/* The map: on a wide screen it fills the right of the window, on a narrow one it sits under the header. */
+/* The map: on a wide screen it fills the right of the window. On a narrow one it takes
+   turns with the conversation, filling the screen under the header when it is shown. */
 
 #map {
   display: flex;
   flex-direction: column;
-  height: 42vh;
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
 }
 #map[hidden], body.map-hidden #map { display: none; }
+
+@media (max-width: 999px) {
+  #map { display: none; }
+  body.map-full #top { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  body.map-full header { width: 100%; }
+  body.map-full #map:not([hidden]) { display: flex; flex: 1; min-height: 0; }
+  body.map-full main, body.map-full #composer { display: none; }
+}
 .map-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px 0; }
 #map h2 { flex: 1; min-width: 0; font-size: 15px; margin: 0; }
 #map-traffic { font-size: 12px; padding: 1px 8px; }
@@ -254,8 +274,6 @@ pre code { background: none; padding: 0; }
     right: 0;
     bottom: 0;
     width: 52vw;
-    height: auto;
-    border-bottom: 0;
     border-left: 1px solid var(--border);
   }
 }
