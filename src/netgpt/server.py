@@ -24,7 +24,7 @@ import icmplib
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import BaseModel, BeforeValidator
+from pydantic import BaseModel, BeforeValidator, Field
 
 from netgpt import __version__
 from netgpt.guard import GuardError
@@ -52,8 +52,9 @@ logger = logging.getLogger("netgpt")
 INSTRUCTIONS = """\
 NetGPT gives read-only access to the network devices in its inventory.
 Call list_devices first: every other tool takes device names from that list and cannot reach anything else.
-lldp_neighbors, interfaces, arp_table, mac_table, and routes query many devices at once and return typed
-records, with per-device errors alongside the results. topology merges them into one graph: at layer 2
+lldp_neighbors, interfaces, arp_table, mac_table, and routes return typed records from every device in
+one call, with per-device errors alongside the results. Ask for every device you need in one call, rather
+than one device at a time. topology merges them into one graph: at layer 2
 (the default) the cables, switches, and the port each host is plugged into; at layer 3 the routers and
 the networks between them. forwarding_path follows the routing tables hop by hop to show where packets
 from a source to a destination go, and where they are lost. Use show for anything the typed tools don't
@@ -98,7 +99,10 @@ def as_names(value: object) -> object:
 
 
 Names = Annotated[list[str] | None, BeforeValidator(as_names)]
-DeviceNames = Names
+# Small models ask one device at a time, a reply each, unless told plainly that one call covers them all.
+DeviceNames = Annotated[
+    Names, Field(description="The devices to query, from list_devices, all in this one call. Leave it out to query every device.")
+]
 
 
 class PathEnds(BaseModel):
@@ -236,7 +240,10 @@ def build_server(
 
     @server.tool(annotations=READ_ONLY)
     async def lldp_neighbors(devices: DeviceNames = None) -> Collection[LldpNeighbor]:
-        """Return LLDP adjacencies: which interface is cabled to which remote system and port. Omit devices to query all of them."""
+        """
+        Return every device's LLDP adjacencies: which interface is cabled to which remote system and port.
+        One call covers every device; name devices only to leave the others out.
+        """
         items, errors = await collect(devices, lambda platform: platform.lldp_neighbors())
         return Collection[LldpNeighbor](items=items, errors=errors)
 
@@ -244,26 +251,37 @@ def build_server(
     async def interfaces(devices: DeviceNames = None) -> Collection[Interface]:
         """
         Return each device's logical interfaces: the network instance (VRF or bridge) each is in,
-        whether it routes or bridges, its IPv4 addresses, and whether it is up. Omit devices to query all of them.
+        whether it routes or bridges, its IPv4 addresses, and whether it is up. network_instance is null for
+        a subinterface in no network instance: nothing passes through it, whether it is up or not.
+        One call covers every device; name devices only to leave the others out.
         """
         items, errors = await collect(devices, lambda platform: platform.interfaces())
         return Collection[Interface](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
     async def mac_table(devices: DeviceNames = None) -> Collection[MacEntry]:
-        """Return layer 2 forwarding (MAC table) entries. Omit devices to query all of them."""
+        """
+        Return every device's layer 2 forwarding (MAC table) entries, per network instance.
+        One call covers every device; name devices only to leave the others out.
+        """
         items, errors = await collect(devices, lambda platform: platform.mac_table())
         return Collection[MacEntry](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
     async def arp_table(devices: DeviceNames = None) -> Collection[ArpEntry]:
-        """Return ARP bindings of IPv4 addresses to MAC addresses. Omit devices to query all of them."""
+        """
+        Return every device's ARP bindings of IPv4 addresses to MAC addresses.
+        One call covers every device; name devices only to leave the others out.
+        """
         items, errors = await collect(devices, lambda platform: platform.arp_table())
         return Collection[ArpEntry](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
     async def routes(devices: DeviceNames = None, network_instance: str = "default") -> Collection[Route]:
-        """Return the IPv4 routing table of one network instance (VRF). Omit devices to query all of them."""
+        """
+        Return every device's IPv4 routes in one network instance (VRF).
+        One call covers every device; name devices only to leave the others out.
+        """
         items, errors = await collect(devices, lambda platform: platform.routes(network_instance))
         return Collection[Route](items=items, errors=errors)
 

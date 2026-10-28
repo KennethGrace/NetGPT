@@ -85,6 +85,15 @@ async def test_one_device_name_is_accepted_where_a_list_is_expected(client: Clie
 
 
 @pytest.mark.anyio
+async def test_every_table_tool_says_one_call_covers_every_device(client: Client) -> None:
+    async with client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+    for name in ("lldp_neighbors", "interfaces", "mac_table", "arp_table", "routes"):
+        assert "One call covers every device" in tools[name].description
+        assert "all in this one call" in tools[name].input_schema["properties"]["devices"]["description"]
+
+
+@pytest.mark.anyio
 async def test_unsupported_query_is_reported_per_device(client: Client) -> None:
     async with client:
         result = await client.call_tool("mac_table", {"devices": ["leaf1"]})
