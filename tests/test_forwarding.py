@@ -86,7 +86,7 @@ async def test_where_the_packet_is_lost_is_marked(lab: LabState) -> None:
     topology, routes = lab
     no_route = trace_path(topology, routes, {}, HOST1, "10.9.9.9")
     assert (no_route.outcome, no_route.trouble) == ("no_route", ["leaf1"])
-    assert no_route.detail == "leaf1 has no route to 10.9.9.9."
+    assert no_route.detail == "leaf1 has no route to 10.9.9.9. None of the devices has 10.9.9.9 on a connected network."
 
     nobody_home = trace_path(topology, routes, {}, HOST1, "192.168.12.99")
     assert (nobody_home.outcome, nobody_home.trouble) == ("unresolved", ["leaf2"])
@@ -105,8 +105,26 @@ async def test_a_forwarding_loop_is_caught(lab: LabState) -> None:
         for route in routes["spine1"]
     ]
     path = trace_path(topology, {**routes, "spine1": looped}, {}, HOST1, HOST2)
-    assert (path.outcome, path.trouble) == ("loop", ["leaf1"])
-    assert path.detail == "The packet comes back to leaf1: a forwarding loop."
+    # Either route could be the mistake, so both devices are marked; where host2's network
+    # really is says which route points the wrong way.
+    assert (path.outcome, path.trouble) == ("loop", ["leaf1", "spine1"])
+    assert path.detail == (
+        "A forwarding loop: leaf1 sends it to spine1 (static 192.168.0.0/16), and spine1 sends it back to leaf1 "
+        "(static 192.168.12.0/24). 192.168.12.2's network is connected to leaf2 (192.168.12.0/24 on ethernet-1/1.0)."
+    )
+
+
+@pytest.mark.anyio
+async def test_a_router_that_loses_its_address_on_a_network_leaves_that_network_nowhere(lab: LabState) -> None:
+    topology, routes = lab
+    # leaf2's address on the hosts' network mistyped: its connected route for the network is gone.
+    renumbered = [route for route in routes["leaf2"] if not route.prefix.startswith("192.168.12.")]
+    path = trace_path(topology, {**routes, "leaf2": renumbered}, {}, HOST1, HOST2)
+    assert (path.outcome, path.trouble) == ("loop", ["spine1", "leaf2"])
+    assert path.detail == (
+        "A forwarding loop: spine1 sends it to leaf2 (static 192.168.12.0/24), and leaf2 sends it back to spine1 "
+        "(static 192.168.0.0/16). None of the devices has 192.168.12.2 on a connected network."
+    )
 
 
 @pytest.mark.anyio

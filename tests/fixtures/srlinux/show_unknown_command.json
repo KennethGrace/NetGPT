@@ -1,0 +1,8 @@
+{
+ "error": {
+  "code": -1,
+  "message": "Error: Cli commands 'show interfaces' failed with error 1: At line 1: Parsing error: Unknown token 'interfaces'. Options are ['#', '/', '>', '>>', 'acl', 'arpnd', 'interface', 'lag', 'network-instance', 'platform', 'qos', 'system', 'tunnel', 'tunnel-interface', 'version', '|']\n"
+ },
+ "id": 1,
+ "jsonrpc": "2.0"
+}

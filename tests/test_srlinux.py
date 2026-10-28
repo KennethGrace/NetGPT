@@ -108,6 +108,25 @@ async def test_show_returns_cli_text() -> None:
 
 
 @pytest.mark.anyio
+async def test_a_command_srlinux_does_not_know_comes_back_with_ones_it_does() -> None:
+    platform, _ = leaf1({"show interfaces": "show_unknown_command.json"})
+    async with platform:
+        with pytest.raises(PlatformError, match="Unknown token 'interfaces'") as raised:
+            await platform.show("show interfaces")
+    assert "show interface brief" in str(raised.value) and "mac_table" in str(raised.value)
+
+
+@pytest.mark.anyio
+async def test_a_ping_srlinux_refuses_comes_back_without_the_show_examples() -> None:
+    # Recorded from switch1, whose 'lan' is a mac-vrf: it bridges, and has no addresses to ping from.
+    platform, _ = leaf1({"ping": "ping_unknown_instance.json"}, "switch1")
+    async with platform:
+        with pytest.raises(PlatformError, match="Must be an existing network namespace") as raised:
+            await platform.ping("192.168.12.2", 3, "lan")
+    assert "show interface brief" not in str(raised.value)
+
+
+@pytest.mark.anyio
 async def test_ping_across_the_fabric() -> None:
     platform, requests = leaf1({"ping": "ping_ok.json"})
     async with platform:

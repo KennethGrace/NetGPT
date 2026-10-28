@@ -48,6 +48,20 @@ DEFAULT_CONTEXT = 131072
 BLANK_REPLY = re.compile(r"^\s*(<\|?[a-z_]+\|?>\s*)*$")
 BLANK_REPLY_RETRIES = 2
 
+# When the model has spent every reply on tool calls, it gets one more with no tools offered, and this note,
+# so what it found becomes an answer instead of an error.
+OUT_OF_TOOLS = (
+    "That was your last tool call for this question. Answer it now from what you have found, "
+    "and say what you could not check."
+)
+
+# Added to the server's instructions. Small models make one tool call per reply, a reply each time, unless
+# told that one reply can make several; and the budget is counted in replies.
+SEVERAL_CALLS = (
+    "Each question allows {replies} replies that call tools. One reply can call several tools: when you need "
+    "several things that don't depend on each other (tables, paths, pings), ask for them all in the same reply."
+)
+
 
 class ChatError(RuntimeError):
     """The model or Ollama failed to produce an answer."""
@@ -168,7 +182,11 @@ class Chat:
         think: bool = False,
         max_rounds: int = 10,
     ) -> None:
-        """client must already be connected; http's base URL is the Ollama server."""
+        """
+        client must already be connected; http's base URL is the Ollama server.
+        max_rounds is how many replies to a question may call tools. If they all
+        do, one more reply, with no tools offered, answers from what they found.
+        """
         self.model = model
         self.think = think
         self._client = client
@@ -182,7 +200,7 @@ class Chat:
     async def start(self) -> None:
         """Fetch the server's tools and instructions and begin an empty conversation."""
         self._tools = ollama_tools((await self._client.list_tools()).tools)
-        self._instructions = self._client.instructions or ""
+        self._instructions = f"{self._client.instructions or ''}\n{SEVERAL_CALLS.format(replies=self._max_rounds)}"
         self.reset()
 
     def reset(self) -> None:
@@ -206,27 +224,36 @@ class Chat:
                 self.messages.append({**message, "content": ""})
                 for call in calls:
                     self.messages.append(await self._run_tool(call, observer))
-            raise ChatError(f"{self.model} was still calling tools after {self._max_rounds} turns.")
+            return await self._last_word(observer)
         except ChatError:
             # Drop the unanswered question so the conversation can carry on.
             del self.messages[checkpoint:]
             raise
 
-    async def _reply(self, observer: ChatObserver) -> dict[str, Any]:
+    async def _last_word(self, observer: ChatObserver) -> str:
+        """Ask for an answer with no tools offered, once every reply has gone on tool calls."""
+        self.messages.append({"role": "user", "content": OUT_OF_TOOLS})
+        message = await self._reply(observer, tools=False)
+        if not message["content"].strip():
+            raise ChatError(f"{self.model} was still calling tools after {self._max_rounds} turns.")
+        self.messages.append({key: value for key, value in message.items() if key != "tool_calls"})
+        return message["content"].strip()
+
+    async def _reply(self, observer: ChatObserver, tools: bool = True) -> dict[str, Any]:
         """Get the model's next message, resampling a blank reply."""
         for _ in range(BLANK_REPLY_RETRIES + 1):
-            message = await self._stream_reply(observer)
+            message = await self._stream_reply(observer, tools)
             if message.get("tool_calls") or not BLANK_REPLY.match(message["content"]):
                 return message
             logger.warning("Resampling a blank reply from %s: %r", self.model, message)
         raise ChatError(f"{self.model} gave a blank reply {BLANK_REPLY_RETRIES + 1} times in a row.")
 
-    async def _stream_reply(self, observer: ChatObserver) -> dict[str, Any]:
+    async def _stream_reply(self, observer: ChatObserver, tools: bool = True) -> dict[str, Any]:
         """Stream one reply from Ollama, passing its thinking and text to the observer as they arrive."""
         request = {
             "model": self.model,
             "messages": [for_ollama(message) for message in self.messages],
-            "tools": self._tools,
+            "tools": self._tools if tools else [],
             "stream": True,
             "think": self.think,
             "options": self._options,
@@ -412,7 +439,13 @@ def main() -> None:
         help="Let the model reason before each reply: much slower, but far better at multi-step questions "
         "(default: on when the model supports it).",
     )
-    parser.add_argument("--max-rounds", type=int, default=10, help="Model replies allowed per question.")
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=10,
+        help="Replies per question that may call tools. If they all do, one more answers without tools "
+        "(default: %(default)s).",
+    )
     parser.add_argument(
         "--timeout", type=float, default=900.0, help="Seconds to wait for Ollama to send anything (default: %(default)s)."
     )
