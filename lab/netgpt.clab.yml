@@ -14,6 +14,13 @@
 # 192.168.12.0/24 out to host2 and host3. Management addresses are fixed so the
 # inventory (inventory.yml) doesn't change between deploys.
 #
+# The hosts keep traffic flowing, so interface counters have something to count:
+# host1 sends to host2, and host3 to host1, with iperf3 at a rate that changes every
+# minute (traffic.sh). Their links get containerlab's 9500-byte MTU, but SR Linux
+# routes 1500-byte IP packets, so the hosts are set to 1500. Otherwise a TCP
+# connection stalls on its first full-size segment, and the leaf counts it as an
+# input error each time it is sent again.
+#
 # Use Docker. SR Linux 25.10.5 crashes at boot under podman (sr_app_mgr asserts in
 # its datapath launcher), and containerlab no longer tests the podman runtime.
 #
@@ -53,21 +60,32 @@ topology:
     host1:
       kind: linux
       mgmt-ipv4: 172.20.20.31
+      binds:
+        - traffic.sh:/traffic.sh:ro
       exec:
+        - ip link set dev eth1 mtu 1500
         - ip addr add 192.168.11.2/24 dev eth1
         - ip route add 192.168.0.0/16 via 192.168.11.1
+        - iperf3 -s -D
+        - sh -c "nohup sh /traffic.sh 192.168.12.2 > /dev/null 2>&1 &"
     host2:
       kind: linux
       mgmt-ipv4: 172.20.20.32
       exec:
+        - ip link set dev eth1 mtu 1500
         - ip addr add 192.168.12.2/24 dev eth1
         - ip route add 192.168.0.0/16 via 192.168.12.1
+        - iperf3 -s -D
     host3:
       kind: linux
       mgmt-ipv4: 172.20.20.33
+      binds:
+        - traffic.sh:/traffic.sh:ro
       exec:
+        - ip link set dev eth1 mtu 1500
         - ip addr add 192.168.12.3/24 dev eth1
         - ip route add 192.168.0.0/16 via 192.168.12.1
+        - sh -c "nohup sh /traffic.sh 192.168.11.2 > /dev/null 2>&1 &"
 
   links:
     - endpoints: ["leaf1:e1-49", "spine1:e1-1"]

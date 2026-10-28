@@ -52,7 +52,7 @@ pytest
 
 ### A lab to talk to
 
-[`lab/`](lab/) holds a [containerlab](https://containerlab.dev) topology: one Nokia SR Linux spine and two leaves, with static routing across the fabric. A Linux host hangs off leaf1. Behind leaf2 is switch1, an SR Linux node that only bridges, with two hosts on its LAN. It needs [containerlab](https://containerlab.dev/install/) and Docker:
+[`lab/`](lab/) holds a [containerlab](https://containerlab.dev) topology: one Nokia SR Linux spine and two leaves, with static routing across the fabric. A Linux host hangs off leaf1. Behind leaf2 is switch1, an SR Linux node that only bridges, with two hosts on its LAN. The hosts keep traffic flowing with iperf3 ([`lab/traffic.sh`](lab/traffic.sh)), from host1 to host2 and from host3 to host1, at a rate that changes every minute, so the interface counters have something to count. It needs [containerlab](https://containerlab.dev/install/) and Docker:
 
 ```bash
 sudo containerlab deploy -t lab/netgpt.clab.yml
