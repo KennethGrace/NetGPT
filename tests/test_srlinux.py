@@ -108,6 +108,15 @@ async def test_show_returns_cli_text() -> None:
 
 
 @pytest.mark.anyio
+async def test_a_command_srlinux_does_not_know_comes_back_with_ones_it_does() -> None:
+    platform, _ = leaf1({"show interfaces": "show_unknown_command.json"})
+    async with platform:
+        with pytest.raises(PlatformError, match="Unknown token 'interfaces'") as raised:
+            await platform.show("show interfaces")
+    assert "show interface brief" in str(raised.value) and "mac_table" in str(raised.value)
+
+
+@pytest.mark.anyio
 async def test_ping_across_the_fabric() -> None:
     platform, requests = leaf1({"ping": "ping_ok.json"})
     async with platform:

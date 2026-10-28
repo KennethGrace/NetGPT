@@ -31,6 +31,16 @@ INTERFACE_PATHS = [
     "/network-instance[name=*]/interface[name=*]/name",
 ]
 
+# Added to the error when SR Linux can't parse a command. Models reach for Cisco's commands, which SR Linux
+# doesn't have, and then try variations of them; working examples and the typed tools stop the guessing.
+CLI_HINT = (
+    "This device runs Nokia SR Linux, whose commands differ from Cisco's. For example: show interface brief, "
+    "show network-instance default route-table, show network-instance <name> bridge-table mac-table all, "
+    "show arpnd arp-entries, info from running network-instance default static-routes. For interfaces, ARP, "
+    "MAC tables, routes, and LLDP, the typed tools (interfaces, arp_table, mac_table, routes, lldp_neighbors) "
+    "work on every platform."
+)
+
 # What SR Linux's next-hop types do with a packet; any other type forwards it.
 NEXT_HOP_ACTIONS = {"extract": "receive", "broadcast": "receive", "blackhole": "drop", "drop": "drop", "reject": "drop"}
 
@@ -134,7 +144,12 @@ class SRLinuxPlatform(Platform):
         return [strip_module_prefixes(item) for item in result]
 
     async def _run_checked_cli(self, command: str) -> str:
-        result = await self._rpc("cli", {"commands": [command], "output-format": "text"})
+        try:
+            result = await self._rpc("cli", {"commands": [command], "output-format": "text"})
+        except PlatformError as error:
+            if "Parsing error" in str(error):
+                raise PlatformError(f"{error.args[0].rstrip()} {CLI_HINT}") from error
+            raise
         return "".join(str(item) for item in result)
 
     async def lldp_neighbors(self) -> list[LldpNeighbor]:

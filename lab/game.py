@@ -20,13 +20,14 @@ rubric can't tell which device an answer blames, and the judge can be wrong, so 
 the answers where the two disagree.
 
 Rounds are appended to lab/.scoreboard.jsonl, each marked with the NetGPT commit it
-was played against ("-dirty" when src/ had uncommitted changes).
+was played against, plus a fingerprint of any uncommitted changes to src/.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import random
@@ -164,13 +165,17 @@ async def judge_round(http: httpx.AsyncClient, model: str, record: dict[str, Any
 
 
 def netgpt_version() -> str:
-    """The commit NetGPT is at, marked dirty when src/ has uncommitted changes."""
+    """
+    The commit NetGPT is at. With uncommitted changes to src/, a fingerprint of them
+    follows a "+", so each state of the code played gets its own row.
+    """
     try:
         commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True)
-        changes = subprocess.run(["git", "status", "--porcelain", "--", "src"], capture_output=True, text=True, check=True)
+        changes = subprocess.run(["git", "diff", "HEAD", "--", "src"], capture_output=True, check=True)
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
-    return commit.stdout.strip() + ("-dirty" if changes.stdout.strip() else "")
+    fingerprint = f"+{hashlib.sha1(changes.stdout).hexdigest()[:7]}" if changes.stdout else ""
+    return commit.stdout.strip() + fingerprint
 
 
 async def play_round(chat: Chat, inventory: Inventory, fault: Fault) -> dict[str, Any]:

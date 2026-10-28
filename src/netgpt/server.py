@@ -221,8 +221,10 @@ def build_server(
     async def show(device: str, command: str) -> CommandOutput:
         """
         Run one read-only CLI command on a device and return its text output.
-        Commands that could change the device, write files, or chain several
-        commands together are refused, with the reason.
+        The command is in the device's own CLI, which may not be Cisco's:
+        list_devices gives each device's platform. Where a typed tool covers the
+        question, use it instead. Commands that could change the device, write
+        files, or chain several commands together are refused, with the reason.
         """
         try:
             # Refuse a command before resolving credentials or opening a connection.
