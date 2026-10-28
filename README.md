@@ -137,6 +137,10 @@ The layout is a force simulation ([d3-force](https://d3js.org/d3-force), include
 
 You can pin nodes to lay the map out your way: say, a border leaf on top with the other leaves in a row below. A node you drag stays where you drop it, and the forces arrange everything else around it. Dropped near another pinned node's row or column, it snaps into line. Double-click a node to pin it where it is, or to let it go; the inspector has the same switch, plus "Unpin all". Pins are yours, not the model's: they hold across views, are kept per plane, and are saved in your browser.
 
+#### Charts
+
+When NetGPT polls (it does unless `--poll-interval 0`), the page also offers `chart`. Asked how busy something is, the model charts ports' traffic, utilization, or errors over the last minutes, right in the conversation. It names ports as `device:port`, a link as `leaf1--spine1`, or a device for all its ports. Each port gets its own color, with in drawn solid and out dashed. A chart keeps updating with every poll while it is on the page. Hovering shows every line's value at one poll, and the Data table under each chart has the same numbers.
+
 ## Inventory
 
 ```yaml

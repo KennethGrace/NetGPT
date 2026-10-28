@@ -9,6 +9,7 @@
 //
 // When the model calls display, its tool event carries a view, which the map
 // (map.js) draws. Each view leaves a chip in the conversation that brings it back.
+// When it calls chart, the event carries a chart, drawn in the conversation (chart.js).
 
 const conversation = document.getElementById("conversation");
 const composer = document.getElementById("composer");
@@ -21,8 +22,8 @@ const mapToggle = document.getElementById("map-toggle");
 
 const EXAMPLES = [
   "Show me the network.",
+  "How busy are the fabric links?",
   "What is cabled to each device?",
-  "Show me every device's routing table.",
 ];
 
 let turn = null; // the reply being built, until its answer or error arrives
@@ -41,6 +42,10 @@ function node(tag, className, text) {
 
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const escapeHtml = (text) => text.replace(/[&<>"']/g, (character) => ESCAPES[character]);
+// Small models write arrows in LaTeX ($\to$), which the page has no renderer for.
+const ARROWS = {
+  to: "→", rightarrow: "→", leftarrow: "←", leftrightarrow: "↔", Rightarrow: "⇒", Leftarrow: "⇐", Leftrightarrow: "⇔",
+};
 
 function inline(text) {
   // Code spans become numbered placeholders, so nothing inside them is formatted
@@ -52,8 +57,7 @@ function inline(text) {
   return escapeHtml(marked)
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,:;!?]|$)/g, "$1<em>$2</em>")
-    .replace(/\$\\(?:to|rightarrow)\$/g, "→")
-    .replace(/\$\\leftarrow\$/g, "←")
+    .replace(/\$\\(to|rightarrow|leftarrow|leftrightarrow|Rightarrow|Leftarrow|Leftrightarrow)\$/g, (_, name) => ARROWS[name])
     .replace(/\u0000(\d+)\u0000/g, (_, index) => `<code>${escapeHtml(spans[Number(index)])}</code>`);
 }
 
@@ -198,6 +202,7 @@ function handle(event, live) {
         .join(", ");
       step.append(node("summary", "", `${event.name}(${args})`), node("pre", "", pretty(event.result)));
       reply().append(step);
+      if (event.chart) netchart.add(reply(), event.chart);
       if (event.view) {
         const chip = node("button", "view-chip", event.view.title);
         chip.type = "button";
@@ -261,6 +266,15 @@ function clearMap() {
 mapToggle.addEventListener("click", () => {
   const hidden = document.body.classList.toggle("map-hidden");
   mapToggle.setAttribute("aria-pressed", String(!hidden));
+});
+
+narrow.addEventListener("change", () => {
+  // Widening the window puts the map back beside the conversation.
+  if (!narrow.matches) {
+    setScreen(false);
+    mapToggle.classList.remove("fresh");
+  }
+  labelToggle();
 });
 
 // ---- Status and controls

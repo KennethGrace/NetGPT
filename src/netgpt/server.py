@@ -47,7 +47,7 @@ from netgpt.primitives import (
     Route,
 )
 from netgpt.forwarding import ForwardingPath, TraceError, trace_path
-from netgpt.statistics import DEFAULT_INTERVAL, DEFAULT_WINDOW, Poller
+from netgpt.statistics import DEFAULT_INTERVAL, DEFAULT_WINDOW, MAX_CHART_PORTS, Chart, ChartError, Metric, Poller, describe_chart
 from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_topology, port_of
 from netgpt.views import View, ViewError, describe, make_view
 
@@ -80,6 +80,12 @@ path (source and destination) and the server traces it through the routing table
 default) draws the cabling: switches, and which port each host is plugged into. layer 3 draws the
 routers and the networks between them, without the switches. Refer to the map in your answer rather
 than describing every link in words.
+"""
+
+CHART_INSTRUCTIONS = """\
+Call chart to draw ports' traffic, utilization, or errors over time in the conversation. The chart keeps
+updating as NetGPT polls, so use it whenever the answer is about how busy something is, or how its errors
+change, and refer to it rather than listing numbers.
 """
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
@@ -120,6 +126,13 @@ Minutes = Annotated[
 ]
 
 
+ChartPorts = Annotated[
+    list[str],
+    BeforeValidator(as_names),
+    Field(description="Ports as device:port (leaf1:ethernet-1/49), links as device--device, or devices for all their ports."),
+]
+
+
 class PathEnds(BaseModel):
     """The two ends of a path to trace."""
 
@@ -150,6 +163,7 @@ def build_server(
         INSTRUCTIONS
         + (STATISTICS_INSTRUCTIONS.format(interval=statistics.interval) if statistics else "")
         + (DISPLAY_INSTRUCTIONS if display else "")
+        + (CHART_INSTRUCTIONS if display and statistics else "")
     )
 
     @contextlib.asynccontextmanager
@@ -238,6 +252,20 @@ def build_server(
             failure.device: failure.error for failure in failures if failure.device in present or failure.device not in answered
         }
         return topology, found, trace_path(topology, tables, unreadable, source, destination, network_instance)
+
+    async def link_port(name: str) -> str:
+        """A link named device--device, as the first device's port on it (from LLDP); any other name as it is."""
+        ends = [end.strip() for end in name.split("--")]
+        if len(ends) != 2:
+            return name
+        known = {device.name for device in inventory.devices}
+        if ends[0] not in known:
+            ends.reverse()
+        neighbors, _ = await collect([ends[0]], lambda platform: platform.lldp_neighbors())
+        ports = [neighbor.interface for neighbor in neighbors if neighbor.neighbor == ends[1]]
+        if not ports:
+            raise ChartError(f"LLDP shows no link from {ends[0]} to {ends[1]}. Name a port as device:port instead.")
+        return f"{ends[0]}:{ports[0]}"
 
     @server.tool(annotations=READ_ONLY)
     def list_devices() -> list[DeviceInfo]:
@@ -393,6 +421,33 @@ def build_server(
             return CallToolResult(
                 content=[TextContent(type="text", text=describe(view))],
                 structured_content=view.model_dump(mode="json"),
+            )
+
+    if display and statistics is not None:
+
+        @server.tool(
+            name="chart",
+            annotations=READ_ONLY,
+            description=(
+                "Draw a chart in the conversation of ports' rates over the last minutes. It keeps updating every "
+                f"{statistics.interval:g} seconds as NetGPT polls. Name ports as device:port (leaf1:ethernet-1/49), a "
+                "link as device--device for the first device's port on it, or a device for all its ports except "
+                f"management; up to {MAX_CHART_PORTS} ports. metric is traffic "
+                "(Mbit/s in and out, the default), percent (of each port's speed), or errors (errors and discards in "
+                "each interval between polls, in and out)."
+            ),
+        )
+        async def chart(
+            title: str, ports: ChartPorts, metric: Metric = "traffic", minutes: Minutes = 15
+        ) -> Annotated[CallToolResult, Chart]:
+            try:
+                drawn = statistics.chart(title, [await link_port(name) for name in ports], metric, minutes)
+            except ChartError as error:
+                raise ToolError(str(error)) from error
+            # The model reads a summary; the page draws the chart from the structured content.
+            return CallToolResult(
+                content=[TextContent(type="text", text=describe_chart(drawn))],
+                structured_content=drawn.model_dump(mode="json"),
             )
 
     @server.tool(annotations=READ_ONLY)

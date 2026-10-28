@@ -7,6 +7,7 @@ through httpx's ASGI transport, with a scripted Ollama playing the model.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
@@ -18,6 +19,7 @@ from mcp import Client
 from netgpt.chat import Chat
 from netgpt.inventory import Inventory
 from netgpt.server import build_server
+from netgpt.statistics import Poller
 from netgpt.web import build_app
 
 from fakes import FakePlatform, ScriptedOllama, calls, says
@@ -33,24 +35,26 @@ def events(response: httpx.Response) -> list[dict[str, Any]]:
 
 @pytest.fixture
 async def browser(inventory: Inventory) -> AsyncIterator[Browser]:
-    """Yields a factory: given a scripted Ollama, it returns a browser for the app, signed in or not."""
-    # The page can draw, so its server offers display, as netgpt-chat --web does.
-    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True)) as client:
-        opened: list[httpx.AsyncClient] = []
+    """
+    Yields a factory: given a scripted Ollama, it returns a browser for the app, signed
+    in or not. Given a poller too, the server polls and the page can draw charts.
+    """
+    async with contextlib.AsyncExitStack() as stack:
 
-        async def open_page(ollama: ScriptedOllama, signed_in: bool = True) -> httpx.AsyncClient:
-            http = ollama.client()
+        async def open_page(ollama: ScriptedOllama, signed_in: bool = True, statistics: Poller | None = None) -> httpx.AsyncClient:
+            # The page can draw, so its server offers display, as netgpt-chat --web does.
+            server = build_server(inventory, platforms={"fake": FakePlatform}, display=True, statistics=statistics)
+            client = await stack.enter_async_context(Client(server))
+            http = await stack.enter_async_context(ollama.client())
             chat = Chat(client, http, "scripted", {}, think=True)
             await chat.start()
-            page = httpx.AsyncClient(transport=httpx.ASGITransport(app=build_app(chat, TOKEN)), base_url="http://netgpt.test")
-            opened.extend([http, page])
+            app = build_app(chat, TOKEN, statistics)
+            page = await stack.enter_async_context(httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://netgpt.test"))
             if signed_in:
                 await page.get("/", params={"token": TOKEN})
             return page
 
         yield open_page
-        for http in opened:
-            await http.aclose()
 
 
 @pytest.mark.anyio
@@ -58,8 +62,8 @@ async def test_nothing_is_served_without_the_token(browser: Browser) -> None:
     page = await browser(ScriptedOllama(says("Never asked.")), signed_in=False)
     wrong = await page.get("/", params={"token": "guess"})
     assert wrong.status_code == 401 and "set-cookie" not in wrong.headers
-    paths = ["/", "/app.js", "/map.js", "/d3-force.js", "/app.css", "/api/conversation"]
-    for method, path in [("GET", path) for path in paths] + [("POST", "/api/ask"), ("POST", "/api/reset")]:
+    paths = ["/", "/app.js", "/map.js", "/chart.js", "/d3-force.js", "/app.css", "/api/conversation"]
+    for method, path in [("GET", path) for path in paths] + [("POST", "/api/ask"), ("POST", "/api/reset"), ("POST", "/api/chart")]:
         response = await page.request(method, path, json={"question": "hi"} if method == "POST" else None)
         assert response.status_code == 401, path
 
@@ -146,3 +150,45 @@ async def test_only_display_results_carry_a_view(browser: Browser) -> None:
     assert refused["is_error"] and "view" not in refused
     assert graph["name"] == "topology" and "view" not in graph
 
+
+@pytest.mark.anyio
+async def test_a_chart_reaches_the_page_survives_a_reload_and_refreshes_with_new_polls(
+    browser: Browser, inventory: Inventory, counter_reads: dict[str, int]
+) -> None:
+    now = [1000.0]
+    poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30, clock=lambda: now[0])
+    page = await browser(ScriptedOllama(calls("chart", {"title": "leaf1", "ports": ["leaf1"]}), says("See the chart.")), statistics=poller)
+    await poller.poll()
+    now[0] += 30
+    await poller.poll()
+    streamed = events(await page.post("/api/ask", json={"question": "How busy is leaf1?"}))
+    chart = streamed[0]["chart"]
+    assert (chart["ports"], chart["unit"], chart["interval"]) == (["leaf1:ethernet-1/1"], "Mbit/s", 30)
+    assert [(line["direction"], [value for _, value in line["points"]]) for line in chart["lines"]] == [("in", [10.0]), ("out", [1.0])]
+    assert (await page.get("/api/conversation")).json()["events"][1]["chart"] == chart
+    # The page asks for the same chart again, and gets the poll that came since.
+    now[0] += 30
+    await poller.poll()
+    asked = {key: chart[key] for key in ("title", "ports", "metric", "minutes")}
+    fresh = (await page.post("/api/chart", json=asked)).json()
+    assert [len(line["points"]) for line in fresh["lines"]] == [2, 2]
+
+
+@pytest.mark.anyio
+async def test_a_chart_of_ports_nobody_polls_is_refused_with_the_ones_that_are(
+    browser: Browser, inventory: Inventory, counter_reads: dict[str, int]
+) -> None:
+    poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30)
+    page = await browser(ScriptedOllama(), statistics=poller)
+    await poller.poll()
+    refused = await page.post("/api/chart", json={"title": "x", "ports": ["leaf9:ethernet-1/1"], "metric": "traffic", "minutes": 15})
+    assert refused.status_code == 400 and "leaf1:ethernet-1/1, leaf2:ethernet-1/1" in refused.json()["error"]
+    garbled = await page.post("/api/chart", json={"ports": "leaf1"})
+    assert garbled.status_code == 400 and "title, ports, metric, and minutes" in garbled.json()["error"]
+
+
+@pytest.mark.anyio
+async def test_without_a_poller_there_are_no_charts(browser: Browser) -> None:
+    page = await browser(ScriptedOllama())
+    response = await page.post("/api/chart", json={"title": "x", "ports": ["leaf1"], "metric": "traffic", "minutes": 15})
+    assert response.status_code == 404

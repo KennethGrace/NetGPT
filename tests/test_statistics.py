@@ -12,7 +12,7 @@ import pytest
 
 from netgpt.inventory import Inventory
 from netgpt.primitives import InterfaceCounters
-from netgpt.statistics import Poller, Sample, rate, speed_name, summarize
+from netgpt.statistics import ChartError, Poller, Sample, rate, speed_name, summarize
 
 from fakes import FakePlatform
 
@@ -131,3 +131,32 @@ async def test_polling_runs_in_the_background_while_anything_needs_it(inventory:
 
 def test_port_speeds_are_written_the_way_vendors_write_them() -> None:
     assert [speed_name(speed) for speed in (25 * 10**9, 100 * 10**6, 10**12, None)] == ["25G", "100M", "1T", None]
+
+
+@pytest.mark.anyio
+async def test_a_chart_draws_each_port_both_ways_in_the_metric_asked_for(inventory: Inventory, counter_reads: dict[str, int]) -> None:
+    clock = Clock()
+    polls = poller(inventory, clock)
+    for _ in range(3):
+        await polls.poll()
+        clock.now += 30
+    clock.now -= 30
+    traffic = polls.chart("Leaves", ["leaf1", "leaf2:ethernet-1/1"], "traffic", 15)
+    assert traffic.ports == ["leaf1:ethernet-1/1", "leaf2:ethernet-1/1"] and traffic.unit == "Mbit/s"
+    assert [(line.port, line.direction, line.points) for line in traffic.lines[:2]] == [
+        ("leaf1:ethernet-1/1", "in", [(1030, 10.0), (1060, 10.0)]),
+        ("leaf1:ethernet-1/1", "out", [(1030, 1.0), (1060, 1.0)]),
+    ]
+    assert [value for _, value in polls.chart("t", ["leaf1"], "percent", 15).lines[0].points] == [1.0, 1.0]
+    assert [value for _, value in polls.chart("t", ["leaf1"], "errors", 15).lines[0].points] == [2.0, 2.0]
+
+
+@pytest.mark.anyio
+async def test_a_chart_of_names_nobody_polls_or_too_many_ports_is_refused(inventory: Inventory, counter_reads: dict[str, int]) -> None:
+    polls = poller(inventory, Clock())
+    await polls.poll()
+    with pytest.raises(ChartError, match="Name a device, or one of its ports: leaf1:ethernet-1/1, leaf2:ethernet-1/1."):
+        polls.chart("t", ["leaf1:ethernet-1/9"], "traffic", 15)
+    polls._samples.update({("leaf1", f"ethernet-1/{port}"): polls._samples[("leaf1", "ethernet-1/1")] for port in range(2, 8)})
+    with pytest.raises(ChartError, match="That is 7 ports; a chart has room for 6"):
+        polls.chart("t", ["leaf1"], "traffic", 15)

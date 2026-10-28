@@ -13,7 +13,9 @@ streams to the page as newline-delimited JSON events. The answer keeps going if
 the page goes away, and a reload replays the conversation from its history.
 
 When the model calls display, its tool event carries the view, and the page draws
-it on the map (map.js, laid out by the vendored d3-force library).
+it on the map (map.js, laid out by the vendored d3-force library). When it calls
+chart, the event carries the chart, which the page draws in the conversation
+(chart.js) and refreshes from /api/chart each time the poller has new samples.
 """
 
 from __future__ import annotations
@@ -26,19 +28,23 @@ from importlib.resources import files
 from typing import Any
 
 import uvicorn
+from pydantic import BaseModel, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from netgpt.chat import Chat, ChatError, ChatObserver
+from netgpt.statistics import MAX_CHART_PORTS, ChartError, Metric, Poller
 
 COOKIE = "netgpt_token"
 DISPLAY_TOOL = "display"
+CHART_TOOL = "chart"
 ASSETS = {
     "index.html": "text/html",
     "app.js": "text/javascript",
     "map.js": "text/javascript",
+    "chart.js": "text/javascript",
     "d3-force.js": "text/javascript",
     "app.css": "text/css",
 }
@@ -64,6 +70,15 @@ Event = dict[str, Any]
 Endpoint = Callable[[Request], Awaitable[Response]]
 
 
+class ChartRequest(BaseModel):
+    """A chart the page already has, asked for again with the latest samples."""
+
+    title: str = Field(max_length=200)
+    ports: list[str] = Field(min_length=1, max_length=MAX_CHART_PORTS)
+    metric: Metric
+    minutes: float = Field(gt=0)
+
+
 class StreamObserver(ChatObserver):
     """Turns a question's progress into events for the page."""
 
@@ -85,10 +100,12 @@ class StreamObserver(ChatObserver):
 def tool_event(
     name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None
 ) -> Event:
-    """The event for one tool call. A view the model displayed comes along for the map."""
+    """The event for one tool call. A view the model displayed comes along for the map, and a chart for the page."""
     event: Event = {"type": "tool", "name": name, "arguments": arguments, "result": result, "is_error": is_error}
     if name == DISPLAY_TOOL and structured is not None and not is_error:
         event["view"] = structured
+    if name == CHART_TOOL and structured is not None and not is_error:
+        event["chart"] = structured
     return event
 
 
@@ -118,8 +135,8 @@ def conversation_events(messages: list[dict[str, Any]]) -> list[Event]:
     return events
 
 
-def build_app(chat: Chat, token: str) -> Starlette:
-    """Build the web app serving one conversation, for browsers holding the token."""
+def build_app(chat: Chat, token: str, statistics: Poller | None = None) -> Starlette:
+    """Build the web app serving one conversation, for browsers holding the token. Charts need the poller."""
     static = files("netgpt") / "static"
     assets = {name: (static / name).read_text(encoding="utf-8") for name in ASSETS}
     expected = token.encode()
@@ -194,6 +211,18 @@ def build_app(chat: Chat, token: str) -> Starlette:
         task.add_done_callback(running.discard)
         return StreamingResponse(stream(events), media_type="application/x-ndjson", headers=SECURITY_HEADERS)
 
+    async def chart(request: Request) -> Response:
+        if statistics is None:
+            return JSONResponse({"error": "NetGPT isn't polling."}, status_code=404, headers=SECURITY_HEADERS)
+        try:
+            asked = ChartRequest.model_validate(await request.json())
+            drawn = statistics.chart(asked.title, asked.ports, asked.metric, asked.minutes)
+        except (ValueError, ValidationError) as error:
+            # ChartError is a ValueError, and names the ports that are polled.
+            message = str(error) if isinstance(error, ChartError) else "Send JSON with a title, ports, metric, and minutes."
+            return JSONResponse({"error": message}, status_code=400, headers=SECURITY_HEADERS)
+        return JSONResponse(drawn.model_dump(mode="json"), headers=SECURITY_HEADERS)
+
     async def reset(request: Request) -> Response:
         if busy.locked():
             message = "Still answering; wait for the answer before starting over."
@@ -208,12 +237,13 @@ def build_app(chat: Chat, token: str) -> Starlette:
             Route("/api/conversation", requires_sign_in(conversation)),
             Route("/api/ask", requires_sign_in(ask), methods=["POST"]),
             Route("/api/reset", requires_sign_in(reset), methods=["POST"]),
+            Route("/api/chart", requires_sign_in(chart), methods=["POST"]),
         ]
     )
 
 
-async def serve(chat: Chat, host: str, port: int, token: str) -> None:
+async def serve(chat: Chat, host: str, port: int, token: str, statistics: Poller | None = None) -> None:
     """Serve the chat page until interrupted."""
     # No access log: the first request's URL carries the token.
-    config = uvicorn.Config(build_app(chat, token), host=host, port=port, log_level="warning", access_log=False)
+    config = uvicorn.Config(build_app(chat, token, statistics), host=host, port=port, log_level="warning", access_log=False)
     await uvicorn.Server(config).serve()

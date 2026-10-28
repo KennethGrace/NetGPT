@@ -392,7 +392,7 @@ async def run(args: argparse.Namespace) -> int:
             host, port = args.web
             token = os.environ.get("NETGPT_WEB_TOKEN") or secrets.token_urlsafe(24)
             progress(f"NetGPT chat with {chat.model} at http://{host}:{port}/?token={token}", GRAY)
-            await serve(chat, host, port, token)
+            await serve(chat, host, port, token, statistics)
             return 0
         observer = TerminalObserver(args.verbose)
         if not args.questions:

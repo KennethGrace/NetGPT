@@ -7,6 +7,9 @@ Counters only grow, so a rate is the difference between two readings over the ti
 between them. A counter that goes backwards was reset (the device restarted, or
 someone cleared it), and that interval isn't measured. Samples are kept in memory
 for a window; nothing survives a restart yet.
+
+A Chart is a few ports' rates over time, which the web page draws in the
+conversation and keeps asking for again as the poller takes new samples.
 """
 
 from __future__ import annotations
@@ -20,6 +23,9 @@ from collections import deque
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from netgpt.inventory import Inventory, InventoryError
 from netgpt.platforms import PLATFORMS, Platform, PlatformError, connect
@@ -35,6 +41,37 @@ FIRST_INTERVAL = 5.0
 
 # The counters a rate is the difference of. Any of them going backwards means a reset.
 COUNTED = ("in_octets", "out_octets", "in_errors", "out_errors", "in_discards", "out_discards")
+
+Metric = Literal["traffic", "percent", "errors"]
+UNITS: dict[str, str] = {"traffic": "Mbit/s", "percent": "% of port speed", "errors": "errors and discards per poll"}
+# The page has six colors for ports, each port's in and out drawn in one of them.
+MAX_CHART_PORTS = 6
+
+
+class ChartError(ValueError):
+    """A chart asked for ports that NetGPT doesn't poll; the message names the ones it does."""
+
+
+class ChartLine(BaseModel):
+    """One line on a chart: one port's traffic, utilization, or errors, one way."""
+
+    port: str = Field(description="The device and port, as device:port.")
+    direction: Literal["in", "out"]
+    points: list[tuple[float, float]] = Field(
+        description="(time, value) at the end of each interval between polls; time in seconds since the epoch."
+    )
+
+
+class Chart(BaseModel):
+    """A few ports' rates over the last minutes, for the page to draw and keep up to date."""
+
+    title: str
+    metric: Metric
+    unit: str
+    minutes: float
+    interval: float = Field(description="Seconds between polls: how often the chart has something new.")
+    ports: list[str] = Field(description="The ports charted, as device:port, in the order they are colored.")
+    lines: list[ChartLine]
 
 
 @dataclass(frozen=True)
@@ -58,6 +95,7 @@ class Rate:
     in_discards: int
     out_discards: int
     flaps: int | None
+    speed_bps: int | None
 
 
 def rate(earlier: Sample, later: Sample) -> Rate | None:
@@ -81,6 +119,7 @@ def rate(earlier: Sample, later: Sample) -> Rate | None:
         in_discards=deltas["in_discards"],
         out_discards=deltas["out_discards"],
         flaps=flaps,
+        speed_bps=later.counters.speed_bps,
     )
 
 
@@ -94,9 +133,14 @@ def speed_name(bps: int | None) -> str | None:
     return f"{bps}bps"
 
 
+def rates_since(samples: Sequence[Sample], since: float) -> list[Rate]:
+    """The rates between one port's samples, for the intervals that end after a moment."""
+    return [found for earlier, later in pairwise(samples) if later.at > since and (found := rate(earlier, later))]
+
+
 def summarize(samples: Sequence[Sample], since: float) -> InterfaceTraffic | None:
     """What one port's samples say since a moment: None until there are two to compare after it."""
-    rates = [found for earlier, later in pairwise(samples) if later.at > since and (found := rate(earlier, later))]
+    rates = rates_since(samples, since)
     if not rates:
         return None
     latest, counters = rates[-1], samples[-1].counters
@@ -133,6 +177,33 @@ def port_order(name: str) -> list[str | int]:
     return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
 
 
+def chart_value(found: Rate, metric: Metric, direction: Literal["in", "out"]) -> float | None:
+    """One interval's value on a chart, or None for utilization on a port of unknown speed."""
+    if metric == "errors":
+        return float(found.in_errors + found.in_discards if direction == "in" else found.out_errors + found.out_discards)
+    bps = found.in_bps if direction == "in" else found.out_bps
+    if metric == "traffic":
+        return round(bps / 1e6, 3)
+    return round(100 * bps / found.speed_bps, 4) if found.speed_bps else None
+
+
+def describe_chart(chart: Chart) -> str:
+    """What the model reads about a chart it drew: each line's latest value, average, and peak."""
+    lines = [
+        f"Charted {chart.unit} for {', '.join(chart.ports)} over the last {chart.minutes:g} minutes. The chart is in "
+        f"the conversation, and it updates every {chart.interval:g} seconds."
+    ]
+    for line in chart.lines:
+        values = [value for _, value in line.points]
+        if not values:
+            lines.append(f"{line.port} {line.direction}: nothing yet.")
+            continue
+        average = sum(values) / len(values)
+        lines.append(f"{line.port} {line.direction}: now {values[-1]:g}, average {average:.3g}, peak {max(values):g}.")
+    lines.append("Refer to the chart in your answer rather than repeating every number.")
+    return "\n".join(lines)
+
+
 class Poller:
     """
     Polls every device in the inventory for its interface counters, every interval
@@ -154,6 +225,11 @@ class Poller:
         self._inventory = inventory
         self._platforms = platforms
         self._clock = clock
+        self._management = {
+            device.name: platforms[device.platform].management_interfaces
+            for device in inventory.devices
+            if device.platform in platforms
+        }
         self._samples: dict[tuple[str, str], deque[Sample]] = {}
         # Each device's error from its latest poll, while it keeps failing.
         self._errors: dict[str, str] = {}
@@ -236,3 +312,54 @@ class Poller:
                     )
                 )
         return items, errors
+
+    def ports(self) -> list[tuple[str, str]]:
+        """Every port polled so far, as (device, port), in inventory order and then port order."""
+        order = {device.name: index for index, device in enumerate(self._inventory.devices)}
+        return sorted(self._samples, key=lambda key: (order.get(key[0], len(order)), port_order(key[1])))
+
+    def resolve(self, names: list[str]) -> list[tuple[str, str]]:
+        """
+        The ports some names mean: device:port (or "device port") for one port, or a
+        device for all its ports except management. Raises ChartError naming the ports
+        polled when a name matches none of them.
+        """
+        polled = self.ports()
+        found: list[tuple[str, str]] = []
+        for name in names:
+            device, _, port = name.strip().replace(" ", ":", 1).partition(":")
+            if port:
+                matches = [(device, port)] if (device, port) in polled else []
+            else:
+                management = self._management.get(device)
+                matches = [key for key in polled if key[0] == device and not (management and management.match(key[1]))]
+            if not matches:
+                known = ", ".join(f"{device}:{port}" for device, port in polled) or "none yet: polling has just begun"
+                raise ChartError(f"No polled port is called '{name}'. Name a device, or one of its ports: {known}.")
+            found.extend(match for match in matches if match not in found)
+        if len(found) > MAX_CHART_PORTS:
+            raise ChartError(
+                f"That is {len(found)} ports; a chart has room for {MAX_CHART_PORTS}. Name fewer devices, or single ports."
+            )
+        return found
+
+    def chart(self, title: str, names: list[str], metric: Metric, minutes: float) -> Chart:
+        """Chart some ports, named as resolve() takes them, over the last minutes."""
+        ports = self.resolve(names)
+        minutes = min(minutes, self.window / 60)
+        since = self._clock() - minutes * 60
+        lines = []
+        for device, port in ports:
+            found = rates_since(self._samples[(device, port)], since)
+            for direction in ("in", "out"):
+                points = [(item.end, value) for item in found if (value := chart_value(item, metric, direction)) is not None]
+                lines.append(ChartLine(port=f"{device}:{port}", direction=direction, points=points))
+        return Chart(
+            title=title,
+            metric=metric,
+            unit=UNITS[metric],
+            minutes=minutes,
+            interval=self.interval,
+            ports=[f"{device}:{port}" for device, port in ports],
+            lines=lines,
+        )
