@@ -14,6 +14,7 @@ pytest                                  # the whole suite; quick, needs no devic
 netgpt-mcp --inventory lab/inventory.yml
 netgpt-chat --inventory lab/inventory.yml --model gemma4:e4b --ollama http://127.0.0.1:11434
 netgpt-chat ... --web 127.0.0.1:8080    # sign-in token from $NETGPT_WEB_TOKEN, or printed
+netgpt-chat ... --poll-interval 10      # interface counters every 10 s (default 30; 0 turns polling off)
 python lab/record_fixtures.py           # re-record the lab's responses as test fixtures
 python lab/gremlin.py break|reveal|repair|check   # break one thing in the lab on purpose, and put it back
 python lab/game.py --model M --ollama URL         # the gremlin's game: break, ask the model why, keep score
@@ -22,11 +23,12 @@ python lab/game.py --model M --ollama URL         # the gremlin's game: break, a
 ## Layout
 
 - `src/netgpt/primitives.py`: the typed records every tool returns, by layer. Each names the device that reported it.
-- `src/netgpt/platforms/`: one driver per platform (`srlinux.py` speaks SR Linux JSON-RPC). `base.py` is the interface.
+- `src/netgpt/platforms/`: one driver per platform (`srlinux.py` speaks SR Linux JSON-RPC). `base.py` is the interface, and `connect` opens an inventory device with its driver.
 - `src/netgpt/guard.py`: the read-only CLI policy for `show`.
 - `src/netgpt/inventory.py`: devices, credentials (env var or `chmod 600` file), and the networks `ping_sweep` may cover.
 - `src/netgpt/topology.py`: merges the tables into one graph: `build_topology` (layer 2), `build_l3` (layer 3).
 - `src/netgpt/forwarding.py`: walks routing tables hop by hop (`trace_path`). It sends nothing.
+- `src/netgpt/statistics.py`: the `Poller`, which reads every device's interface counters on an interval, and the rates worked out from them.
 - `src/netgpt/views.py`: turns the model's choices into a `View` of the graph. `describe` is the text the model reads back.
 - `src/netgpt/server.py`: the MCP tools. `display` exists only when `build_server(display=True)`.
 - `src/netgpt/chat.py`, `web.py`: the Ollama tool loop, and the web page's server.
@@ -48,6 +50,7 @@ python lab/game.py --model M --ollama URL         # the gremlin's game: break, a
 - **Layer 2:** LLDP gives cables. A port hearing several LLDP neighbors is a shared segment. For each ARP entry, `locate` follows the address from the port it was heard on through switches' MAC tables to the port it is plugged into. A forgotten MAC leaves the host behind the switch with no port.
 - **Layer 3:** routers, subnets (from routed interfaces), and the hosts on them. Switches drop out. A /30 or /31 between two routers becomes a link with `subnet` set.
 - **Forwarding walk:** longest match, recursive next-hop resolution, then the cable. `beyond` crosses shared segments and bridged ports, and each switch crossed becomes a hop. Hosts on the same network reach each other without the router.
+- **Statistics:** while a client is connected, the server's lifespan runs the `Poller`: every device's interface counters every 30 seconds, the second poll 5 seconds after the first, and an hour of samples in memory. A rate is the difference of two readings over the time between them, and a counter that goes backwards is a reset, so that interval isn't measured. `interface_traffic` exists only when the server polls; the game's server doesn't.
 - **Model and page:** a `display` result gives the model `describe(view)` as text and gives the page the whole view as structured content. The chat keeps it under `_structured` and strips that before Ollama sees the history.
 
 ## Small models
@@ -69,6 +72,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **Parser tests** replay JSON-RPC responses recorded from the lab (`tests/fixtures/srlinux/`, through `fakes.replay`). The single files are leaf1's, for the parser tests. `lab/<device>/` holds every device's tables, and `fakes.recorded_lab()` parses them through the real driver.
 - **After changing the lab,** re-record (`python lab/record_fixtures.py`) and read the diff. A redeploy changes MAC addresses, which some tests name, and timestamps change every time.
 - **Synthetic networks:** `fakes.SwitchedNetwork` is a small routed network with a switch. `FakePlatform` backs the server, chat, and web tests. `ScriptedOllama` stands in for the model.
+- **Polling:** `FakePlatform`'s counters grow the same amount on every read (`counter_reads` resets them), and the `Poller` takes a clock, so a test sets the time between polls and knows the rates exactly.
 - **Check driver changes against the live lab** before calling them done. Recording the lab found that SR Linux spells a learned MAC `learnt`. SR Linux also reports an unanswered ping as either a result or an error.
 - **The page has no JS test suite.** Check it in headless Firefox:
   - Build a static copy of the page whose stub `fetch` replays real views, and screenshot it.
@@ -136,7 +140,12 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
     - Check the tools with no model: break each fault, make fixed tool calls, and check the deciding fact is in the output, unambiguous.
     - `interfaces` reports oper-state but not admin-state, so a shut port and a pulled cable look the same.
     - Play more rounds of each fault. Two or three is a small sample, and the same fault scores very differently from round to round.
-- **NMS track** (next): poll statistics from the devices and chart them on the page, beside the agent. Not yet planned.
+- **NMS track** (poll statistics and show them on the page, beside the agent):
+  - Phase 1, polling: `InterfaceCounters` from the drivers, the `Poller` (every 30 seconds by default, an hour in memory), `interface_traffic` for the model, and steady traffic in the lab.
+  - Phase 2, the page: utilization and errors on the map's links, a time series for the selected link or device, and the model can point at them.
+  - Phase 3, persistence: storage behind an interface, with TimescaleDB (PostgreSQL) in a compose dev environment under rootless podman. History survives restarts, with rollups and retention, and the tool reads past windows.
+  - Phase 4, events: errors climbing, a link saturated or down, shown on the page and told to the agent.
+  - Later: protocol state (OSPF, BGP; the lab runs static routes, so a Lab phase adds them first), Neo4j for the network as a graph over time, and gNMI streaming in place of polling.
 - **Frontends track:**
   - Phase 1: `netgpt-mcp` over HTTP, behind a token.
   - Phase 2: one login for the page and the endpoint.

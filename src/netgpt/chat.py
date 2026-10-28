@@ -30,6 +30,7 @@ from prompt_toolkit import PromptSession
 
 from netgpt.inventory import Inventory
 from netgpt.server import build_server
+from netgpt.statistics import DEFAULT_INTERVAL, Poller
 
 DEFAULT_MODEL = "gemma4:e4b"
 DEFAULT_OLLAMA = "http://127.0.0.1:11434"
@@ -371,9 +372,10 @@ async def run(args: argparse.Namespace) -> int:
     if args.threads:
         options["num_thread"] = args.threads
     timeout = httpx.Timeout(args.timeout, connect=10.0)
+    statistics = Poller(inventory, interval=args.poll_interval) if args.poll_interval > 0 else None
     # Only the web page can show the map, so only it gets the tool that draws one.
     async with (
-        Client(build_server(inventory, display=args.web is not None)) as client,
+        Client(build_server(inventory, display=args.web is not None, statistics=statistics)) as client,
         httpx.AsyncClient(base_url=args.ollama, timeout=timeout) as http,
     ):
         try:
@@ -451,6 +453,13 @@ def main() -> None:
     )
     parser.add_argument("--verbose", action="store_true", help="Show tool results as well as tool calls.")
     parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=DEFAULT_INTERVAL,
+        help="Seconds between polls of every device's interface counters, which interface_traffic reads. "
+        "0 turns polling, and the tool, off (default: %(default)g).",
+    )
+    parser.add_argument(
         "--web",
         type=web_address,
         metavar="[HOST:]PORT",
@@ -461,6 +470,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.inventory is None:
         parser.error("--inventory is required (or set NETGPT_INVENTORY).")
+    if args.poll_interval < 0:
+        parser.error("--poll-interval can't be negative; 0 turns polling off.")
     if args.web and args.questions:
         parser.error("--web serves a page for asking questions; leave the questions off the command line.")
 

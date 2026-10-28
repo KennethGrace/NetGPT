@@ -22,12 +22,15 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
 | `ping_sweep`     | The addresses that answer ICMP in a network, pinged from a device (inside one of its network instances) or from the NetGPT host itself. |
+| `interface_traffic` | Each port's traffic in and out (Mbit/s, and percent of its speed), its busiest interval, and the errors, discards, and link flaps counted, from counters NetGPT polls. |
 
 The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call.
 
 `topology` draws the network at one of two layers. At layer 2 (the default) it is the cabling. Each cable is reconciled from both ends, and a link only one end reports is flagged. Each host hangs off the port it is plugged into: ARP says which port an address was heard on, and where a switch is in the way, the switch's MAC table says which of its ports the address is behind. If a switch has forgotten a MAC, the host is drawn behind the switch with no port, and the evidence says why. At layer 3 the graph is the routing in one network instance: routers, the networks their interfaces are on, and the hosts on those networks. Switches drop out, and a network between just two routers is drawn as a link between them. Both layers keep the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
 
 `forwarding_path` walks the routing tables the way the devices do. At each hop it takes the longest matching route, resolves the route's next hop down to an interface (a static route's next hop is often just an address), and follows the cable on that interface to the next device, through any switches in the way. Between two hosts on the same network, no router is involved: the path goes straight across the switch. It reports where the path ends: delivered, or lost, with the reason (no route, a route that drops the packet, a loop, a next hop nothing answers ARP for, or a device it couldn't read). It sends nothing on the network.
+
+`interface_traffic` reads from a poller, not from the devices directly. While a client is connected, NetGPT reads every device's interface counters every 30 seconds (`--poll-interval`; 0 turns polling and the tool off) and keeps the last hour in memory. A rate is the difference between two readings over the time between them. The second poll comes 5 seconds after the first, so there are rates almost at once. A counter that goes backwards was reset (the device restarted, or someone cleared it), and that interval isn't measured.
 
 ## Safety model
 

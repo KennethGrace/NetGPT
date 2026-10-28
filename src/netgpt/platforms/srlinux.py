@@ -16,7 +16,17 @@ import httpx
 from netgpt.guard import NOKIA_SRLINUX
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms.base import Platform, PlatformError
-from netgpt.primitives import ArpEntry, CommandOutput, Interface, LldpNeighbor, MacEntry, NextHop, PingResult, Route
+from netgpt.primitives import (
+    ArpEntry,
+    CommandOutput,
+    Interface,
+    InterfaceCounters,
+    LldpNeighbor,
+    MacEntry,
+    NextHop,
+    PingResult,
+    Route,
+)
 
 NETWORK_INSTANCE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 PING_COUNTS = re.compile(r"(\d+) packets transmitted, (\d+) received")
@@ -30,6 +40,15 @@ INTERFACE_PATHS = [
     "/network-instance[name=*]/type",
     "/network-instance[name=*]/interface[name=*]/name",
 ]
+
+# Each port's state, speed, and counters. Every port is listed, but one with no configuration has no counters.
+COUNTER_PATHS = [
+    "/interface[name=*]/oper-state",
+    "/interface[name=*]/ethernet/port-speed",
+    "/interface[name=*]/statistics",
+]
+PORT_SPEED = re.compile(r"^(\d+)([MGT])$")
+SPEED_UNITS = {"M": 10**6, "G": 10**9, "T": 10**12}
 
 # Added to the error when SR Linux can't parse a command. Models reach for Cisco's commands, which SR Linux
 # doesn't have, and then try variations of them; working examples and the typed tools stop the guessing.
@@ -73,6 +92,12 @@ def next_hop(hop: dict[str, Any], protocol: str) -> NextHop:
         return NextHop(action=action)
     address = None if protocol == "local" else hop.get("ip-address")
     return NextHop(address=address, interface=hop.get("subinterface"))
+
+
+def port_speed(value: Any) -> int | None:
+    """Read a port speed such as 25G or 100M as bits per second."""
+    match = PORT_SPEED.match(str(value or ""))
+    return int(match.group(1)) * SPEED_UNITS[match.group(2)] if match else None
 
 
 def parse_ping_output(device: str, destination: str, output: str) -> PingResult:
@@ -221,6 +246,41 @@ class SRLinuxPlatform(Platform):
                         address["ip-prefix"] for address in as_list(prefixes.get(name, {}).get("ipv4", {}).get("address"))
                     ],
                     oper_state=operational.get(name, {}).get("oper-state"),
+                )
+            )
+        return found
+
+    async def interface_counters(self) -> list[InterfaceCounters]:
+        states, speeds, statistics = await self._get_states(COUNTER_PATHS)
+
+        def by_port(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+            return {interface["name"]: interface for interface in as_list(state.get("interface"))}
+
+        oper, speed = by_port(states), by_port(speeds)
+        found = []
+        for name, port in by_port(statistics).items():
+            counts = port.get("statistics") or {}
+            if not counts:
+                continue
+
+            def count(key: str) -> int:
+                return int(counts.get(key, 0))
+
+            found.append(
+                InterfaceCounters(
+                    device=self.device.name,
+                    interface=name,
+                    oper_state=oper.get(name, {}).get("oper-state"),
+                    speed_bps=port_speed(speed.get(name, {}).get("ethernet", {}).get("port-speed")),
+                    in_octets=count("in-octets"),
+                    out_octets=count("out-octets"),
+                    in_packets=count("in-packets"),
+                    out_packets=count("out-packets"),
+                    in_errors=count("in-error-packets"),
+                    out_errors=count("out-error-packets"),
+                    in_discards=count("in-discarded-packets"),
+                    out_discards=count("out-discarded-packets"),
+                    carrier_transitions=int(counts["carrier-transitions"]) if "carrier-transitions" in counts else None,
                 )
             )
         return found

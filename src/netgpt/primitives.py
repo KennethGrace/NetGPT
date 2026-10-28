@@ -81,6 +81,52 @@ class Interface(BaseModel):
     oper_state: str | None = Field(None, description="For example up or down.")
 
 
+class InterfaceCounters(BaseModel):
+    """
+    One port's counters, as the device reported them at one moment. They only grow,
+    until the device restarts or someone clears them, so rates come from the
+    difference between two readings.
+    """
+
+    device: str
+    interface: str = Field(description="The port, for example ethernet-1/1 or GigabitEthernet0/1.")
+    oper_state: str | None = None
+    speed_bps: int | None = Field(None, description="The port's speed in bits per second, which utilization is a share of.")
+    in_octets: int
+    out_octets: int
+    in_packets: int
+    out_packets: int
+    in_errors: int
+    out_errors: int
+    in_discards: int
+    out_discards: int
+    carrier_transitions: int | None = Field(None, description="How many times the link has gone up or down.")
+
+
+class InterfaceTraffic(BaseModel):
+    """
+    One port's traffic and errors over the last minutes, worked out from the counters
+    NetGPT polls: the latest rates, the busiest interval's, and what was counted.
+    """
+
+    device: str
+    interface: str
+    oper_state: str | None = None
+    speed: str | None = Field(None, description="The port's speed, for example 25G.")
+    minutes: float = Field(description="How far back the figures go: less than asked for if polling began more recently.")
+    in_mbps: float = Field(description="Megabits per second received, between the latest two polls.")
+    out_mbps: float = Field(description="Megabits per second sent, between the latest two polls.")
+    in_percent: float | None = Field(None, description="in_mbps as a percent of the port's speed.")
+    out_percent: float | None = Field(None, description="out_mbps as a percent of the port's speed.")
+    peak_in_mbps: float = Field(description="The highest in_mbps between any two polls in the window.")
+    peak_out_mbps: float = Field(description="The highest out_mbps between any two polls in the window.")
+    in_errors: int = Field(description="Packets received with errors, over the window.")
+    out_errors: int = Field(description="Packets that failed to send, over the window.")
+    in_discards: int = Field(description="Received packets dropped without an error, for example for lack of buffer, over the window.")
+    out_discards: int = Field(description="Packets dropped instead of sent, over the window.")
+    flaps: int | None = Field(None, description="How many times the link went up or down, over the window.")
+
+
 # Ethernet: layer 2 forwarding.
 
 

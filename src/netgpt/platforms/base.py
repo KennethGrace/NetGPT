@@ -17,7 +17,16 @@ from typing import ClassVar
 
 from netgpt.guard import CliPolicy
 from netgpt.inventory import Credentials, Device, InventoryError
-from netgpt.primitives import ArpEntry, CommandOutput, Interface, LldpNeighbor, MacEntry, PingResult, Route
+from netgpt.primitives import (
+    ArpEntry,
+    CommandOutput,
+    Interface,
+    InterfaceCounters,
+    LldpNeighbor,
+    MacEntry,
+    PingResult,
+    Route,
+)
 
 
 class PlatformError(RuntimeError):
@@ -83,6 +92,10 @@ class Platform(ABC):
     async def interfaces(self) -> list[Interface]:
         """Return the device's logical interfaces: network instance, routed or bridged, and addresses."""
         raise self._unsupported("interfaces")
+
+    async def interface_counters(self) -> list[InterfaceCounters]:
+        """Return each port's traffic and error counters, and its speed."""
+        raise self._unsupported("interface counters")
 
     async def mac_table(self) -> list[MacEntry]:
         """Return the device's layer 2 forwarding entries across all network instances."""

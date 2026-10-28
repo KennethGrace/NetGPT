@@ -31,6 +31,7 @@ TABLES: dict[str, Callable[[SRLinuxPlatform], Awaitable[list]]] = {
     "mac_table": lambda platform: platform.mac_table(),
     "interfaces": lambda platform: platform.interfaces(),
     "route_table": lambda platform: platform.routes("default"),
+    "interface_counters": lambda platform: platform.interface_counters(),
 }
 
 
@@ -52,12 +53,13 @@ class Recording(httpx.AsyncBaseTransport):
         await self.inner.aclose()
 
 
-async def record(inventory: Inventory, out: Path) -> None:
-    """Query every device for every table and write each response to its own file."""
+async def record(inventory: Inventory, out: Path, tables: list[str]) -> None:
+    """Query every device for each table and write each response to its own file."""
     for device in inventory.devices:
         folder = out / device.name
         folder.mkdir(parents=True, exist_ok=True)
-        for table, query in TABLES.items():
+        for table in tables:
+            query = TABLES[table]
             transport = Recording(str(device.tls_ca) if device.tls_ca else True)
             async with SRLinuxPlatform(device, inventory.credentials_for(device), transport=transport) as platform:
                 items = await query(platform)
@@ -71,8 +73,9 @@ def main() -> None:
     parser.add_argument(
         "--out", type=Path, default=Path("tests/fixtures/srlinux/lab"), help="Where to write the fixtures."
     )
+    parser.add_argument("--tables", nargs="+", choices=list(TABLES), default=list(TABLES), help="The tables to record (default: all).")
     args = parser.parse_args()
-    asyncio.run(record(Inventory.load(args.inventory), args.out))
+    asyncio.run(record(Inventory.load(args.inventory), args.out, args.tables))
 
 
 if __name__ == "__main__":
