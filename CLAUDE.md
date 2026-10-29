@@ -35,6 +35,7 @@ python lab/game.py --model M --ollama URL         # the gremlin's game: break, a
 - `src/netgpt/chat.py`, `web.py`: the Ollama tool loop, and the web page's server.
 - `src/netgpt/static/`: the page. `map.js` is the map on vendored d3-force, with each link's traffic, and `chart.js` draws charts in the conversation and the map's inspector.
 - `lab/`: the containerlab lab (SR Linux spine, two leaves, a bridging switch, Linux hosts) and its inventory.
+- `lab/wan/`: the WAN lab: three sites (HQ, Ops, a branch) on 25G, 10G, and 1G links, routed by OSPF, with its own inventory.
 - `api/`, `www/`: the 2023 v0.3 app, kept for reference only. Never deploy it: its API accepts any bearer token.
 
 ## Rules that hold everywhere
@@ -87,7 +88,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 ## The lab
 
 - **Runtime:** containerlab on Docker, not podman: SR Linux 25.10.5 crashes during boot under podman. Shells may still export `DOCKER_HOST` pointing at podman; use `env -u DOCKER_HOST` for Docker commands.
-- **Deploying needs root.** Ask the user to run `sudo containerlab deploy -t lab/netgpt.clab.yml` (`--reconfigure` after changing the topology).
+- **Deploying needs root.** Ask the user to run `sudo containerlab deploy -t lab/netgpt.clab.yml` (`--reconfigure` after changing the topology). The WAN lab is `lab/wan/wan.clab.yml`, beside it on 172.20.21.0/24.
 - **The hosts send traffic,** so the counters have something to count: iperf3 from host1 to host2 and from host3 to host1, 5 to 45 Mbit/s, changing every minute (`lab/traffic.sh`, started by the topology's `exec`).
   - **The hosts' MTU is 1500,** to match SR Linux's IP MTU. At containerlab's default 9500, TCP connects, then stalls on its first full-size segment, which the leaf counts as an input error each time it is resent. `interface_traffic` found it: errors on exactly the two ports the senders plug into, and no traffic.
 - **A fresh deploy has empty ARP and MAC tables.** Sweep the host networks from their leaves (`ping_sweep` with `device`) before drawing the map or recording fixtures.
@@ -98,6 +99,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Management lives in network instance `mgmt`.
   - Asking for routes in an instance a device lacks returns an empty list, not an error.
   - Each ping is a CLI session; about 16 at once is the most a sweep gains from.
+  - The lab's nodes are 7220 IXR-D2L, whose 25G ports accept `port-speed` 1G, 10G, or 25G. Ports come in groups that share a speed mode: a port left at 25G goes down, "unsupported-speed", when another in its group is set to 10G or 1G, and `commit validate` doesn't catch it. Setting 25G explicitly fails validation even alone, so leave it unset.
 - **Junos details** (learned on real QFX5120 and EX4400 switches, Junos 23.4R2):
   - Every operational command has an RPC: `show ... | display xml rpc` names it.
   - The `<command>` RPC ignores pipes without saying so, so the driver filters the text itself. It answers some commands Junos lacks (`show ip route`) with an empty reply, not an error.
@@ -146,6 +148,12 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 1 is done: a bridging switch, and layer 2 and layer 3 views.
   - Phase 2, a second vendor: Junos, over NETCONF with an SSH key, built against real switches (a QFX5120 and two EX4400s, Junos 23.4R2) rather than a virtual lab. Virtual Junos needs KVM, which this VM lacks, except cRPD, which is only the routing daemon. Cisco IOL is legitimately available through CML-Free.
   - Mixing vendors on one cable will need port names normalized (`Gi1/0/45` and `GigabitEthernet1/0/45`), so both ends match.
+- **OSPF track** (branch `feature/ospf`):
+  - Phase 1 is done: the WAN lab. Every adjacency is Full, and the branch's traffic to Ops goes through HQ (cost 22) while its own 1G link to Ops sits idle.
+  - Phase 2: OSPF in the tools: neighbors (state, area, uptime) and OSPF interfaces (cost, type, passive, timers), read from SR Linux, with fixtures from the WAN lab. Routes already carry `ospfv2`, metric, and preference.
+  - Phase 3: an OSPF view for `topology` and the map: routers by area and site, adjacencies with their state and each direction's cost, and a cable LLDP sees with no adjacency flagged.
+  - Phase 4: Junos OSPF.
+  - Phase 5: WAN faults for the gremlin: a cost that moves traffic, an area mismatch, an MTU mismatch stuck in ExStart, a passive interface, mismatched hello timers.
 - **Gremlin track** (can a model troubleshoot with these tools?):
   - Phase 1 is done: `lab/gremlin.py`, six faults across all four devices, each checked live.
   - Phase 2 is done: `lab/game.py` breaks a fault, asks the model the complaint, has a judge score the answer against the cause, and keeps a scoreboard per model, NetGPT commit, and reply limit.

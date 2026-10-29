@@ -71,6 +71,13 @@ mkdir -p ~/.config/netgpt && printf 'NokiaSrl1!' > ~/.config/netgpt/srlinux-lab.
 chmod 600 ~/.config/netgpt/srlinux-lab.password
 ```
 
+A second lab, [`lab/wan/`](lab/wan/), is a WAN routed by OSPF: three sites, HQ, Ops, and a branch, joined by links of 25G, 10G, and 1G. HQ and Ops each have a campus core with a datacenter router off it, and HQ's users sit behind an access switch. Link costs follow speed, so the branch reaches Ops through HQ rather than over its own 1G link. Each site's users send iperf3 traffic to the servers. It runs beside the first lab, on its own management network, and [`lab/wan/inventory.yml`](lab/wan/inventory.yml) describes it:
+
+```bash
+sudo containerlab deploy -t lab/wan/wan.clab.yml
+netgpt-chat --inventory lab/wan/inventory.yml
+```
+
 To see whether NetGPT can troubleshoot, let a gremlin loose in the lab. [`lab/gremlin.py`](lab/gremlin.py) breaks one thing at random: a port shut, an address mistyped, a host's switch port pulled from its LAN, a blackhole route, a routing loop, or a missing route back. It prints only the complaint a user would make ("host2 and host3 can't reach host1"). Several faults share a complaint, so the model has to investigate rather than guess. The gremlin writes configuration through the lab's own login; NetGPT stays read-only.
 
 ```bash
