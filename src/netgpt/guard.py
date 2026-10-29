@@ -68,6 +68,12 @@ NOKIA_SRLINUX = CliPolicy(
     forbidden=(">", "<", ";", "`", "$(", "&"),
 )
 
+JUNIPER_JUNOS = CliPolicy(
+    verbs=frozenset({"show", "sho", "sh"}),
+    # `save`, `append`, and `tee` write files, and `request` acts on the device, so they are deliberately absent.
+    pipe_filters=frozenset({"match", "except", "count", "last", "find", "display", "no-more", "trim"}),
+)
+
 CISCO_IOS = CliPolicy(
     verbs=frozenset({"show", "sho", "sh"}),
     # `redirect`, `append`, and `tee` write files, so they are deliberately absent.

@@ -19,6 +19,7 @@ from netgpt.guard import CliPolicy
 from netgpt.inventory import Credentials, Device, InventoryError
 from netgpt.primitives import (
     ArpEntry,
+    BgpSession,
     CommandOutput,
     Interface,
     InterfaceCounters,
@@ -106,8 +107,12 @@ class Platform(ABC):
         raise self._unsupported("ARP tables")
 
     async def routes(self, network_instance: str) -> list[Route]:
-        """Return the IPv4 routing table of one network instance (VRF)."""
+        """Return the routing table of one network instance (VRF): IPv4, and IPv6 where the platform reads it."""
         raise self._unsupported("routing tables")
+
+    async def bgp_sessions(self) -> list[BgpSession]:
+        """Return the device's BGP sessions, in every network instance."""
+        raise self._unsupported("BGP sessions")
 
     async def ping(self, destination: str, count: int, network_instance: str) -> PingResult:
         """Send ICMP echo requests from the device to a destination."""

@@ -1,0 +1,66 @@
+<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="13">
+<bgp-information xmlns="http://xml.juniper.net/junos/23.4R0/junos-routing">
+<bgp-peer junos:style="detail">
+<peer-address>fd00:ff01:1:1:d281:c50f:fc26:f480</peer-address>
+<peer-as>65011</peer-as>
+<local-address>fd00::5c47:fd4c:bd1d:7b62:91c4</local-address>
+<local-as>65001</local-as>
+<peer-group>Overlay</peer-group>
+<peer-cfg-rti>master</peer-cfg-rti>
+<peer-fwd-rti>master</peer-fwd-rti>
+<peer-type>External</peer-type>
+<peer-state>Active</peer-state>
+<peer-flags></peer-flags>
+<rsync-flags></rsync-flags>
+<last-state>Idle</last-state>
+<last-event>Start</last-event>
+<last-error>None</last-error>
+<bgp-option-information>
+<bgp-options>Multihop NoNextHopChange LocalAddress Ttl AddressFamily PeerAS Multipath LocalAS Rib-group Refresh</bgp-options>
+<bgp-options2>MultipathAs BfdEnabled PeerSpecficLoopsAllowed</bgp-options2>
+<bgp-options-extended>GracefulShutdownRcv</bgp-options-extended>
+<bgp-options-extended2></bgp-options-extended2>
+<address-families>evpn</address-families>
+<local-address>fd00::5c47:fd4c:bd1d:7b62:91c4</local-address>
+<holdtime>90</holdtime>
+<preference>170</preference>
+<gshut-recv-local-preference>0</gshut-recv-local-preference>
+<local-as>65001</local-as>
+<local-system-as>65001</local-system-as>
+</bgp-option-information>
+<flap-count>0</flap-count>
+<recv-ebgp-origin-validation-state>Reject</recv-ebgp-origin-validation-state>
+</bgp-peer>
+<bgp-peer junos:style="detail">
+<peer-address>fd00:ff01:1:1:d281:c50f:fc3a:8b80</peer-address>
+<peer-as>65012</peer-as>
+<local-address>fd00::5c47:fd4c:bd1d:7b62:91c4</local-address>
+<local-as>65001</local-as>
+<peer-group>Overlay</peer-group>
+<peer-cfg-rti>master</peer-cfg-rti>
+<peer-fwd-rti>master</peer-fwd-rti>
+<peer-type>External</peer-type>
+<peer-state>Active</peer-state>
+<peer-flags></peer-flags>
+<rsync-flags></rsync-flags>
+<last-state>Idle</last-state>
+<last-event>Start</last-event>
+<last-error>None</last-error>
+<bgp-option-information>
+<bgp-options>Multihop NoNextHopChange LocalAddress Ttl AddressFamily PeerAS Multipath LocalAS Rib-group Refresh</bgp-options>
+<bgp-options2>MultipathAs BfdEnabled PeerSpecficLoopsAllowed</bgp-options2>
+<bgp-options-extended>GracefulShutdownRcv</bgp-options-extended>
+<bgp-options-extended2></bgp-options-extended2>
+<address-families>evpn</address-families>
+<local-address>fd00::5c47:fd4c:bd1d:7b62:91c4</local-address>
+<holdtime>90</holdtime>
+<preference>170</preference>
+<gshut-recv-local-preference>0</gshut-recv-local-preference>
+<local-as>65001</local-as>
+<local-system-as>65001</local-system-as>
+</bgp-option-information>
+<flap-count>0</flap-count>
+<recv-ebgp-origin-validation-state>Reject</recv-ebgp-origin-validation-state>
+</bgp-peer>
+</bgp-information>
+</rpc-reply>

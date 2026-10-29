@@ -1,0 +1,36 @@
+<nc:rpc-reply xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="1">
+<lldp-neighbors-information junos:style="brief">
+<lldp-neighbor-information>
+<lldp-local-port-id>me0</lldp-local-port-id>
+<lldp-local-parent-interface-name>-</lldp-local-parent-interface-name>
+<lldp-remote-chassis-id-subtype>Mac address</lldp-remote-chassis-id-subtype>
+<lldp-remote-chassis-id>00:76:86:e2:05:80</lldp-remote-chassis-id>
+<lldp-remote-port-description>GigabitEthernet1/0/23</lldp-remote-port-description>
+<lldp-remote-system-name>oob-switch3</lldp-remote-system-name>
+</lldp-neighbor-information>
+<lldp-neighbor-information>
+<lldp-local-port-id>xe-0/2/0</lldp-local-port-id>
+<lldp-local-parent-interface-name>-</lldp-local-parent-interface-name>
+<lldp-remote-chassis-id-subtype>Mac address</lldp-remote-chassis-id-subtype>
+<lldp-remote-chassis-id>3c:08:cd:5a:bb:80</lldp-remote-chassis-id>
+<lldp-remote-port-description> uplink to NorthOffice</lldp-remote-port-description>
+<lldp-remote-system-name>core</lldp-remote-system-name>
+</lldp-neighbor-information>
+<lldp-neighbor-information>
+<lldp-local-port-id>ge-0/0/23</lldp-local-port-id>
+<lldp-local-parent-interface-name>-</lldp-local-parent-interface-name>
+<lldp-remote-chassis-id-subtype>Mac address</lldp-remote-chassis-id-subtype>
+<lldp-remote-chassis-id>a8:3a:79:a9:c2:be</lldp-remote-chassis-id>
+<lldp-remote-port-description>ETH0</lldp-remote-port-description>
+<lldp-remote-system-name>ap-north-2</lldp-remote-system-name>
+</lldp-neighbor-information>
+<lldp-neighbor-information>
+<lldp-local-port-id>ge-0/0/22</lldp-local-port-id>
+<lldp-local-parent-interface-name>-</lldp-local-parent-interface-name>
+<lldp-remote-chassis-id-subtype>Mac address</lldp-remote-chassis-id-subtype>
+<lldp-remote-chassis-id>a8:3a:79:a9:c2:c8</lldp-remote-chassis-id>
+<lldp-remote-port-description>ETH0</lldp-remote-port-description>
+<lldp-remote-system-name>ap-north-4</lldp-remote-system-name>
+</lldp-neighbor-information>
+</lldp-neighbors-information>
+</nc:rpc-reply>

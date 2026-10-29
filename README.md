@@ -17,7 +17,8 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `interfaces`     | Each logical interface's network instance, whether it routes or bridges, its addresses, and its state. |
 | `mac_table`      | Layer 2 forwarding entries across many devices.                                         |
 | `arp_table`      | ARP bindings across many devices.                                                       |
-| `routes`         | The IPv4 routing table of a network instance (VRF) across many devices.                 |
+| `routes`         | The routing table of a network instance (VRF) across many devices: IPv4, and IPv6 where the platform reads it. |
+| `bgp_sessions`   | Each device's BGP sessions: the peer and local addresses and AS numbers, the state, the last error, the address families, and the prefixes received. |
 | `topology`       | The network as one graph at layer 2 or layer 3, merged from every device's tables, with the evidence for each link. |
 | `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
@@ -35,8 +36,8 @@ The multi-device tools query devices concurrently. A device that fails shows up 
 ## Safety model
 
 - **Inventory only.** Tools take device names from the inventory. The model cannot point NetGPT at any other host. `ping_sweep` only covers networks listed under `sweep_networks`, up to /22 from the NetGPT host and /24 from a device.
-- **Read-only CLI.** `show` accepts a command only if it starts with an allowed verb, every pipe leads to an allowed filter, and it contains no control characters or chaining syntax. On Cisco IOS this refuses `| redirect`, `| tee`, and `| append`. On SR Linux it refuses `>` redirection. Use a read-only account on the device as well; the policy is the second line of defence, not the first.
-- **Credentials stay on the server.** The inventory names an environment variable or a `chmod 600` file for each password. Passwords never appear in tool arguments or results.
+- **Read-only CLI.** `show` accepts a command only if it starts with an allowed verb, every pipe leads to an allowed filter, and it contains no control characters or chaining syntax. On Cisco IOS this refuses `| redirect`, `| tee`, and `| append`. On SR Linux it refuses `>` redirection. On Junos it refuses `| save` and `| request`. Use a read-only account on the device as well; the policy is the second line of defence, not the first.
+- **Credentials stay on the server.** The inventory names an environment variable or a `chmod 600` file for each password, or a `chmod 600` SSH private key. Secrets never appear in tool arguments or results. Over SSH, NetGPT checks each device's host key against a `known_hosts` file and refuses to log in to one that doesn't match.
 
 ## Quick start
 
@@ -154,6 +155,9 @@ credentials:
   lab-readonly:
     username: netgpt
     password_env: NETGPT_LAB_PASSWORD        # or: password_file: ~/.config/netgpt/lab.password
+  junos-key:
+    username: netgpt
+    ssh_key_file: ~/.config/netgpt/netgpt_ed25519
 devices:
   - name: core1
     host: 10.0.0.1
@@ -161,6 +165,11 @@ devices:
     credentials: lab-readonly
     role: core
     tls_ca: certs/lab-ca.pem                 # optional; relative paths resolve against this file
+  - name: access1
+    host: 10.0.0.2
+    platform: juniper_junos
+    credentials: junos-key
+    known_hosts: ~/.config/netgpt/known_hosts  # optional; the default is ~/.ssh/known_hosts
 sweep_networks:
   - 10.0.0.0/24
 ```
@@ -169,9 +178,34 @@ sweep_networks:
 
 | Platform        | Transport           | Status                                                                 |
 |-----------------|---------------------|------------------------------------------------------------------------|
-| `nokia_srlinux` | JSON-RPC over HTTPS | All tools verified against SR Linux 25.10.5 in the lab. The tests replay responses recorded there. |
+| `nokia_srlinux` | JSON-RPC over HTTPS | All tools verified against SR Linux 25.10.5 in the lab. The tests replay responses recorded there. `bgp_sessions` isn't implemented yet. |
+| `juniper_junos` | NETCONF over SSH    | Every tool but `ping` and `ping_sweep`, verified against Junos 23.4R2 on a QFX5120 and two EX4400s. The tests replay replies recorded there, renamed. |
 
-Platform names match containerlab node kinds. Cisco IOS (via containerlab's `cisco_iol` kind) is next.
+Platform names match containerlab node kinds where there is one. `juniper_junos` is for Junos on hardware, which has none.
+
+On Junos, give NetGPT a user in the built-in `read-only` class, with an SSH key:
+
+```
+set system login user netgpt class read-only
+set system login user netgpt authentication ssh-ed25519 "ssh-ed25519 AAAA... netgpt@host"
+```
+
+That class can't read the configuration, so the device refuses `show configuration`. To let NetGPT read it, give the user a class with `view-configuration` as well:
+
+```
+set system login class netgpt-ro permissions [ view view-configuration ]
+set system login user netgpt class netgpt-ro
+```
+
+Junos hides secret statements, such as passwords and keys, from that class, but not comments. The Mist agent writes its device secret into a comment in the configuration, so a model reading a Mist-connected switch's configuration reads that secret too.
+
+Interfaces and routes include IPv6 on Junos, but `topology` and `forwarding_path` still work in IPv4 only. Junos's NETCONF `<command>` ignores pipes, so NetGPT applies `match`, `except`, `find`, `count`, `last`, and `trim` to the output itself, and asks Junos for XML or JSON for `| display xml` and `| display json`.
+
+To record new fixtures from Junos devices, list them in an inventory, and list each real name and address with a stand-in in a YAML file kept outside the repository:
+
+```bash
+python lab/record_junos.py --inventory my-junos.yml --rename my-renames.yml
+```
 
 ## Legacy web app (v0.3)
 

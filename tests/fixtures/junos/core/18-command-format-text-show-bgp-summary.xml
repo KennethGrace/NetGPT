@@ -1,0 +1,13 @@
+<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="20">
+<output>
+Threading mode: BGP I/O
+Default eBGP mode: advertise - accept, receive - accept
+Groups: 1 Peers: 2 Down peers: 2
+Table          Tot Paths  Act Paths Suppressed    History Damp State    Pending
+bgp.evpn.0           
+                       0          0          0          0          0          0
+Peer                     AS      InPkt     OutPkt    OutQ   Flaps Last Up/Dwn State|#Active/Received/Accepted/Damped...
+fd00:ff01:1:1:d281:c50f:fc26:f480       65011          0          0       0       0 30w3d 21:43:25 Active
+fd00:ff01:1:1:d281:c50f:fc3a:8b80       65012          0          0       0       0 30w3d 21:43:25 Active
+</output>
+</rpc-reply>

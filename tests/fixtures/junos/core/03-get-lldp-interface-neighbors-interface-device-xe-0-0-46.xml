@@ -1,0 +1,60 @@
+<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="3">
+<lldp-neighbors-information junos:style="detail">
+<lldp-neighbor-information>
+<lldp-index>4</lldp-index>
+<lldp-ttl>120</lldp-ttl>
+<lldp-timemark>Wed Oct 28 20:22:27 2026</lldp-timemark>
+<lldp-age>5</lldp-age>
+<lldp-local-interface>xe-0/0/46</lldp-local-interface>
+<lldp-local-parent-interface-name>-</lldp-local-parent-interface-name>
+<lldp-local-port-id>518</lldp-local-port-id>
+<lldp-local-port-ageout-count>0</lldp-local-port-ageout-count>
+<lldp-remote-chassis-id-subtype>Mac address</lldp-remote-chassis-id-subtype>
+<lldp-remote-chassis-id>60:c7:8d:4d:4f:66</lldp-remote-chassis-id>
+<lldp-remote-port-id-subtype>Interface name</lldp-remote-port-id-subtype>
+<lldp-remote-port-id>xe-0/0/16</lldp-remote-port-id>
+<lldp-remote-port-description>lab uplink</lldp-remote-port-description>
+<lldp-remote-system-name>lab-router</lldp-remote-system-name>
+<lldp-system-description>
+<lldp-remote-system-description>Juniper Networks, Inc. srx internet router Copyright (c) 1996-2024 Juniper Networks, Inc.</lldp-remote-system-description>
+</lldp-system-description>
+<lldp-remote-system-capabilities-supported>Bridge Router </lldp-remote-system-capabilities-supported>
+<lldp-remote-system-capabilities-enabled>Bridge Router </lldp-remote-system-capabilities-enabled>
+<lldp-med-remote-system-class>Network Connectivity</lldp-med-remote-system-class>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-802-3>00120f</lldp-remote-oui-802-3>
+<lldp-remote-subtype-mac>1</lldp-remote-subtype-mac>
+<lldp-remote-subtype-mac-autonegotiation>not supported, disabled (0x0)</lldp-remote-subtype-mac-autonegotiation>
+<lldp-remote-subtype-mac-pmd>8000</lldp-remote-subtype-mac-pmd>
+<lldp-remote-subtype-mac-mau>0</lldp-remote-subtype-mac-mau>
+<lldp-remote-index>1</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-802-3>00120f</lldp-remote-oui-802-3>
+<lldp-remote-subtype-lag>3</lldp-remote-subtype-lag>
+<lldp-remote-subtype-lag-status>supported, disabled (0x1)</lldp-remote-subtype-lag-status>
+<lldp-remote-subtype-lag-portid>0</lldp-remote-subtype-lag-portid>
+<lldp-remote-index>2</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-802-3>00120f</lldp-remote-oui-802-3>
+<lldp-remote-subtype-mtu>4</lldp-remote-subtype-mtu>
+<lldp-remote-subtype-mtu-size>1514</lldp-remote-subtype-mtu-size>
+<lldp-remote-index>3</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-juniper>009069</lldp-remote-oui-juniper>
+<lldp-remote-subtype-serial>SERIAL</lldp-remote-subtype-serial>
+<lldp-remote-subtype-slot-serial>SERIAL</lldp-remote-subtype-slot-serial>
+<lldp-remote-index>4</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype-med-capabilities>1</lldp-remote-subtype-med-capabilities>
+<lldp-remote-subtype-med-cap-status>LLDP-Med capable, Network policy capable, Location ID capable, MDI-PSE capable, MDI-PD not capable, Inventory not capable (0x0f)</lldp-remote-subtype-med-cap-status>
+<lldp-remote-subtype-med-class-type>Network Connectivity (4)</lldp-remote-subtype-med-class-type>
+<lldp-remote-index>5</lldp-remote-index>
+</lldp-org-specific-tlv>
+</lldp-neighbor-information>
+</lldp-neighbors-information>
+</rpc-reply>

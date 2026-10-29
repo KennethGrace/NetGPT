@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
     "icmplib>=3.0.4",
+    "asyncssh>=2.14",
     "prompt_toolkit>=3.0",
     "starlette>=0.40",
     "uvicorn>=0.30",

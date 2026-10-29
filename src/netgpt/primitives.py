@@ -77,7 +77,10 @@ class Interface(BaseModel):
     mode: Literal["routed", "bridged"] = Field(
         description="routed: it has addresses and routes packets. bridged: it switches frames in a layer 2 network instance."
     )
-    addresses: list[str] = Field(default_factory=list, description="IPv4 addresses with prefix length, such as 192.168.12.1/24.")
+    addresses: list[str] = Field(
+        default_factory=list,
+        description="IPv4 and IPv6 addresses with prefix length, such as 192.168.12.1/24 or fd00::1/128. Link-local addresses are left out.",
+    )
     oper_state: str | None = Field(None, description="For example up or down.")
 
 
@@ -156,7 +159,7 @@ class ArpEntry(BaseModel):
 class NextHop(BaseModel):
     """Where a route sends a packet."""
 
-    address: str | None = Field(None, description="The next router's IPv4 address; none for a directly connected network.")
+    address: str | None = Field(None, description="The next router's address; none for a directly connected network.")
     interface: str | None = Field(None, description="The interface the packet leaves by, when the device names it.")
     action: Literal["forward", "receive", "drop"] = Field(
         "forward", description="receive: the packet is for the device itself. drop: it is discarded."
@@ -164,7 +167,7 @@ class NextHop(BaseModel):
 
 
 class Route(BaseModel):
-    """One route in a routing table."""
+    """One route in a routing table, IPv4 or IPv6."""
 
     device: str
     network_instance: str
@@ -174,6 +177,36 @@ class Route(BaseModel):
     active: bool | None = None
     metric: int | None = None
     preference: int | None = None
+
+
+class BgpSession(BaseModel):
+    """
+    One BGP session, as the device that has it configured reports it: who it peers
+    with, from which address, and how far it got. A session that isn't Established
+    exchanges no routes.
+    """
+
+    device: str
+    network_instance: str
+    peer_address: str
+    peer_as: int | None = None
+    local_address: str | None = Field(
+        None, description="The address the device sends from: configured, or chosen when the session came up."
+    )
+    local_as: int | None = None
+    group: str | None = None
+    state: str = Field(
+        description=(
+            "Established when the session is up. Otherwise how far it got: Idle (not trying), Connect or Active "
+            "(trying to open a TCP connection to the peer, and failing: Active does not mean up), OpenSent, OpenConfirm."
+        )
+    )
+    last_error: str | None = None
+    flags: list[str] = Field(default_factory=list, description="The device's own notes on the session, as it spells them.")
+    families: list[str] = Field(default_factory=list, description="The address families it carries, for example inet-unicast or evpn.")
+    flaps: int | None = Field(None, description="How many times it has gone down.")
+    received_prefixes: int | None = None
+    active_prefixes: int | None = Field(None, description="How many of the received prefixes are the best route, and in use.")
 
 
 class PingResult(BaseModel):
