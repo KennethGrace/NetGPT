@@ -412,6 +412,8 @@ def build_l3(
                 network = ipaddress.IPv4Interface(address).network
             except ValueError:
                 continue
+            if network.prefixlen == network.max_prefixlen:
+                continue  # A loopback's single address names no network; the router's addresses list it.
             end = LinkEnd(node=interface.device, interface=interface.name, address=address)
             members[network].append((interface.device, end, f"{interface.device} {interface.name} is {address}."))
 
