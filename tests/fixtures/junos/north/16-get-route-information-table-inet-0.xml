@@ -1,0 +1,25 @@
+<nc:rpc-reply xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="18">
+<route-information xmlns="http://xml.juniper.net/junos/23.4R0/junos-routing">
+<!-- keepalive -->
+<route-table>
+<table-name>inet.0</table-name>
+<destination-count>1</destination-count>
+<total-route-count>1</total-route-count>
+<active-route-count>1</active-route-count>
+<holddown-route-count>0</holddown-route-count>
+<hidden-route-count>0</hidden-route-count>
+<rt junos:style="brief">
+<rt-destination>10.254.0.6/32</rt-destination>
+<rt-entry>
+<active-tag>*</active-tag>
+<current-active/>
+<last-active/>
+<protocol-name>Local</protocol-name>
+<preference>0</preference>
+<age junos:seconds="18481440">30w3d 21:44:00</age>
+<nh-type>Reject</nh-type>
+</rt-entry>
+</rt>
+</route-table>
+</route-information>
+</nc:rpc-reply>

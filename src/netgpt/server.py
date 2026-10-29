@@ -35,6 +35,7 @@ from netgpt.platforms import connect as connect_to
 from netgpt.platforms.base import UnsupportedError
 from netgpt.primitives import (
     ArpEntry,
+    BgpSession,
     Collection,
     CommandOutput,
     DeviceError,
@@ -56,8 +57,8 @@ logger = logging.getLogger("netgpt")
 INSTRUCTIONS = """\
 NetGPT gives read-only access to the network devices in its inventory.
 Call list_devices first: every other tool takes device names from that list and cannot reach anything else.
-lldp_neighbors, interfaces, arp_table, mac_table, and routes return typed records from every device in
-one call, with per-device errors alongside the results. Ask for every device you need in one call, rather
+lldp_neighbors, interfaces, arp_table, mac_table, routes, and bgp_sessions return typed records from
+every device in one call, with per-device errors alongside the results. Ask for every device you need in one call, rather
 than one device at a time. topology merges them into one graph: at layer 2
 (the default) the cables, switches, and the port each host is plugged into; at layer 3 the routers and
 the networks between them. forwarding_path follows the routing tables hop by hop to show where packets
@@ -307,7 +308,7 @@ def build_server(
     async def interfaces(devices: DeviceNames = None) -> Collection[Interface]:
         """
         Return each device's logical interfaces: the network instance (VRF or bridge) each is in,
-        whether it routes or bridges, its IPv4 addresses, and whether it is up. network_instance is null for
+        whether it routes or bridges, its IPv4 and IPv6 addresses, and whether it is up. network_instance is null for
         a subinterface in no network instance: nothing passes through it, whether it is up or not.
         One call covers every device; name devices only to leave the others out.
         """
@@ -335,11 +336,22 @@ def build_server(
     @server.tool(annotations=READ_ONLY)
     async def routes(devices: DeviceNames = None, network_instance: str = "default") -> Collection[Route]:
         """
-        Return every device's IPv4 routes in one network instance (VRF).
+        Return every device's routes in one network instance (VRF): IPv4, and IPv6 where the platform reads it.
         One call covers every device; name devices only to leave the others out.
         """
         items, errors = await collect(devices, lambda platform: platform.routes(network_instance))
         return Collection[Route](items=items, errors=errors)
+
+    @server.tool(annotations=READ_ONLY)
+    async def bgp_sessions(devices: DeviceNames = None) -> Collection[BgpSession]:
+        """
+        Return every device's BGP sessions, in every network instance: the peer's address and AS, the local
+        address and AS the session uses, its state, the last error, the address families it carries, and
+        how many prefixes it received. Only an Established session exchanges routes; Active means it is
+        trying to connect and failing. One call covers every device; name devices only to leave the others out.
+        """
+        items, errors = await collect(devices, lambda platform: platform.bgp_sessions())
+        return Collection[BgpSession](items=items, errors=errors)
 
     if statistics is not None:
 

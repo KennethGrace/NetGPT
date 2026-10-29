@@ -2,9 +2,9 @@
 The inventory module defines which devices NetGPT may reach and how it logs in.
 
 The model only ever names devices from the inventory; it cannot point NetGPT at
-an arbitrary host. Passwords never live in the inventory file itself. Each
-credentials profile names either an environment variable or a file (readable
-only by its owner) that holds the password.
+an arbitrary host. Secrets never live in the inventory file itself. Each
+credentials profile names an environment variable or a file (readable only by
+its owner) that holds the password, or an SSH private key file (likewise).
 """
 
 from __future__ import annotations
@@ -22,17 +22,30 @@ class InventoryError(ValueError):
     """Raised when the inventory is invalid or a device or credential cannot be resolved."""
 
 
+def owner_only(path: Path, what: str) -> Path:
+    """The path, once it is known to exist and to be readable by its owner alone."""
+    path = path.expanduser()
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
+        raise InventoryError(f"{what} {path} does not exist.") from None
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        raise InventoryError(f"{what} {path} is readable by others; chmod 600 it.")
+    return path
+
+
 class Credentials(BaseModel):
-    """A login profile. Exactly one of password_env or password_file must be set."""
+    """A login profile. Exactly one of password_env, password_file, or ssh_key_file must be set."""
 
     username: str
     password_env: str | None = None
     password_file: Path | None = None
+    ssh_key_file: Path | None = None
 
     @model_validator(mode="after")
-    def _one_password_source(self) -> Credentials:
-        if (self.password_env is None) == (self.password_file is None):
-            raise ValueError("Set exactly one of password_env or password_file.")
+    def _one_secret(self) -> Credentials:
+        if [self.password_env, self.password_file, self.ssh_key_file].count(None) != 2:
+            raise ValueError("Set exactly one of password_env, password_file, or ssh_key_file.")
         return self
 
     def password(self) -> str:
@@ -42,14 +55,13 @@ class Credentials(BaseModel):
             if value is None:
                 raise InventoryError(f"Environment variable {self.password_env} is not set.")
             return value
-        path = self.password_file.expanduser()
-        try:
-            mode = path.stat().st_mode
-        except FileNotFoundError:
-            raise InventoryError(f"Password file {path} does not exist.") from None
-        if mode & (stat.S_IRWXG | stat.S_IRWXO):
-            raise InventoryError(f"Password file {path} is readable by others; chmod 600 it.")
-        return path.read_text().strip()
+        if self.password_file is None:
+            raise InventoryError(f"The {self.username} login uses an SSH key, and this platform needs a password.")
+        return owner_only(self.password_file, "Password file").read_text().strip()
+
+    def ssh_key(self) -> Path:
+        """The SSH private key file, checked but not read: the SSH client reads it."""
+        return owner_only(self.ssh_key_file, "SSH key file")
 
 
 class Device(BaseModel):
@@ -61,6 +73,8 @@ class Device(BaseModel):
     credentials: str
     role: str | None = None
     tls_ca: Path | None = None
+    # The SSH host keys to trust, for platforms reached over SSH. None means the user's ~/.ssh/known_hosts.
+    known_hosts: Path | None = None
 
 
 class Inventory(BaseModel):
@@ -90,12 +104,13 @@ class Inventory(BaseModel):
         path = path.expanduser().resolve()
         with path.open() as handle:
             inventory = cls.model_validate(yaml.safe_load(handle))
+        def resolve(file: Path | None) -> Path | None:
+            return path.parent / file if file is not None and not file.expanduser().is_absolute() else file
+
         for device in inventory.devices:
-            if device.tls_ca is not None and not device.tls_ca.expanduser().is_absolute():
-                device.tls_ca = path.parent / device.tls_ca
+            device.tls_ca, device.known_hosts = resolve(device.tls_ca), resolve(device.known_hosts)
         for profile in inventory.credentials.values():
-            if profile.password_file is not None and not profile.password_file.expanduser().is_absolute():
-                profile.password_file = path.parent / profile.password_file
+            profile.password_file, profile.ssh_key_file = resolve(profile.password_file), resolve(profile.ssh_key_file)
         return inventory
 
     def get(self, name: str) -> Device:

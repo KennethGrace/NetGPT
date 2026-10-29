@@ -16,6 +16,7 @@ netgpt-chat --inventory lab/inventory.yml --model gemma4:e4b --ollama http://127
 netgpt-chat ... --web 127.0.0.1:8080    # sign-in token from $NETGPT_WEB_TOKEN, or printed
 netgpt-chat ... --poll-interval 10      # interface counters every 10 s (default 30; 0 turns polling off)
 python lab/record_fixtures.py           # re-record the lab's responses as test fixtures
+python lab/record_junos.py --inventory I --rename R   # record Junos devices' replies as renamed fixtures
 python lab/gremlin.py break|reveal|repair|check   # break one thing in the lab on purpose, and put it back
 python lab/game.py --model M --ollama URL         # the gremlin's game: break, ask the model why, keep score
 ```
@@ -23,9 +24,9 @@ python lab/game.py --model M --ollama URL         # the gremlin's game: break, a
 ## Layout
 
 - `src/netgpt/primitives.py`: the typed records every tool returns, by layer. Each names the device that reported it.
-- `src/netgpt/platforms/`: one driver per platform (`srlinux.py` speaks SR Linux JSON-RPC). `base.py` is the interface, and `connect` opens an inventory device with its driver.
+- `src/netgpt/platforms/`: one driver per platform (`srlinux.py` speaks SR Linux JSON-RPC, `junos.py` NETCONF over SSH). `base.py` is the interface, and `connect` opens an inventory device with its driver.
 - `src/netgpt/guard.py`: the read-only CLI policy for `show`.
-- `src/netgpt/inventory.py`: devices, credentials (env var or `chmod 600` file), and the networks `ping_sweep` may cover.
+- `src/netgpt/inventory.py`: devices, credentials (a password from an env var or `chmod 600` file, or a `chmod 600` SSH key), each device's `known_hosts`, and the networks `ping_sweep` may cover.
 - `src/netgpt/topology.py`: merges the tables into one graph: `build_topology` (layer 2), `build_l3` (layer 3).
 - `src/netgpt/forwarding.py`: walks routing tables hop by hop (`trace_path`). It sends nothing.
 - `src/netgpt/statistics.py`: the `Poller`, which reads every device's interface counters on an interval, and the rates worked out from them.
@@ -71,6 +72,8 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 
 - **Parser tests** replay JSON-RPC responses recorded from the lab (`tests/fixtures/srlinux/`, through `fakes.replay`). The single files are leaf1's, for the parser tests. `lab/<device>/` holds every device's tables, and `fakes.recorded_lab()` parses them through the real driver.
 - **After changing the lab,** re-record (`python lab/record_fixtures.py`) and read the diff. A redeploy changes MAC addresses, which some tests name, and timestamps change every time.
+- **Junos fixtures** (`tests/fixtures/junos/`) are real switches' replies: a QFX5120 core and two EX4400 office switches, recorded by `lab/record_junos.py` through the real driver. `replies.json` says which RPC each file answers, and `test_junos.Replay` replays them.
+  - **The repository is public, and the switches are real.** The recorder replaces every name and address listed in a YAML file kept outside the repository, and blanks serial numbers. Audit the fixtures before committing: LLDP on a management port carries the neighbor's management address, model, and software version.
 - **Synthetic networks:** `fakes.SwitchedNetwork` is a small routed network with a switch. `FakePlatform` backs the server, chat, and web tests. `ScriptedOllama` stands in for the model.
 - **Polling:** `FakePlatform`'s counters grow the same amount on every read (`counter_reads` resets them), and the `Poller` takes a clock, so a test sets the time between polls and knows the rates exactly.
 - **Check driver changes against the live lab** before calling them done. Recording the lab found that SR Linux spells a learned MAC `learnt`. SR Linux also reports an unanswered ping as either a result or an error.
@@ -95,6 +98,15 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Management lives in network instance `mgmt`.
   - Asking for routes in an instance a device lacks returns an empty list, not an error.
   - Each ping is a CLI session; about 16 at once is the most a sweep gains from.
+- **Junos details** (learned on real QFX5120 and EX4400 switches, Junos 23.4R2):
+  - Every operational command has an RPC: `show ... | display xml rpc` names it.
+  - The `<command>` RPC ignores pipes without saying so, so the driver filters the text itself. It answers some commands Junos lacks (`show ip route`) with an empty reply, not an error.
+  - The LLDP summary names a neighbor's system but not its port; each port's detail (`get-lldp-interface-neighbors`) does. Access points send their MAC as the port ID and name the port in the description.
+  - Only the `extensive` level of `get-interface-information` has error counters, and for a whole switch it is most of a megabyte, so counters are read one up port at a time.
+  - The main routing instance is `master`, and it lists no interfaces: an interface no other instance lists is in it. NetGPT calls it `default`. `__juniper_private*__` instances and interfaces such as `pfe-`, `bme0`, `jsrv`, and `lsi` are Junos's own. A port nobody configured has a placeholder unit, `.16386`.
+  - Routes for an instance are in two tables, `<instance>.inet.0` and `<instance>.inet6.0`. A table that doesn't exist comes back empty.
+  - BGP's `Active` state means trying and failing to connect, not up; the tool's description says so. An established session lists each VPN route in `bgp.evpn.0`, where it arrived, and again in every instance table that imports it (`Global.evpn.0`), so only the arrival tables are counted.
+  - The built-in `read-only` class can't run `show configuration` (it lacks `view-configuration`). A class with `view` and `view-configuration` can; Junos hides secret statements from it, but not comments, and the Mist agent leaves its device secret in one.
 - **The web page reads its assets and inventory at startup.** Restart it after changing `static/` or `lab/inventory.yml`.
 - **The gremlin** (`lab/gremlin.py`) is the one thing here that writes to devices. It is a lab tool outside `src/`, and the model never reaches it.
   - Each fault is SR Linux CLI: commands that break, commands that repair, the user's complaint, and the cause.
@@ -132,8 +144,8 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 
 - **Lab track:**
   - Phase 1 is done: a bridging switch, and layer 2 and layer 3 views.
-  - Phase 2 is a second vendor. Arista cEOS-lab is a container with a JSON API. Cisco IOL is legitimately available through CML-Free. This VM has no nested KVM, so images packaged as VMs (vJunos, Nexus 9000v, Cat8000v) need other hardware.
-  - A second vendor will need port names normalized, so both ends of a cable match.
+  - Phase 2, a second vendor: Junos, over NETCONF with an SSH key, built against real switches (a QFX5120 and two EX4400s, Junos 23.4R2) rather than a virtual lab. Virtual Junos needs KVM, which this VM lacks, except cRPD, which is only the routing daemon. Cisco IOL is legitimately available through CML-Free.
+  - Mixing vendors on one cable will need port names normalized (`Gi1/0/45` and `GigabitEthernet1/0/45`), so both ends match.
 - **Gremlin track** (can a model troubleshoot with these tools?):
   - Phase 1 is done: `lab/gremlin.py`, six faults across all four devices, each checked live.
   - Phase 2 is done: `lab/game.py` breaks a fault, asks the model the complaint, has a judge score the answer against the cause, and keeps a scoreboard per model, NetGPT commit, and reply limit.
@@ -159,6 +171,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 2: one login for the page and the endpoint.
   - Phase 3: the map inside MCP clients (MCP Apps).
 - **Known gaps:**
-  - IPv4 only.
+  - `topology` and the forwarding walk are IPv4 only. Junos's interfaces and routes include IPv6; SR Linux's don't yet.
+  - `bgp_sessions` is Junos only so far, and `ping` isn't on Junos yet.
   - A path and its return path are separate views.
   - A sweep from the NetGPT host can't tell "unreachable" from "empty".

@@ -1,0 +1,244 @@
+<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="2">
+<bgp-information xmlns="http://xml.juniper.net/junos/23.4R0/junos-routing">
+<bgp-peer junos:style="detail">
+<peer-address>fd00:ff01:1:1:d281:c50f:fc26:f480+179</peer-address>
+<peer-as>65011</peer-as>
+<local-address>fd00:ff01:1:1:3e08:cd0f:fc5a:bb80+55206</local-address>
+<local-as>65001</local-as>
+<peer-group>Overlay</peer-group>
+<peer-cfg-rti>master</peer-cfg-rti>
+<peer-fwd-rti>master</peer-fwd-rti>
+<peer-type>External</peer-type>
+<peer-state>Established</peer-state>
+<peer-flags>Sync</peer-flags>
+<rsync-flags></rsync-flags>
+<last-state>OpenConfirm</last-state>
+<last-event>RecvKeepAlive</last-event>
+<last-error>None</last-error>
+<bgp-option-information>
+<bgp-options>Multihop NoNextHopChange LocalAddress Ttl AddressFamily PeerAS Multipath LocalAS Rib-group Refresh</bgp-options>
+<bgp-options2>MultipathAs BfdEnabled PeerSpecficLoopsAllowed</bgp-options2>
+<bgp-options-extended>GracefulShutdownRcv</bgp-options-extended>
+<bgp-options-extended2></bgp-options-extended2>
+<address-families>evpn</address-families>
+<local-address>fd00:ff01:1:1:3e08:cd0f:fc5a:bb80</local-address>
+<holdtime>90</holdtime>
+<preference>170</preference>
+<gshut-recv-local-preference>0</gshut-recv-local-preference>
+<local-as>65001</local-as>
+<local-system-as>65001</local-system-as>
+</bgp-option-information>
+<flap-count>0</flap-count>
+<recv-ebgp-origin-validation-state>Reject</recv-ebgp-origin-validation-state>
+<peer-id>10.224.251.242</peer-id>
+<local-id>10.98.145.196</local-id>
+<active-holdtime>90</active-holdtime>
+<keepalive-interval>30</keepalive-interval>
+<group-index>0</group-index>
+<peer-index>0</peer-index>
+<snmp-index>0</snmp-index>
+<bgp-peer-iosession>
+<iosession-thread-name>bgpio-0</iosession-thread-name>
+<iosession-state>Enabled</iosession-state>
+</bgp-peer-iosession>
+<bgp-bfd>
+<bfd-configuration-state>enabled</bfd-configuration-state>
+<bfd-operational-state>up</bfd-operational-state>
+</bgp-bfd>
+<peer-restart-nlri-configured>evpn</peer-restart-nlri-configured>
+<nlri-type-peer>evpn</nlri-type-peer>
+<nlri-type-session>evpn</nlri-type-session>
+<peer-refresh-capability>2</peer-refresh-capability>
+<peer-stale-route-time-configured>300</peer-stale-route-time-configured>
+<peer-no-restart/>
+<peer-restart-flags-received>Notification</peer-restart-flags-received>
+<peer-restart-nlri-negotiated>evpn</peer-restart-nlri-negotiated>
+<peer-end-of-rib-received>evpn</peer-end-of-rib-received>
+<peer-end-of-rib-sent>evpn</peer-end-of-rib-sent>
+<peer-end-of-rib-scheduled></peer-end-of-rib-scheduled>
+<peer-no-llgr-restarter/>
+<peer-4byte-as-capability-advertised>65011</peer-4byte-as-capability-advertised>
+<peer-addpath-not-supported/>
+<local-ext-nh-color-nlri>evpn</local-ext-nh-color-nlri>
+<bgp-rib junos:style="detail">
+<name>bgp.evpn.0</name>
+<rib-bit>20000</rib-bit>
+<bgp-rib-state>BGP restart is complete</bgp-rib-state>
+<vpn-rib-state>VPN restart is complete</vpn-rib-state>
+<send-state>in sync</send-state>
+<active-prefix-count>1</active-prefix-count>
+<received-prefix-count>1</received-prefix-count>
+<accepted-prefix-count>1</accepted-prefix-count>
+<suppressed-prefix-count>0</suppressed-prefix-count>
+<advertised-prefix-count>5</advertised-prefix-count>
+</bgp-rib>
+<bgp-rib junos:style="detail">
+<name>default-switch.evpn.0</name>
+<bgp-rib-state>BGP restart is complete</bgp-rib-state>
+<vpn-rib-state>VPN restart is complete</vpn-rib-state>
+<send-state>not advertising</send-state>
+<active-prefix-count>0</active-prefix-count>
+<received-prefix-count>0</received-prefix-count>
+<accepted-prefix-count>0</accepted-prefix-count>
+<suppressed-prefix-count>0</suppressed-prefix-count>
+</bgp-rib>
+<bgp-rib junos:style="detail">
+<name>Global.evpn.0</name>
+<bgp-rib-state>BGP restart is complete</bgp-rib-state>
+<vpn-rib-state>VPN restart is complete</vpn-rib-state>
+<send-state>not advertising</send-state>
+<active-prefix-count>1</active-prefix-count>
+<received-prefix-count>1</received-prefix-count>
+<accepted-prefix-count>1</accepted-prefix-count>
+<suppressed-prefix-count>0</suppressed-prefix-count>
+</bgp-rib>
+<bgp-rib junos:style="detail">
+<name>__default_evpn__.evpn.0</name>
+<bgp-rib-state>BGP restart is complete</bgp-rib-state>
+<vpn-rib-state>VPN restart is complete</vpn-rib-state>
+<send-state>not advertising</send-state>
+<active-prefix-count>0</active-prefix-count>
+<received-prefix-count>0</received-prefix-count>
+<accepted-prefix-count>0</accepted-prefix-count>
+<suppressed-prefix-count>0</suppressed-prefix-count>
+</bgp-rib>
+<last-received>4</last-received>
+<last-sent>28</last-sent>
+<last-checked>141</last-checked>
+<input-messages>9</input-messages>
+<input-updates>2</input-updates>
+<input-refreshes>0</input-refreshes>
+<input-octets>331</input-octets>
+<output-messages>9</output-messages>
+<output-updates>3</output-updates>
+<output-refreshes>0</output-refreshes>
+<output-octets>564</output-octets>
+<bgp-output-queue>
+<number>1</number>
+<count>0</count>
+<table-name>bgp.evpn.0</table-name>
+<rib-adv-nlri>evpn</rib-adv-nlri>
+</bgp-output-queue>
+</bgp-peer>
+<bgp-peer junos:style="detail">
+<peer-address>fd00:ff01:1:1:d281:c50f:fc3a:8b80+60884</peer-address>
+<peer-as>65012</peer-as>
+<local-address>fd00:ff01:1:1:3e08:cd0f:fc5a:bb80+179</local-address>
+<local-as>65001</local-as>
+<peer-group>Overlay</peer-group>
+<peer-cfg-rti>master</peer-cfg-rti>
+<peer-fwd-rti>master</peer-fwd-rti>
+<peer-type>External</peer-type>
+<peer-state>Established</peer-state>
+<peer-flags>Sync</peer-flags>
+<rsync-flags></rsync-flags>
+<last-state>OpenConfirm</last-state>
+<last-event>RecvKeepAlive</last-event>
+<last-error>None</last-error>
+<bgp-option-information>
+<bgp-options>Multihop NoNextHopChange LocalAddress Ttl AddressFamily PeerAS Multipath LocalAS Rib-group Refresh</bgp-options>
+<bgp-options2>MultipathAs BfdEnabled PeerSpecficLoopsAllowed</bgp-options2>
+<bgp-options-extended>GracefulShutdownRcv</bgp-options-extended>
+<bgp-options-extended2></bgp-options-extended2>
+<address-families>evpn</address-families>
+<local-address>fd00:ff01:1:1:3e08:cd0f:fc5a:bb80</local-address>
+<holdtime>90</holdtime>
+<preference>170</preference>
+<gshut-recv-local-preference>0</gshut-recv-local-preference>
+<local-as>65001</local-as>
+<local-system-as>65001</local-system-as>
+</bgp-option-information>
+<flap-count>0</flap-count>
+<recv-ebgp-origin-validation-state>Reject</recv-ebgp-origin-validation-state>
+<peer-id>10.29.122.63</peer-id>
+<local-id>10.98.145.196</local-id>
+<active-holdtime>90</active-holdtime>
+<keepalive-interval>30</keepalive-interval>
+<group-index>0</group-index>
+<peer-index>1</peer-index>
+<snmp-index>1</snmp-index>
+<bgp-peer-iosession>
+<iosession-thread-name>bgpio-0</iosession-thread-name>
+<iosession-state>Enabled</iosession-state>
+</bgp-peer-iosession>
+<bgp-bfd>
+<bfd-configuration-state>enabled</bfd-configuration-state>
+<bfd-operational-state>up</bfd-operational-state>
+</bgp-bfd>
+<peer-restart-nlri-configured>evpn</peer-restart-nlri-configured>
+<nlri-type-peer>evpn</nlri-type-peer>
+<nlri-type-session>evpn</nlri-type-session>
+<peer-refresh-capability>2</peer-refresh-capability>
+<peer-stale-route-time-configured>300</peer-stale-route-time-configured>
+<peer-no-restart/>
+<peer-restart-flags-received>Notification</peer-restart-flags-received>
+<peer-restart-nlri-negotiated>evpn</peer-restart-nlri-negotiated>
+<peer-end-of-rib-received>evpn</peer-end-of-rib-received>
+<peer-end-of-rib-sent>evpn</peer-end-of-rib-sent>
+<peer-end-of-rib-scheduled></peer-end-of-rib-scheduled>
+<peer-no-llgr-restarter/>
+<peer-4byte-as-capability-advertised>65012</peer-4byte-as-capability-advertised>
+<peer-addpath-not-supported/>
+<local-ext-nh-color-nlri>evpn</local-ext-nh-color-nlri>
+<bgp-rib junos:style="detail">
+<name>bgp.evpn.0</name>
+<rib-bit>20000</rib-bit>
+<bgp-rib-state>BGP restart is complete</bgp-rib-state>
+<vpn-rib-state>VPN restart is complete</vpn-rib-state>
+<send-state>in sync</send-state>
+<active-prefix-count>2</active-prefix-count>
+<received-prefix-count>2</received-prefix-count>
+<accepted-prefix-count>2</accepted-prefix-count>
+<suppressed-prefix-count>0</suppressed-prefix-count>
+<advertised-prefix-count>4</advertised-prefix-count>
+</bgp-rib>
+<bgp-rib junos:style="detail">
+<name>default-switch.evpn.0</name>
+<bgp-rib-state>BGP restart is complete</bgp-rib-state>
+<vpn-rib-state>VPN restart is complete</vpn-rib-state>
+<send-state>not advertising</send-state>
+<active-prefix-count>1</active-prefix-count>
+<received-prefix-count>1</received-prefix-count>
+<accepted-prefix-count>1</accepted-prefix-count>
+<suppressed-prefix-count>0</suppressed-prefix-count>
+</bgp-rib>
+<bgp-rib junos:style="detail">
+<name>Global.evpn.0</name>
+<bgp-rib-state>BGP restart is complete</bgp-rib-state>
+<vpn-rib-state>VPN restart is complete</vpn-rib-state>
+<send-state>not advertising</send-state>
+<active-prefix-count>1</active-prefix-count>
+<received-prefix-count>1</received-prefix-count>
+<accepted-prefix-count>1</accepted-prefix-count>
+<suppressed-prefix-count>0</suppressed-prefix-count>
+</bgp-rib>
+<bgp-rib junos:style="detail">
+<name>__default_evpn__.evpn.0</name>
+<bgp-rib-state>BGP restart is complete</bgp-rib-state>
+<vpn-rib-state>VPN restart is complete</vpn-rib-state>
+<send-state>not advertising</send-state>
+<active-prefix-count>0</active-prefix-count>
+<received-prefix-count>0</received-prefix-count>
+<accepted-prefix-count>0</accepted-prefix-count>
+<suppressed-prefix-count>0</suppressed-prefix-count>
+</bgp-rib>
+<last-received>2</last-received>
+<last-sent>27</last-sent>
+<last-checked>57</last-checked>
+<input-messages>7</input-messages>
+<input-updates>3</input-updates>
+<input-refreshes>0</input-refreshes>
+<input-octets>385</input-octets>
+<output-messages>5</output-messages>
+<output-updates>2</output-updates>
+<output-refreshes>0</output-refreshes>
+<output-octets>392</output-octets>
+<bgp-output-queue>
+<number>1</number>
+<count>0</count>
+<table-name>bgp.evpn.0</table-name>
+<rib-adv-nlri>evpn</rib-adv-nlri>
+</bgp-output-queue>
+</bgp-peer>
+</bgp-information>
+</rpc-reply>

@@ -264,6 +264,17 @@ def test_layer_3_is_the_routers_and_the_networks_between_them() -> None:
     assert links["10.1.0.0/24--r1:ethernet-1/1.0"].b.address == "10.1.0.1/24"
 
 
+def test_a_loopback_s_single_address_is_the_router_s_not_a_network() -> None:
+    network = SwitchedNetwork()
+    loopbacks = [
+        Interface(device="r0", name="lo0.0", network_instance="default", mode="routed", addresses=["10.255.0.1/32"]),
+        Interface(device="r1", name="lo0.0", network_instance="default", mode="routed", addresses=["10.255.0.2/32"]),
+    ]
+    l3 = build_l3(network.devices, network.topology(is_management), network.interfaces + loopbacks, is_management)
+    assert [node.id for node in l3.nodes if node.kind == "subnet"] == ["10.1.0.0/24"]
+    assert not [link for link in l3.links if "lo0.0" in link.id]
+
+
 def test_a_layer_3_view_names_networks_and_says_which_layer_it_is() -> None:
     network = SwitchedNetwork()
     l3 = build_l3(network.devices, network.topology(is_management), network.interfaces, is_management)

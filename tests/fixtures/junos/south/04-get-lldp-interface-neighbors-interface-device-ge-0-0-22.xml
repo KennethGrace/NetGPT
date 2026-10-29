@@ -1,0 +1,66 @@
+<nc:rpc-reply xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="4">
+<lldp-neighbors-information junos:style="detail">
+<lldp-neighbor-information>
+<lldp-index>5</lldp-index>
+<lldp-ttl>120</lldp-ttl>
+<lldp-timemark>Wed Oct 28 20:22:29 2026</lldp-timemark>
+<lldp-age>4</lldp-age>
+<lldp-local-interface>ge-0/0/22</lldp-local-interface>
+<lldp-local-parent-interface-name>-</lldp-local-parent-interface-name>
+<lldp-local-port-id>538</lldp-local-port-id>
+<lldp-local-port-ageout-count>0</lldp-local-port-ageout-count>
+<lldp-remote-chassis-id-subtype>Mac address</lldp-remote-chassis-id-subtype>
+<lldp-remote-chassis-id>a8:3a:79:a9:c0:c0</lldp-remote-chassis-id>
+<lldp-remote-port-id-subtype>Mac address</lldp-remote-port-id-subtype>
+<lldp-remote-port-id>a8:3a:79:a9:c0:c0</lldp-remote-port-id>
+<lldp-remote-port-description>ETH0</lldp-remote-port-description>
+<lldp-remote-system-name>ap-south-7</lldp-remote-system-name>
+<lldp-system-description>
+<lldp-remote-system-description>Mist Systems 802.11ax Access Point.</lldp-remote-system-description>
+</lldp-system-description>
+<lldp-remote-system-capabilities-supported>Bridge WLAN Access Point </lldp-remote-system-capabilities-supported>
+<lldp-remote-system-capabilities-enabled>Bridge WLAN Access Point </lldp-remote-system-capabilities-enabled>
+<lldp-med-remote-system-class>Network Connectivity</lldp-med-remote-system-class>
+<lldp-remote-inventory-hardware-revision>AP45-US</lldp-remote-inventory-hardware-revision>
+<lldp-remote-inventory-serial-number>SERIAL</lldp-remote-inventory-serial-number>
+<lldp-remote-inventory-manufacturer-name>Mist Systems.</lldp-remote-inventory-manufacturer-name>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype-med-capabilities>1</lldp-remote-subtype-med-capabilities>
+<lldp-remote-subtype-med-cap-status>LLDP-Med capable, Network policy not capable, Location ID not capable, MDI-PSE not capable, MDI-PD capable, Inventory not capable (0x11)</lldp-remote-subtype-med-cap-status>
+<lldp-remote-subtype-med-class-type>Network Connectivity (4)</lldp-remote-subtype-med-class-type>
+<lldp-remote-index>1</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype>(9)</lldp-remote-subtype>
+<lldp-remote-value>4D6973742053797374656D732E</lldp-remote-value>
+<lldp-remote-index>2</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype>(5)</lldp-remote-subtype>
+<lldp-remote-value>415034352D5553</lldp-remote-value>
+<lldp-remote-index>3</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype>(8)</lldp-remote-subtype>
+<lldp-remote-value>41313632373233303230353231</lldp-remote-value>
+<lldp-remote-index>4</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-802-1>0080c2</lldp-remote-oui-802-1>
+<lldp-remote-subtype-port-vid>1</lldp-remote-subtype-port-vid>
+<lldp-remote-subtype-vlan-id>1</lldp-remote-subtype-vlan-id>
+<lldp-remote-index>5</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-org-def-info-oui>5c.5b.35</lldp-remote-org-def-info-oui>
+<lldp-remote-subtype>1</lldp-remote-subtype>
+<lldp-remote-value>03 </lldp-remote-value>
+<lldp-remote-index>6</lldp-remote-index>
+</lldp-org-specific-tlv>
+</lldp-neighbor-information>
+</lldp-neighbors-information>
+</nc:rpc-reply>
