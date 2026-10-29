@@ -149,17 +149,24 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **Gremlin track** (can a model troubleshoot with these tools?):
   - Phase 1 is done: `lab/gremlin.py`, six faults across all four devices, each checked live.
   - Phase 2 is done: `lab/game.py` breaks a fault, asks the model the complaint, has a judge score the answer against the cause, and keeps a scoreboard per model, NetGPT commit, and reply limit.
-  - Phase 3 (fix what the scoreboard shows the tools or the chat missing) is paused here. Every game so far is gemma4 26b with 10 replies, scored by the judge as it is now:
+  - Phase 3 (fix what the scoreboard shows the tools or the chat missing) is paused here. gemma4 26b, 10 replies:
     - Before Phase 3: 1 of 13 found. 11 rounds ran out of replies, and the walk flagged leaf1 for spine1's loop.
     - First pass, 8 of 12: an answer when the replies run out, loops that name every router and where the destination is connected, and SR Linux examples on a parse error. 8 of the 12 answers came on the last reply, so most of the gain is the chat's, not the tools'.
     - Telling the model one call covers every device: 13 of 18, about the same, and the calls didn't change.
-    - Not yet played: `SEVERAL_CALLS`, what a null network instance means (it had read one as an instance named "null"), and SR Linux's `show` examples kept off ping errors.
-  - The misses left are mostly misreadings with the facts in hand: a loop blamed on the leaves' /16 with "connected to leaf2" in the result, spine1's address read as leaf1's own, and host2 "on the wrong port" when its port was in no network instance.
+  - Three models at f208158, 3 rounds of each fault, 10 replies, judged by qwen3.8 27b (`--judge`). Every earlier round was rejudged by it too, which changed 5 of 74 verdicts.
+    - qwen3.8 27b: 18 of 18. It makes about 2 tool calls per reply, and answered on its own in 17 rounds.
+    - gemma4 26b: 13 of 18, the same as before `SEVERAL_CALLS`, the null network instance's description, and the `show` examples. It still makes one call per reply, and 14 answers came on the last reply.
+    - nemotron 3.5 lightning 30b: 4 of 16, and 4 partly; the keyword rubric says 10. The fastest, at a median of 74 s, but it blames extra devices, hedges, and reads the lab's design as faults: leaf2 routing toward a bridging switch as "a layer 2/3 mismatch", and the leaves' /16 as "too broad".
+    - With these tools, the model decides most of the score, and several calls per reply is the clearest difference between them. The six faults no longer test qwen.
+  - The misses left are misreadings with the facts in hand: a loop blamed on the leaves' /16 with "connected to leaf2" in the result, spine1's address read as leaf1's own, and host2 "on the wrong port" when its port was in no network instance.
+  - Known in the game:
+    - A judge call that fails ends the game, and that round is lost. nemotron's 17th was: the judge's reply has no length cap, and it timed out after 900 s.
+    - The judge spots hedges inconsistently: "administratively down, or the link is down" passed for qwen and was a hedge for nemotron. `interfaces` reports oper-state but not admin-state, so the tools can't tell a shut port from a pulled cable either.
   - When it resumes:
-    - Play a second model (qwen3.8 27b) at the same NetGPT version, with the judge fixed, to tell tool gains from accommodations of gemma.
+    - Harder faults, so the game measures qwen again: two at once, an MTU mismatch, a wrong VLAN, something intermittent.
     - Check the tools with no model: break each fault, make fixed tool calls, and check the deciding fact is in the output, unambiguous.
-    - `interfaces` reports oper-state but not admin-state, so a shut port and a pulled cable look the same.
-    - Play more rounds of each fault. Two or three is a small sample, and the same fault scores very differently from round to round.
+    - Admin-state in `interfaces`.
+    - Keep a round whose judging fails, unjudged, for `--rejudge`, and cap the judge's reply.
 - **NMS track** (poll statistics and show them on the page, beside the agent):
   - Phase 1, polling: `InterfaceCounters` from the drivers, the `Poller` (every 30 seconds by default, an hour in memory), `interface_traffic` for the model, and steady traffic in the lab.
   - Phase 2, the page: charts in the conversation (`chart`, live, from the model), traffic and errors on the map's links, and a chart of the selected link or device.
