@@ -23,7 +23,9 @@ the answers where the two disagree.
 
 Rounds are appended to lab/.scoreboard.jsonl, each marked with its lab and the NetGPT
 commit it was played against, plus a fingerprint of any uncommitted changes to src/.
-The scoreboard has a table for each lab.
+The scoreboard has a table for each lab. Each answered round's whole conversation (the
+instructions, the tools as offered, the model's thinking and calls, and every tool
+result) goes to lab/.transcripts/, named in the round's "transcript".
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ from netgpt.chat import (
     OUT_OF_TOOLS,
     ChatError,
     TerminalObserver,
+    for_ollama,
     ollama_post,
     supports_thinking,
 )
@@ -62,6 +65,7 @@ from netgpt.inventory import Inventory
 from netgpt.server import build_server
 
 SCOREBOARD = Path("lab/.scoreboard.jsonl")
+TRANSCRIPTS = Path("lab/.transcripts")
 
 JUDGE_PROMPT = """\
 Someone broke a lab network on purpose. What they broke, on {device}:
@@ -260,6 +264,19 @@ def netgpt_version() -> str:
     return commit.stdout.strip() + fingerprint
 
 
+def keep_transcript(chat: Chat, when: datetime, lab: Lab, names: list[str]) -> str:
+    """
+    Write the round's conversation as the model saw it, with the tools it was offered,
+    and return the file's name. A good round's transcript is an example to learn from.
+    """
+    model = chat.model.replace(":", "-").replace("/", "-")
+    name = f"{when:%Y%m%dT%H%M%S}-{lab.name}-{'+'.join(names)}-{model}.json"
+    TRANSCRIPTS.mkdir(exist_ok=True)
+    transcript = {"model": chat.model, "tools": chat.tools, "messages": [for_ollama(message) for message in chat.messages]}
+    (TRANSCRIPTS / name).write_text(json.dumps(transcript, indent=1))
+    return name
+
+
 async def play_round(chat: Chat, inventory: Inventory, lab: Lab, faults: list[Fault]) -> dict[str, Any]:
     """Break the faults, let the model investigate, and put the lab back. The round is judged afterwards."""
     watcher = Watcher()
@@ -275,11 +292,14 @@ async def play_round(chat: Chat, inventory: Inventory, lab: Lab, faults: list[Fa
     finally:
         seconds = time.monotonic() - started
         gremlin.mend(inventory, lab, faults)
+    when = datetime.now()
+    # A round that failed has no conversation left: Chat drops the question with it.
+    transcript = keep_transcript(chat, when, lab, names) if answer is not None else None
     wrong = gremlin.settle(inventory, lab)
     if wrong:
         raise GremlinError(f"The lab didn't come back after repairing {' and '.join(names)}: {', '.join(wrong)}.")
     return {
-        "when": datetime.now().isoformat(timespec="seconds"),
+        "when": when.isoformat(timespec="seconds"),
         "lab": lab.name,
         # A pair goes on the scoreboard as one column, cost+auth.
         "fault": "+".join(names),
@@ -294,6 +314,7 @@ async def play_round(chat: Chat, inventory: Inventory, lab: Lab, faults: list[Fa
         "tool_errors": watcher.errors,
         "answer": answer,
         "error": error,
+        "transcript": transcript,
     }
 
 
