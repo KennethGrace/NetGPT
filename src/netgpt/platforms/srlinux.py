@@ -61,14 +61,17 @@ NO_ROUTER = "0.0.0.0"
 PORT_SPEED = re.compile(r"^(\d+)([MGT])$")
 SPEED_UNITS = {"M": 10**6, "G": 10**9, "T": 10**12}
 
-# Added to the error when SR Linux can't parse a command. Models reach for Cisco's commands, which SR Linux
-# doesn't have, and then try variations of them; working examples and the typed tools stop the guessing.
+# Added to the error when SR Linux can't parse a command. Models reach for Cisco's commands, or for SR OS's
+# (show router ospf), which SR Linux doesn't have, and then try variations of them; working examples and the
+# typed tools stop the guessing.
 CLI_HINT = (
-    "This device runs Nokia SR Linux, whose commands differ from Cisco's. For example: show interface brief, "
-    "show network-instance default route-table, show network-instance <name> bridge-table mac-table all, "
-    "show arpnd arp-entries, info from running network-instance default static-routes. For interfaces, ARP, "
-    "MAC tables, routes, and LLDP, the typed tools (interfaces, arp_table, mac_table, routes, lldp_neighbors) "
-    "work on every platform."
+    "This device runs Nokia SR Linux, whose commands differ from Cisco's and from Nokia SR OS's. For example: "
+    "show interface brief, show network-instance default route-table, "
+    "show network-instance <name> bridge-table mac-table all, show arpnd arp-entries, "
+    "show network-instance default protocols ospf neighbor, info from running network-instance default static-routes, "
+    "info from running network-instance default protocols ospf (OSPF's configuration: areas, costs, timers, "
+    "authentication). For interfaces, ARP, MAC tables, routes, LLDP, and OSPF, the typed tools (interfaces, "
+    "arp_table, mac_table, routes, lldp_neighbors, ospf_neighbors, ospf_interfaces) need no commands."
 )
 
 # What SR Linux's next-hop types do with a packet; any other type forwards it.
