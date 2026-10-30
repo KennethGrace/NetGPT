@@ -490,6 +490,8 @@ OSPF_AGREEMENT = (
     ("hello intervals", "hello_interval"),
     ("dead intervals", "dead_interval"),
     ("MTUs", "mtu"),
+    ("area types", "area_type"),
+    ("authentication types", "authentication"),
 )
 
 
@@ -497,6 +499,10 @@ def _ospf_says(interface: OspfInterface) -> str:
     """What a router says about one of its OSPF interfaces, in a line."""
     settings = [f"area {interface.area}", interface.network_type or "network type unknown", f"cost {interface.cost}"]
     settings += [f"hello {interface.hello_interval}s, dead {interface.dead_interval}s", f"MTU {interface.mtu}"]
+    if interface.area_type and interface.area_type != "normal":
+        settings.append(f"a {interface.area_type} area")
+    if interface.authentication and interface.authentication != "none":
+        settings.append(f"{interface.authentication} authentication, keychain {interface.keychain}")
     if interface.passive:
         settings.append("passive")
     return f"{interface.device} {interface.interface} runs OSPF: {', '.join(settings)}."

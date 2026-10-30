@@ -11,7 +11,7 @@ import json
 import pytest
 
 from netgpt.inventory import Credentials, Device
-from netgpt.platforms.srlinux import SRLinuxPlatform, strip_module_prefixes
+from netgpt.platforms.srlinux import OSPF_PATHS, SRLinuxPlatform, strip_module_prefixes
 from netgpt.primitives import DeviceError, DeviceInfo, Interface, OspfInterface, OspfNeighbor
 from netgpt.topology import build_ospf
 
@@ -26,9 +26,9 @@ def lab_password(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NETGPT_TEST_PASSWORD", "not-used-by-the-mock")
 
 
-def wan(name: str) -> SRLinuxPlatform:
+def wan(name: str, ospf: str = "ospf.json") -> SRLinuxPlatform:
     """A WAN lab device, answering from its recorded responses."""
-    transport, _ = replay({OSPF: f"wan/{name}/ospf.json", ROUTES: f"wan/{name}/route_table.json"})
+    transport, _ = replay({OSPF: f"wan/{name}/{ospf}", ROUTES: f"wan/{name}/route_table.json"})
     device = Device(name=name, host="172.20.21.11", platform="nokia_srlinux", credentials="lab")
     credentials = Credentials(username="admin", password_env="NETGPT_TEST_PASSWORD")
     return SRLinuxPlatform(device, credentials, transport=transport)
@@ -77,6 +77,38 @@ async def test_each_ospf_neighbor_is_named_by_its_router_id_with_the_adjacency_s
     assert {neighbor.router_id: neighbor.uptime_seconds for neighbor in neighbors} == {
         router: value // 100 for router, value in hundredths.items()
     }
+
+
+@pytest.mark.anyio
+async def test_an_interface_that_authenticates_says_its_algorithm_and_keychain_but_never_its_key() -> None:
+    # Recorded while the gremlin had hq-core authenticate its 25G link to Ops with MD5, and ops-core not.
+    async with wan("hq-core", "ospf_authenticated.json") as platform:
+        interfaces = {interface.interface: interface for interface in await platform.ospf_interfaces()}
+    assert {name: (interface.authentication, interface.keychain) for name, interface in interfaces.items()} == {
+        "ethernet-1/1.0": ("md5", "ospf-wan"),
+        "ethernet-1/20.0": ("none", None),
+        "ethernet-1/3.0": ("none", None),
+        "ethernet-1/10.0": ("none", None),
+        "system0.0": ("none", None),
+    }
+    assert {interface.area_type for interface in interfaces.values()} == {"normal"}
+    # The only keychain path asked for is each key's algorithm, so the keys never leave the device.
+    assert [path.rsplit("/", 1)[-1] for path in OSPF_PATHS if "keychain" in path] == ["algorithm"]
+    assert "authentication-key" not in (FIXTURES / "wan/hq-core/ospf_authenticated.json").read_text()
+
+
+@pytest.mark.anyio
+async def test_every_interface_in_a_stub_area_says_so() -> None:
+    # Recorded while the gremlin had hq-dc treat area 0.0.0.1 as a stub, and hq-core not.
+    async with wan("hq-dc", "ospf_stub.json") as platform:
+        interfaces = await platform.ospf_interfaces()
+    assert {(interface.interface, interface.area, interface.area_type) for interface in interfaces} == {
+        ("ethernet-1/1.0", "0.0.0.1", "stub"),
+        ("ethernet-1/10.0", "0.0.0.1", "stub"),
+        ("system0.0", "0.0.0.1", "stub"),
+    }
+    async with wan("hq-dc") as platform:
+        assert {interface.area_type for interface in await platform.ospf_interfaces()} == {"normal"}
 
 
 @pytest.mark.anyio
@@ -163,6 +195,27 @@ def test_an_adjacency_stuck_in_exstart_is_drawn_with_the_mtus_that_differ() -> N
         "r1 sees its adjacency with r2 at exstart, not full.",
         "r2 sees its adjacency with r1 at exstart, not full.",
     ]
+
+
+def test_a_stub_flag_at_one_end_only_is_drawn_as_area_types_that_differ() -> None:
+    ospf = [ospf_interface("r1", "10.1.0.0", area_type="normal"), ospf_interface("r2", "10.1.0.1", area_type="stub")]
+    graph = build_ospf(ROUTERS, LINK, ospf, [], [])
+    [link] = graph.links
+    assert link.problems[0] == "The area types differ: normal at r1 ethernet-1/1.0, stub at r2 ethernet-1/1.0."
+    assert "r2 ethernet-1/1.0 runs OSPF: area 0.0.0.0, point-to-point, cost 10, hello 10s, dead 40s, MTU 1500, a stub area." in (
+        link.evidence
+    )
+
+
+def test_authentication_at_one_end_only_is_drawn_by_its_algorithm_and_keychain() -> None:
+    ospf = [
+        ospf_interface("r1", "10.1.0.0", authentication="md5", keychain="ospf-dc"),
+        ospf_interface("r2", "10.1.0.1", authentication="none"),
+    ]
+    graph = build_ospf(ROUTERS, LINK, ospf, [], [])
+    [link] = graph.links
+    assert link.problems[0] == "The authentication types differ: md5 at r1 ethernet-1/1.0, none at r2 ethernet-1/1.0."
+    assert any(line.endswith("md5 authentication, keychain ospf-dc.") for line in link.evidence)
 
 
 def test_a_neighbor_heard_by_one_end_only_is_a_one_sided_link() -> None:

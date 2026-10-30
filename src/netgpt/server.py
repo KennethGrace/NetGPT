@@ -380,10 +380,13 @@ def build_server(
     @server.tool(annotations=READ_ONLY)
     async def ospf_interfaces(devices: DeviceNames = None) -> Collection[OspfInterface]:
         """
-        Return the interfaces each device runs OSPF on: the area, network type, cost, whether it is passive,
-        hello and dead intervals, MTU, the DR and BDR of a broadcast network, and how many neighbors it hears.
-        Two routers on a link become neighbors only when their areas, network types, and timers match and
-        neither end is passive; mismatched MTUs stop them in exstart. Each end's cost is its own direction's.
+        Return the interfaces each device runs OSPF on: the area and its type (normal, stub, or nssa), network
+        type, cost, whether it is passive, its authentication (none, or the algorithm, such as md5, and the
+        keychain), hello and dead intervals, MTU, the DR and BDR of a broadcast network, and how many neighbors
+        it hears. Two routers on a link become neighbors only when their areas, area types, network types,
+        authentication, and timers match and neither end is passive; mismatched MTUs stop them in exstart.
+        Authentication keys are never read, so two ends with the same algorithm can still disagree on the key.
+        Each end's cost is its own direction's.
         One call covers every device; name devices only to leave the others out.
         """
         items, errors = await collect(devices, lambda platform: platform.ospf_interfaces())

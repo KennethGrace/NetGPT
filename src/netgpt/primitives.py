@@ -226,9 +226,24 @@ class OspfInterface(BaseModel):
         None,
         description="Its OSPF state: point-to-point, designated-router, backup-designated-router, dr-other, waiting, or down.",
     )
+    area_type: str | None = Field(
+        None,
+        description=(
+            "normal, stub, or nssa. Every router in an area must agree: hellos carry the area's type, and two routers "
+            "whose types differ are never neighbors."
+        ),
+    )
     passive: bool = Field(
         False, description="Passive: OSPF advertises the network but sends no hellos and forms no adjacency on it."
     )
+    authentication: str | None = Field(
+        None,
+        description=(
+            "How it authenticates OSPF packets: none, or its keychain's algorithm, such as md5. Both ends of a link must "
+            "agree, and share a key, which NetGPT never reads."
+        ),
+    )
+    keychain: str | None = Field(None, description="The keychain it authenticates with, if it does.")
     cost: int | None = Field(
         None, description="This end's cost to send out of the interface. Each direction of a link has its own."
     )
