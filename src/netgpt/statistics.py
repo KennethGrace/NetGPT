@@ -5,8 +5,8 @@ the errors, discards, and link flaps counted between polls.
 
 Counters only grow, so a rate is the difference between two readings over the time
 between them. A counter that goes backwards was reset (the device restarted, or
-someone cleared it), and that interval isn't measured. Samples are kept in memory
-for a window; nothing survives a restart yet.
+someone cleared it), and that interval isn't measured. The samples are kept in a
+store (netgpt.store): in memory for a window, unless the poller is given another.
 
 A Chart is a few ports' rates over time, which the web page draws in the
 conversation and keeps asking for again as the poller takes new samples.
@@ -19,7 +19,6 @@ import contextlib
 import logging
 import re
 import time
-from collections import deque
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
@@ -29,13 +28,12 @@ from pydantic import BaseModel, Field
 
 from netgpt.inventory import Inventory, InventoryError
 from netgpt.platforms import PLATFORMS, Platform, PlatformError, connect
-from netgpt.primitives import DeviceError, InterfaceCounters, InterfaceTraffic
+from netgpt.primitives import DeviceError, InterfaceTraffic
+from netgpt.store import MemoryStore, Sample, Store
 
 logger = logging.getLogger("netgpt")
 
 DEFAULT_INTERVAL = 30.0
-# How much history is kept, in seconds: an hour of samples at the default interval is 120 per port.
-DEFAULT_WINDOW = 3600.0
 # The second poll comes this soon after the first, so there are rates within seconds of starting.
 FIRST_INTERVAL = 5.0
 
@@ -72,14 +70,6 @@ class Chart(BaseModel):
     interval: float = Field(description="Seconds between polls: how often the chart has something new.")
     ports: list[str] = Field(description="The ports charted, as device:port, in the order they are colored.")
     lines: list[ChartLine]
-
-
-@dataclass(frozen=True)
-class Sample:
-    """One port's counters, and when they arrived (seconds since the epoch)."""
-
-    at: float
-    counters: InterfaceCounters
 
 
 @dataclass(frozen=True)
@@ -207,8 +197,9 @@ def describe_chart(chart: Chart) -> str:
 class Poller:
     """
     Polls every device in the inventory for its interface counters, every interval
-    seconds, and keeps the samples from the last window seconds. Run it with
-    running(), which polls in the background until the block ends.
+    seconds, and keeps the samples in a store: the last hour in memory, unless it is
+    given another. Run it with running(), which polls in the background until the
+    block ends.
     """
 
     def __init__(
@@ -216,12 +207,12 @@ class Poller:
         inventory: Inventory,
         platforms: dict[str, type[Platform]] = PLATFORMS,
         interval: float = DEFAULT_INTERVAL,
-        window: float = DEFAULT_WINDOW,
+        store: Store | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         """clock is only for tests, which set the time each sample arrives."""
         self.interval = interval
-        self.window = window
+        self.store = store or MemoryStore()
         self._inventory = inventory
         self._platforms = platforms
         self._clock = clock
@@ -230,7 +221,6 @@ class Poller:
             for device in inventory.devices
             if device.platform in platforms
         }
-        self._samples: dict[tuple[str, str], deque[Sample]] = {}
         # Each device's error from its latest poll, while it keeps failing.
         self._errors: dict[str, str] = {}
         self._users = 0
@@ -247,13 +237,8 @@ class Poller:
                 logger.info("Polling %s failed: %s", name, error)
                 self._errors[name] = str(error)
                 return
-            at = self._clock()
             self._errors.pop(name, None)
-            for reading in readings:
-                series = self._samples.setdefault((name, reading.interface), deque())
-                series.append(Sample(at, reading))
-                while series[0].at < at - self.window:
-                    series.popleft()
+            await self.store.add(self._clock(), readings)
 
         await asyncio.gather(*(one(device.name) for device in self._inventory.devices))
 
@@ -285,21 +270,27 @@ class Poller:
                     await self._task
                 self._task = None
 
-    def traffic(self, devices: list[str] | None, minutes: float) -> tuple[list[InterfaceTraffic], list[DeviceError]]:
+    @property
+    def window(self) -> float:
+        """How far back, in seconds, the store keeps samples: no statistic reaches further."""
+        return self.store.window
+
+    async def traffic(self, devices: list[str] | None, minutes: float) -> tuple[list[InterfaceTraffic], list[DeviceError]]:
         """Each port's traffic over the last minutes, on the named devices or all of them, and why any device has none."""
         known = [device.name for device in self._inventory.devices]
         names = devices or known
         since = self._clock() - min(minutes * 60, self.window)
         items: list[InterfaceTraffic] = []
         errors: list[DeviceError] = []
+        polled = await self.ports()
         for name in names:
             try:
                 self._inventory.get(name)
             except InventoryError as error:
                 errors.append(DeviceError(device=name, error=str(error)))
                 continue
-            ports = sorted((port for device, port in self._samples if device == name), key=port_order)
-            found = [summary for port in ports if (summary := summarize(self._samples[(name, port)], since))]
+            ports = [port for device, port in polled if device == name]
+            found = [summary for port in ports if (summary := summarize(await self.store.samples(name, port, since), since))]
             items.extend(found)
             if name in self._errors:
                 errors.append(DeviceError(device=name, error=self._errors[name]))
@@ -313,18 +304,18 @@ class Poller:
                 )
         return items, errors
 
-    def ports(self) -> list[tuple[str, str]]:
+    async def ports(self) -> list[tuple[str, str]]:
         """Every port polled so far, as (device, port), in inventory order and then port order."""
         order = {device.name: index for index, device in enumerate(self._inventory.devices)}
-        return sorted(self._samples, key=lambda key: (order.get(key[0], len(order)), port_order(key[1])))
+        return sorted(await self.store.ports(), key=lambda key: (order.get(key[0], len(order)), port_order(key[1])))
 
-    def resolve(self, names: list[str]) -> list[tuple[str, str]]:
+    async def resolve(self, names: list[str]) -> list[tuple[str, str]]:
         """
         The ports some names mean: device:port (or "device port") for one port, or a
         device for all its ports except management. Raises ChartError naming the ports
         polled when a name matches none of them.
         """
-        polled = self.ports()
+        polled = await self.ports()
         found: list[tuple[str, str]] = []
         for name in names:
             device, _, port = name.strip().replace(" ", ":", 1).partition(":")
@@ -343,14 +334,14 @@ class Poller:
             )
         return found
 
-    def chart(self, title: str, names: list[str], metric: Metric, minutes: float) -> Chart:
+    async def chart(self, title: str, names: list[str], metric: Metric, minutes: float) -> Chart:
         """Chart some ports, named as resolve() takes them, over the last minutes."""
-        ports = self.resolve(names)
+        ports = await self.resolve(names)
         minutes = min(minutes, self.window / 60)
         since = self._clock() - minutes * 60
         lines = []
         for device, port in ports:
-            found = rates_since(self._samples[(device, port)], since)
+            found = rates_since(await self.store.samples(device, port, since), since)
             for direction in ("in", "out"):
                 points = [(item.end, value) for item in found if (value := chart_value(item, metric, direction)) is not None]
                 lines.append(ChartLine(port=f"{device}:{port}", direction=direction, points=points))

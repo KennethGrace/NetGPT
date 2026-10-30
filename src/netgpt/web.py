@@ -220,7 +220,7 @@ def build_app(chat: Chat, token: str, statistics: Poller | None = None) -> Starl
             return JSONResponse({"error": "NetGPT isn't polling."}, status_code=404, headers=SECURITY_HEADERS)
         try:
             asked = ChartRequest.model_validate(await request.json())
-            drawn = statistics.chart(asked.title, asked.ports, asked.metric, asked.minutes)
+            drawn = await statistics.chart(asked.title, asked.ports, asked.metric, asked.minutes)
         except (ValueError, ValidationError) as error:
             # ChartError is a ValueError, and names the ports that are polled.
             message = str(error) if isinstance(error, ChartError) else "Send JSON with a title, ports, metric, and minutes."
@@ -230,7 +230,7 @@ def build_app(chat: Chat, token: str, statistics: Poller | None = None) -> Starl
     async def traffic(request: Request) -> Response:
         if statistics is None:
             return JSONResponse({"error": "NetGPT isn't polling."}, status_code=404, headers=SECURITY_HEADERS)
-        items, _ = statistics.traffic(None, MAP_MINUTES)
+        items, _ = await statistics.traffic(None, MAP_MINUTES)
         ports = [item.model_dump(mode="json") for item in items]
         return JSONResponse({"interval": statistics.interval, "minutes": MAP_MINUTES, "ports": ports}, headers=SECURITY_HEADERS)
 

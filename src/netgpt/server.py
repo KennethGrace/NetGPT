@@ -50,7 +50,8 @@ from netgpt.primitives import (
     Route,
 )
 from netgpt.forwarding import ForwardingPath, TraceError, trace_path
-from netgpt.statistics import DEFAULT_INTERVAL, DEFAULT_WINDOW, MAX_CHART_PORTS, Chart, ChartError, Metric, Poller, describe_chart
+from netgpt.statistics import DEFAULT_INTERVAL, MAX_CHART_PORTS, Chart, ChartError, Metric, Poller, describe_chart
+from netgpt.store import DEFAULT_WINDOW
 from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_ospf, build_topology, ospf_mismatches, port_of
 from netgpt.views import View, ViewError, describe, make_view
 
@@ -411,8 +412,8 @@ def build_server(
                 "covers every device; name devices only to leave the others out."
             ),
         )
-        def interface_traffic(devices: DeviceNames = None, minutes: Minutes = 15) -> Collection[InterfaceTraffic]:
-            items, errors = statistics.traffic(devices, minutes)
+        async def interface_traffic(devices: DeviceNames = None, minutes: Minutes = 15) -> Collection[InterfaceTraffic]:
+            items, errors = await statistics.traffic(devices, minutes)
             return Collection[InterfaceTraffic](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
@@ -507,7 +508,7 @@ def build_server(
             title: str, ports: ChartPorts, metric: Metric = "traffic", minutes: Minutes = 15
         ) -> Annotated[CallToolResult, Chart]:
             try:
-                drawn = statistics.chart(title, [await link_port(name) for name in ports], metric, minutes)
+                drawn = await statistics.chart(title, [await link_port(name) for name in ports], metric, minutes)
             except ChartError as error:
                 raise ToolError(str(error)) from error
             # The model reads a summary; the page draws the chart from the structured content.
