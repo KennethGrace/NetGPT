@@ -18,6 +18,8 @@ from the repository root with the lab deployed:
     python lab/gremlin.py repair            # put it back
     python lab/gremlin.py check             # dry-run every fault; nothing is committed
     python lab/gremlin.py --lab wan break   # the same, in the WAN lab
+    python lab/gremlin.py --lab wan break --pair             # two faults at once, from the lab's pairs
+    python lab/gremlin.py --lab wan break --fault mtu hello  # or two named ones
 
 What it broke is kept in the lab's .gremlin.json until it is repaired.
 """
@@ -87,6 +89,8 @@ class Lab:
     adjacencies: dict[str, int] = field(default_factory=dict)
     # Pings per probe: a lab whose datapath drops the odd packet gets a few tries.
     tries: int = 1
+    # Faults to break together, on different devices, whose complaints don't contradict each other.
+    pairs: tuple[tuple[str, str], ...] = ()
 
 
 FABRIC_HOSTS = {"host1": "192.168.11.2", "host2": "192.168.12.2", "host3": "192.168.12.3"}
@@ -303,6 +307,59 @@ WAN_FAULTS = {
             ),
             clues=(("static",), ("blackhole", "black hole", "null", "discard", "drop")),
         ),
+        # Harder: every adjacency stays full, and only the routes say anything is wrong.
+        Fault(
+            name="summary",
+            device="hq-core",
+            breaks=(f"set {OSPF} area 0.0.0.1 area-range 10.10.0.0/16 advertise false",),
+            repairs=(f"delete {OSPF} area 0.0.0.1 area-range 10.10.0.0/16",),
+            complaint="The branch and Ops can't reach HQ's server, hq-srv1, though HQ's own users can.",
+            answer=(
+                "hq-core, the border router for HQ's datacenter area (0.0.0.1), has an area range 10.10.0.0/16 set not to "
+                "advertise, so it keeps the datacenter's networks out of area 0, and the rest of the WAN has no route to "
+                "10.10.100.0/24. Every adjacency is full, and hq-dc is as it should be."
+            ),
+            clues=(("range", "summar", "advertise"),),
+        ),
+        # Harder: an adjacency is missing, and the typed tools show no setting that differs; the cause is in the
+        # configuration.
+        Fault(
+            name="stub",
+            device="ops-dc",
+            breaks=(f"set {OSPF} area 0.0.0.2 stub summaries true",),
+            repairs=(f"delete {OSPF} area 0.0.0.2 stub",),
+            complaint="Nobody can reach Ops's server, ops-srv1, from anywhere, not even from Ops's own user.",
+            answer=(
+                "ops-dc treats area 0.0.0.2 as a stub area and ops-core doesn't, so their hellos disagree (the E bit) and "
+                "they aren't neighbors: Ops's datacenter is cut off, and nothing else has a route to 10.20.100.0/24. "
+                "ops-core's area settings are as they should be."
+            ),
+            clues=(("stub",),),
+            takes=75.0,
+        ),
+        Fault(
+            name="auth",
+            device="ops-core",
+            breaks=(
+                "set / system authentication keychain ospf-dc admin-state enable",
+                "set / system authentication keychain ospf-dc type ospf",
+                "set / system authentication keychain ospf-dc key 1 algorithm md5",
+                'set / system authentication keychain ospf-dc key 1 authentication-key "lab-key-1"',
+                f"set {OSPF} area 0.0.0.2 interface ethernet-1/3.0 authentication keychain ospf-dc",
+            ),
+            repairs=(
+                f"delete {OSPF} area 0.0.0.2 interface ethernet-1/3.0 authentication",
+                "delete / system authentication keychain ospf-dc",
+            ),
+            complaint="Nobody can reach Ops's server, ops-srv1, from anywhere, not even from Ops's own user.",
+            answer=(
+                "ops-core's ethernet-1/3.0, its link to ops-dc, uses OSPF authentication (MD5, keychain ospf-dc) and "
+                "ops-dc's end uses none, so they aren't neighbors: Ops's datacenter is cut off, and nothing else has a "
+                "route to 10.20.100.0/24. ops-dc is as it should be."
+            ),
+            clues=(("authenticat", "md5", "keychain"),),
+            takes=75.0,
+        ),
     ]
 }
 
@@ -328,6 +385,9 @@ WAN = Lab(
     state=Path("lab/wan/.gremlin.json"),
     adjacencies={"hq-core": 3, "hq-dc": 1, "branch": 2, "ops-core": 3, "ops-dc": 1},
     tries=3,
+    # Each pair touches separate parts of the WAN, so both sets of symptoms show and neither complaint denies
+    # the other (the static route's "everything at HQ works" rules out a pair that breaks HQ's server).
+    pairs=(("mtu", "hello"), ("area", "passive"), ("cost", "auth"), ("static", "stub")),
 )
 
 LABS = {lab.name: lab for lab in (FABRIC, WAN)}
@@ -420,16 +480,26 @@ def dry_run(inventory: Inventory, fault: Fault) -> str | None:
     return None
 
 
-def broken(lab: Lab) -> tuple[Fault, str] | None:
-    """The fault the gremlin committed in a lab, and when, if it hasn't been repaired."""
+def complaint(faults: list[Fault]) -> str:
+    """What users report: one fault's complaint, or each of several, numbered."""
+    if len(faults) == 1:
+        return faults[0].complaint
+    return " ".join(f"({number}) {fault.complaint}" for number, fault in enumerate(faults, 1))
+
+
+def broken(lab: Lab) -> tuple[list[Fault], str] | None:
+    """The faults the gremlin committed in a lab, and when, if they haven't been repaired."""
     if not lab.state.exists():
         return None
     state = json.loads(lab.state.read_text())
-    return FAULTS[state["fault"]], state["broken"]
+    return [FAULTS[name] for name in state.get("faults") or [state["fault"]]], state["broken"]
 
 
-def inflict(inventory: Inventory, lab: Lab, fault: Fault) -> None:
-    """Commit a fault and remember it. Only one at a time, on a whole lab, so the symptoms are all its own."""
+def inflict(inventory: Inventory, lab: Lab, faults: list[Fault]) -> None:
+    """
+    Commit a fault, or a pair, and remember them. Only on a whole lab, so the
+    symptoms are all theirs.
+    """
     if broken(lab) is not None:
         raise GremlinError(
             f"The gremlin has already broken something. Put it back first: python lab/gremlin.py --lab {lab.name} repair"
@@ -437,24 +507,32 @@ def inflict(inventory: Inventory, lab: Lab, fault: Fault) -> None:
     wrong = settle(inventory, lab)
     if wrong:
         raise GremlinError(f"The lab isn't whole, so a fault's symptoms would be muddled: {', '.join(wrong)}.")
-    commit(inventory, fault.device, fault.breaks)
-    lab.state.write_text(json.dumps({"fault": fault.name, "broken": datetime.now().isoformat(timespec="seconds")}) + "\n")
-    time.sleep(fault.takes)  # After the record, so a break interrupted here can still be repaired.
+    for fault in faults:
+        commit(inventory, fault.device, fault.breaks)
+    names = [fault.name for fault in faults]
+    lab.state.write_text(json.dumps({"faults": names, "broken": datetime.now().isoformat(timespec="seconds")}) + "\n")
+    time.sleep(max(fault.takes for fault in faults))  # After the record, so a break interrupted here can still be repaired.
 
 
-def mend(inventory: Inventory, lab: Lab, fault: Fault) -> None:
-    """Commit a fault's repair, and forget the fault if it is the one the gremlin committed."""
+def mend(inventory: Inventory, lab: Lab, faults: list[Fault]) -> None:
+    """Commit faults' repairs, and forget them if they are what the gremlin committed."""
     found = broken(lab)
-    commit(inventory, fault.device, fault.repairs)
-    if found is not None and found[0] == fault:
+    for fault in reversed(faults):
+        commit(inventory, fault.device, fault.repairs)
+    if found is not None and found[0] == faults:
         lab.state.unlink()
 
 
-def break_something(inventory: Inventory, lab: Lab, name: str | None) -> None:
-    fault = lab.faults[name] if name else random.choice(list(lab.faults.values()))
-    inflict(inventory, lab, fault)
-    print(f"The gremlin broke something. The complaint:\n\n    {fault.complaint}\n")
-    print("Ask NetGPT why. `python lab/gremlin.py reveal` says what it did, and `repair` puts it back.")
+def break_something(inventory: Inventory, lab: Lab, names: list[str] | None, pair: bool) -> None:
+    if names:
+        faults = [lab.faults[name] for name in names]
+    elif pair:
+        faults = [lab.faults[name] for name in random.choice(lab.pairs)]
+    else:
+        faults = [random.choice(list(lab.faults.values()))]
+    inflict(inventory, lab, faults)
+    print(f"The gremlin broke something. The complaint:\n\n    {complaint(faults)}\n")
+    print(f"Ask NetGPT why. `python lab/gremlin.py --lab {lab.name} reveal` says what it did, and `repair` puts it back.")
 
 
 def reveal(lab: Lab) -> None:
@@ -462,22 +540,25 @@ def reveal(lab: Lab) -> None:
     if found is None:
         print("Nothing is broken, as far as the gremlin knows.")
         return
-    fault, when = found
-    print(f"{fault.name}, on {fault.device}, since {when}:\n\n    {fault.answer}\n\nThe gremlin ran:")
-    for command in fault.breaks:
-        print(f"    {command}")
+    faults, when = found
+    for fault in faults:
+        print(f"{fault.name}, on {fault.device}, since {when}:\n\n    {fault.answer}\n\nThe gremlin ran:")
+        for command in fault.breaks:
+            print(f"    {command}")
+        print()
 
 
-def repair(inventory: Inventory, lab: Lab, name: str | None) -> None:
-    """Put back the fault the gremlin committed, or a named one (if its record is lost)."""
+def repair(inventory: Inventory, lab: Lab, names: list[str] | None) -> None:
+    """Put back the faults the gremlin committed, or named ones (if its record is lost)."""
     found = broken(lab)
-    if name is None and found is None:
+    if not names and found is None:
         print("Nothing is broken, as far as the gremlin knows.")
         return
-    fault = lab.faults[name] if name else found[0]
-    mend(inventory, lab, fault)
+    faults = [lab.faults[name] for name in names] if names else found[0]
+    mend(inventory, lab, faults)
     wrong = settle(inventory, lab)
-    print(f"Repaired {fault.name} on {fault.device}.", f"Still wrong: {', '.join(wrong)}." if wrong else "The lab is whole.")
+    repaired = ", ".join(f"{fault.name} on {fault.device}" for fault in faults)
+    print(f"Repaired {repaired}.", f"Still wrong: {', '.join(wrong)}." if wrong else "The lab is whole.")
 
 
 def check(inventory: Inventory, lab: Lab) -> bool:
@@ -488,6 +569,11 @@ def check(inventory: Inventory, lab: Lab) -> bool:
         problem = dry_run(inventory, fault)
         passed = passed and problem is None
         print(f"{fault.name} ({fault.device}): {problem or 'ok'}")
+    for pair in lab.pairs:
+        devices = {lab.faults[name].device for name in pair}
+        if len(devices) < len(pair):
+            passed = False
+            print(f"{' + '.join(pair)}: both on {devices.pop()}; a pair's faults belong on different devices")
     return passed
 
 
@@ -495,16 +581,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Break one thing in the lab on purpose, and put it back.")
     parser.add_argument("action", choices=["break", "reveal", "repair", "check"], help="What the gremlin should do.")
     parser.add_argument("--lab", choices=list(LABS), default="fabric", help="The lab (default: %(default)s).")
-    parser.add_argument("--fault", choices=list(FAULTS), help="The fault to break or repair (break: at random).")
+    parser.add_argument("--fault", nargs="+", choices=list(FAULTS), help="The faults to break or repair (break: one at random).")
+    parser.add_argument("--pair", action="store_true", help="Break two faults at once, a pair of the lab's at random.")
     parser.add_argument("--inventory", type=Path, help="The lab's inventory (default: the lab's own).")
     args = parser.parse_args()
     lab = LABS[args.lab]
-    if args.fault and args.fault not in lab.faults:
-        sys.exit(f"{args.fault} is a fault in the {LAB_OF[args.fault].name} lab. Pass --lab {LAB_OF[args.fault].name}.")
+    for name in args.fault or []:
+        if name not in lab.faults:
+            sys.exit(f"{name} is a fault in the {LAB_OF[name].name} lab. Pass --lab {LAB_OF[name].name}.")
     inventory = Inventory.load(args.inventory or lab.inventory)
     try:
         if args.action == "break":
-            break_something(inventory, lab, args.fault)
+            break_something(inventory, lab, args.fault, args.pair)
         elif args.action == "reveal":
             reveal(lab)
         elif args.action == "repair":

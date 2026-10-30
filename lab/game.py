@@ -10,6 +10,7 @@ round and no map to draw on. Run it from the repository root with the lab deploy
     python lab/game.py --model gemma4:26b-mlx --ollama http://HOST:11434    # each fault once, in random order
     python lab/game.py --model ... --faults loop blackhole --rounds 3
     python lab/game.py --lab wan --model ...                                # OSPF faults in the WAN lab
+    python lab/game.py --lab wan --pairs --model ...                        # two faults at once
     python lab/game.py --scoreboard                                         # add --answers to read them
     python lab/game.py --rejudge --model ... --ollama ...                   # judge every round again
 
@@ -85,6 +86,37 @@ Did the diagnosis find what was broken? Go by the root cause it settles on, not 
   "partly" if the blamed device is {device} but the problem is wrong, or too vague to fix. "missed" otherwise.
 """
 
+# When two things are broken at once, each is judged on its own, told about the other, so that blaming the
+# other break's device for its problem isn't counted against the answer.
+JUDGE_PAIR_PROMPT = """\
+Someone broke a lab network on purpose, in two places at once. One break, on {device}:
+
+    {cause}
+
+The other, on {other_device}:
+
+    {other_cause}
+
+Users complained, and a troubleshooter investigated the network and wrote this diagnosis:
+
+---
+{answer}
+---
+
+Judge only whether the diagnosis found the break on {device}. Go by the causes it settles on, not everything it
+mentions on the way.
+- blamed_device: the device the diagnosis blames for the problem the break on {device} causes. Write "none" if it
+  blames no device for it.
+- blamed_problem: what the diagnosis says is wrong on that device.
+- also_blamed: any other devices the diagnosis says are misconfigured or need changing, apart from {other_device},
+  or [] if none. A device it only mentions on the way, as working correctly or as part of the path, is not blamed.
+- hedges: true if the diagnosis offers alternative causes for that problem ("either A or B", "check both") instead
+  of settling on one.
+- reason: how the blamed device and problem compare with the break on {device}.
+- verdict: "found" if the blamed device is {device} and the blamed problem is what was broken there, in any words.
+  "partly" if the blamed device is {device} but the problem is wrong, or too vague to fix. "missed" otherwise.
+"""
+
 # Ollama holds the judge's reply to this schema. Naming what the diagnosis blames is easier than judging it,
 # so the judge does that first, and the verdict follows. One string for the blame ran together "A and B" (both
 # wrong) with "A or B" (a hedge), so other devices and hedging have fields of their own.
@@ -121,28 +153,39 @@ class Watcher(TerminalObserver):
         self.errors += is_error
 
 
-def question(lab: Lab, fault: Fault) -> str:
+def question(lab: Lab, faults: list[Fault]) -> str:
     """The complaint as users would bring it, with the hosts' addresses, since NetGPT knows hosts only by address."""
     hosts = ", ".join(f"{name} is {address}" for name, address in lab.hosts.items())
-    return f"Users report a problem: {fault.complaint} ({hosts}.) What's wrong?"
+    reported = "a problem" if len(faults) == 1 else "two problems"
+    return f"Users report {reported}: {gremlin.complaint(faults)} ({hosts}.) What's wrong?"
 
 
 # Hyphens models write in place of "-", such as the non-breaking one in "hq‑core".
 HYPHENS = str.maketrans({character: "-" for character in "\u2010\u2011\u2012\u2013\u2014\u2212"})
 
 
-def rubric(fault: Fault, answer: str | None) -> str:
-    """Whether an answer names the device and a clue from each group: found or missed."""
+def rubric(faults: list[Fault], answer: str | None) -> str:
+    """Whether an answer names each fault's device and a clue from each of its groups: found or missed."""
     if answer is None:
         return "no answer"
     text = answer.lower().translate(HYPHENS)
-    named = fault.device in text and all(any(clue in text for clue in group) for group in fault.clues)
+    named = all(
+        fault.device in text and all(any(clue in text for clue in group) for group in fault.clues) for fault in faults
+    )
     return "found" if named else "missed"
 
 
-async def judge(http: httpx.AsyncClient, model: str, fault: Fault, answer: str) -> tuple[str, str]:
-    """Ask a model whether an answer found the fault. Returns its verdict and its reason."""
-    prompt = JUDGE_PROMPT.format(device=fault.device, cause=fault.answer, answer=answer.strip())
+async def judge(http: httpx.AsyncClient, model: str, fault: Fault, answer: str, other: Fault | None = None) -> tuple[str, str]:
+    """
+    Ask a model whether an answer found the fault, one of a pair if other is the
+    rest of it. Returns its verdict and its reason.
+    """
+    if other is None:
+        prompt = JUDGE_PROMPT.format(device=fault.device, cause=fault.answer, answer=answer.strip())
+    else:
+        prompt = JUDGE_PAIR_PROMPT.format(
+            device=fault.device, cause=fault.answer, other_device=other.device, other_cause=other.answer, answer=answer.strip()
+        )
     reply = await ollama_post(
         http,
         "/api/chat",
@@ -168,7 +211,7 @@ async def judge(http: httpx.AsyncClient, model: str, fault: Fault, answer: str) 
         raise ChatError(f"The judge, {model}, gave no verdict: {reply.get('message')!r}") from error
     # A diagnosis that hedges, or doesn't blame the fault's device, missed, whatever the judge's verdict says. One
     # that blames another device as well is at best partly right: following it would change something that isn't broken.
-    named = {device for device in DEVICES if device in blamed}
+    named = {device for device in DEVICES if device in blamed} - ({other.device} if other else set())
     if hedges or fault.device not in named:
         verdict = "missed"
     elif len(named) > 1 and verdict == "found":
@@ -181,8 +224,26 @@ async def judge_round(http: httpx.AsyncClient, model: str, record: dict[str, Any
     if record["answer"] is None:
         record.update(verdict="no answer", reason=None, judge=None)
         return
-    verdict, reason = await judge(http, model, gremlin.FAULTS[record["fault"]], record["answer"])
-    record.update(verdict=verdict, reason=reason, judge=model)
+    faults = faults_of(record)
+    if len(faults) == 1:
+        verdict, reason = await judge(http, model, faults[0], record["answer"])
+        record.update(verdict=verdict, reason=reason, judge=model)
+        return
+    # A pair is found when both breaks are, and partly when either is found or partly.
+    first, second = faults
+    verdicts = {}
+    reasons = []
+    for fault, other in ((first, second), (second, first)):
+        verdicts[fault.name], said = await judge(http, model, fault, record["answer"], other)
+        reasons.append(f"{fault.name}: {verdicts[fault.name]}, {said}")
+    found = list(verdicts.values())
+    verdict = "found" if found == ["found", "found"] else "partly" if any(v in ("found", "partly") for v in found) else "missed"
+    record.update(verdict=verdict, verdicts=verdicts, reason=" | ".join(reasons), judge=model)
+
+
+def faults_of(record: dict[str, Any]) -> list[Fault]:
+    """The faults a round broke: one, or a pair. Rounds from before pairs name one."""
+    return [gremlin.FAULTS[name] for name in record.get("faults") or [record["fault"]]]
 
 
 def netgpt_version() -> str:
@@ -199,28 +260,31 @@ def netgpt_version() -> str:
     return commit.stdout.strip() + fingerprint
 
 
-async def play_round(chat: Chat, inventory: Inventory, lab: Lab, fault: Fault) -> dict[str, Any]:
-    """Break the fault, let the model investigate, and put the lab back. The round is judged afterwards."""
+async def play_round(chat: Chat, inventory: Inventory, lab: Lab, faults: list[Fault]) -> dict[str, Any]:
+    """Break the faults, let the model investigate, and put the lab back. The round is judged afterwards."""
     watcher = Watcher()
-    gremlin.inflict(inventory, lab, fault)
+    names = [fault.name for fault in faults]
+    gremlin.inflict(inventory, lab, faults)
     started = time.monotonic()
     answer, error = None, None
     try:
         chat.reset()
-        answer = await chat.ask(question(lab, fault), watcher)
+        answer = await chat.ask(question(lab, faults), watcher)
     except ChatError as failure:
         error = str(failure)
     finally:
         seconds = time.monotonic() - started
-        gremlin.mend(inventory, lab, fault)
+        gremlin.mend(inventory, lab, faults)
     wrong = gremlin.settle(inventory, lab)
     if wrong:
-        raise GremlinError(f"The lab didn't come back after repairing {fault.name}: {', '.join(wrong)}.")
+        raise GremlinError(f"The lab didn't come back after repairing {' and '.join(names)}: {', '.join(wrong)}.")
     return {
         "when": datetime.now().isoformat(timespec="seconds"),
         "lab": lab.name,
-        "fault": fault.name,
-        "rubric": rubric(fault, answer),
+        # A pair goes on the scoreboard as one column, cost+auth.
+        "fault": "+".join(names),
+        "faults": names,
+        "rubric": rubric(faults, answer),
         "seconds": round(seconds, 1),
         "replies": sum(message["role"] == "assistant" for message in chat.messages) if answer is not None else None,
         # Whether the answer came from the reply with no tools offered, after every other reply called tools.
@@ -234,17 +298,18 @@ async def play_round(chat: Chat, inventory: Inventory, lab: Lab, fault: Fault) -
 
 
 def show_round(record: dict[str, Any]) -> None:
-    fault = gremlin.FAULTS[record["fault"]]
+    faults = faults_of(record)
     disagreement = f"; the rubric said {record['rubric']}" if record.get("rubric", record["verdict"]) != record["verdict"] else ""
     last_word = ", answered when out of tool calls" if record.get("last_word") else ""
     print(
-        f"{fault.name}: {record['verdict'].upper()} in {record['seconds']:.0f} s, "
+        f"{record['fault']}: {record['verdict'].upper()} in {record['seconds']:.0f} s, "
         f"{len(record['tool_calls'])} tool calls ({record['tool_errors']} errors){last_word}{disagreement}"
     )
     print(f"  answer: {' '.join((record['answer'] or record['error']).split())}")
     if record.get("reason"):
         print(f"  judge:  {record['reason']}")
-    print(f"  cause:  {fault.answer}", flush=True)
+    for fault in faults:
+        print(f"  cause:  {fault.answer}", flush=True)
 
 
 async def play(args: argparse.Namespace) -> None:
@@ -253,8 +318,11 @@ async def play(args: argparse.Namespace) -> None:
     if strays:
         raise GremlinError(f"Not faults in the {lab.name} lab: {', '.join(strays)}. Its faults are {', '.join(lab.faults)}.")
     inventory = Inventory.load(args.inventory or lab.inventory)
-    faults = [lab.faults[name] for name in args.faults or lab.faults] * args.rounds
-    random.shuffle(faults)
+    if args.pairs:
+        breaks = [[lab.faults[name] for name in pair] for pair in lab.pairs] * args.rounds
+    else:
+        breaks = [[lab.faults[name]] for name in args.faults or lab.faults] * args.rounds
+    random.shuffle(breaks)
     version = netgpt_version()
     async with (
         Client(build_server(inventory)) as client,
@@ -263,9 +331,9 @@ async def play(args: argparse.Namespace) -> None:
         think = args.think if args.think is not None else await supports_thinking(http, args.model)
         chat = Chat(client, http, args.model, {"num_ctx": args.context}, think=think, max_rounds=args.max_rounds)
         await chat.start()
-        for number, fault in enumerate(faults, 1):
-            print(f"\nRound {number} of {len(faults)}: {fault.complaint}", flush=True)
-            record = await play_round(chat, inventory, lab, fault)
+        for number, faults in enumerate(breaks, 1):
+            print(f"\nRound {number} of {len(breaks)}: {gremlin.complaint(faults)}", flush=True)
+            record = await play_round(chat, inventory, lab, faults)
             await judge_round(http, args.judge or args.model, record)
             record.update(model=args.model, think=think, max_rounds=args.max_rounds, version=version)
             with SCOREBOARD.open("a") as log:
@@ -322,7 +390,7 @@ def table(lab: Lab, records: list[dict[str, Any]]) -> None:
     groups: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
     for record in records:
         groups.setdefault((record["model"], record["version"], record["max_rounds"]), []).append(record)
-    names = list(lab.faults)
+    names = list(lab.faults) + ["+".join(pair) for pair in lab.pairs if any(r["fault"] == "+".join(pair) for r in records)]
     print(
         f"{'model':<30} {'netgpt':<16}{'replies':>8}" + "".join(f"{name:>12}" for name in names)
         + f"{'found':>8}{'partly':>8}{'no answer':>11}{'last word':>11}{'median s':>10}"
@@ -347,6 +415,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Play the gremlin's game: break the lab, ask a model why, keep score.")
     parser.add_argument("--lab", choices=list(gremlin.LABS), default="fabric", help="The lab to play in (default: %(default)s).")
     parser.add_argument("--faults", nargs="+", choices=list(gremlin.FAULTS), help="Faults to play (default: all the lab's).")
+    parser.add_argument("--pairs", action="store_true", help="Play the lab's pairs of faults, two broken at once.")
     parser.add_argument("--rounds", type=int, default=1, help="Rounds of each fault (default: %(default)s).")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Ollama model (default: {DEFAULT_MODEL}).")
     parser.add_argument("--judge", help="Ollama model that judges the answers (default: --model).")
