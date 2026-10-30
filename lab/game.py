@@ -127,11 +127,15 @@ def question(lab: Lab, fault: Fault) -> str:
     return f"Users report a problem: {fault.complaint} ({hosts}.) What's wrong?"
 
 
+# Hyphens models write in place of "-", such as the non-breaking one in "hq‑core".
+HYPHENS = str.maketrans({character: "-" for character in "\u2010\u2011\u2012\u2013\u2014\u2212"})
+
+
 def rubric(fault: Fault, answer: str | None) -> str:
     """Whether an answer names the device and a clue from each group: found or missed."""
     if answer is None:
         return "no answer"
-    text = answer.lower()
+    text = answer.lower().translate(HYPHENS)
     named = fault.device in text and all(any(clue in text for clue in group) for group in fault.clues)
     return "found" if named else "missed"
 
