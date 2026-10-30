@@ -131,6 +131,9 @@ async def test_a_command_srlinux_does_not_know_comes_back_with_ones_it_does() ->
         with pytest.raises(PlatformError, match="Unknown token 'interfaces'") as raised:
             await platform.show("show interfaces")
     assert "show interface brief" in str(raised.value) and "mac_table" in str(raised.value)
+    # OSPF's commands are the ones models guess at most, often in SR OS's spelling (show router ospf).
+    assert "info from running network-instance default protocols ospf" in str(raised.value)
+    assert "ospf_neighbors" in str(raised.value)
 
 
 @pytest.mark.anyio

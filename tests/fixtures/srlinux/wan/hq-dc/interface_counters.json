@@ -1,0 +1,909 @@
+{
+ "result": [
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "oper-state": "up"
+    },
+    {
+     "name": "ethernet-1/2",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/3",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/4",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/5",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/6",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/7",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/8",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/9",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/10",
+     "oper-state": "up"
+    },
+    {
+     "name": "ethernet-1/11",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/12",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/13",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/14",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/15",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/16",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/17",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/18",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/19",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/20",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/21",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/22",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/23",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/24",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/25",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/26",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/27",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/28",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/29",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/30",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/31",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/32",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/33",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/34",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/35",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/36",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/37",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/38",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/39",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/40",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/41",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/42",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/43",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/44",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/45",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/46",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/47",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/48",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/49",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/50",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/51",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/52",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/53",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/54",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/55",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/56",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/57",
+     "oper-state": "down"
+    },
+    {
+     "name": "ethernet-1/58",
+     "oper-state": "down"
+    },
+    {
+     "name": "mgmt0",
+     "oper-state": "up"
+    },
+    {
+     "name": "system0",
+     "oper-state": "up"
+    }
+   ]
+  },
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/2",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/3",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/4",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/5",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/6",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/7",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/8",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/9",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/10",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/11",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/12",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/13",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/14",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/15",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/16",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/17",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/18",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/19",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/20",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/21",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/22",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/23",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/24",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/25",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/26",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/27",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/28",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/29",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/30",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/31",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/32",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/33",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/34",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/35",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/36",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/37",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/38",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/39",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/40",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/41",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/42",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/43",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/44",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/45",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/46",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/47",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/48",
+     "ethernet": {
+      "port-speed": "25G"
+     }
+    },
+    {
+     "name": "ethernet-1/49",
+     "ethernet": {
+      "port-speed": "100G"
+     }
+    },
+    {
+     "name": "ethernet-1/50",
+     "ethernet": {
+      "port-speed": "100G"
+     }
+    },
+    {
+     "name": "ethernet-1/51",
+     "ethernet": {
+      "port-speed": "100G"
+     }
+    },
+    {
+     "name": "ethernet-1/52",
+     "ethernet": {
+      "port-speed": "100G"
+     }
+    },
+    {
+     "name": "ethernet-1/53",
+     "ethernet": {
+      "port-speed": "100G"
+     }
+    },
+    {
+     "name": "ethernet-1/54",
+     "ethernet": {
+      "port-speed": "100G"
+     }
+    },
+    {
+     "name": "ethernet-1/55",
+     "ethernet": {
+      "port-speed": "100G"
+     }
+    },
+    {
+     "name": "ethernet-1/56",
+     "ethernet": {
+      "port-speed": "100G"
+     }
+    },
+    {
+     "name": "ethernet-1/57",
+     "ethernet": {
+      "port-speed": "10G"
+     }
+    },
+    {
+     "name": "ethernet-1/58",
+     "ethernet": {
+      "port-speed": "10G"
+     }
+    },
+    {
+     "name": "mgmt0",
+     "ethernet": {
+      "port-speed": "1G"
+     }
+    }
+   ]
+  },
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "statistics": {
+      "in-packets": "1780754",
+      "in-octets": "2692451718",
+      "in-unicast-packets": "1777441",
+      "in-broadcast-packets": "5",
+      "in-multicast-packets": "112",
+      "in-discarded-packets": "274",
+      "in-error-packets": "2922",
+      "in-fcs-error-packets": "0",
+      "out-packets": "925282",
+      "out-octets": "65351089",
+      "out-mirror-octets": "0",
+      "out-unicast-packets": "925163",
+      "out-broadcast-packets": "6",
+      "out-multicast-packets": "113",
+      "out-discarded-packets": "0",
+      "out-error-packets": "0",
+      "out-mirror-packets": "0",
+      "carrier-transitions": "0"
+     }
+    },
+    {
+     "name": "ethernet-1/2",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/3",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/4",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/5",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/6",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/7",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/8",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/9",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/10",
+     "statistics": {
+      "in-packets": "925636",
+      "in-octets": "61667620",
+      "in-unicast-packets": "925176",
+      "in-broadcast-packets": "0",
+      "in-multicast-packets": "0",
+      "in-discarded-packets": "5",
+      "in-error-packets": "455",
+      "in-fcs-error-packets": "0",
+      "out-packets": "1777480",
+      "out-octets": "2695135601",
+      "out-mirror-octets": "0",
+      "out-unicast-packets": "1777452",
+      "out-broadcast-packets": "6",
+      "out-multicast-packets": "22",
+      "out-discarded-packets": "0",
+      "out-error-packets": "0",
+      "out-mirror-packets": "0",
+      "carrier-transitions": "0"
+     }
+    },
+    {
+     "name": "ethernet-1/11",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/12",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/13",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/14",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/15",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/16",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/17",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/18",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/19",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/20",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/21",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/22",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/23",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/24",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/25",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/26",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/27",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/28",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/29",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/30",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/31",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/32",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/33",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/34",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/35",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/36",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/37",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/38",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/39",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/40",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/41",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/42",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/43",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/44",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/45",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/46",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/47",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/48",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/49",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/50",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/51",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/52",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/53",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/54",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/55",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/56",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/57",
+     "statistics": {}
+    },
+    {
+     "name": "ethernet-1/58",
+     "statistics": {}
+    },
+    {
+     "name": "mgmt0",
+     "statistics": {
+      "in-packets": "1400",
+      "in-octets": "109764",
+      "in-unicast-packets": "69",
+      "in-broadcast-packets": "1090",
+      "in-multicast-packets": "212",
+      "in-discarded-packets": "11",
+      "in-error-packets": "19",
+      "in-fcs-error-packets": "0",
+      "out-packets": "114",
+      "out-octets": "28610",
+      "out-mirror-octets": "0",
+      "out-unicast-packets": "67",
+      "out-broadcast-packets": "6",
+      "out-multicast-packets": "41",
+      "out-discarded-packets": "0",
+      "out-error-packets": "0",
+      "out-mirror-packets": "0",
+      "carrier-transitions": "1"
+     }
+    },
+    {
+     "name": "system0",
+     "statistics": {}
+    }
+   ]
+  }
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

@@ -1,0 +1,106 @@
+{
+ "result": [
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "10.1.0.0",
+           "link-layer-address": "1A:F7:02:FF:00:01",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-30T03:59:14.141Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/3",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "10.20.0.1",
+           "link-layer-address": "1A:97:09:FF:00:01",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-30T03:52:34.796Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/10",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "10.20.10.11",
+           "link-layer-address": "AA:C1:AB:A5:BF:18",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-30T03:58:41.916Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "172.20.21.1",
+           "link-layer-address": "EE:87:68:D6:42:B0",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-30T04:03:10.903Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

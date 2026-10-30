@@ -9,7 +9,10 @@ the host networks from their leaves first):
     python lab/record_fixtures.py
 
 It writes tests/fixtures/srlinux/lab/<device>/<table>.json. Check the diff before
-committing: a redeploy changes MAC addresses, and the tests that name them.
+committing: a redeploy changes MAC addresses, and the tests that name them. For the
+WAN lab:
+
+    python lab/record_fixtures.py --inventory lab/wan/inventory.yml --out tests/fixtures/srlinux/wan
 """
 
 from __future__ import annotations
@@ -32,6 +35,8 @@ TABLES: dict[str, Callable[[SRLinuxPlatform], Awaitable[list]]] = {
     "interfaces": lambda platform: platform.interfaces(),
     "route_table": lambda platform: platform.routes("default"),
     "interface_counters": lambda platform: platform.interface_counters(),
+    # ospf_interfaces and ospf_neighbors make the same request.
+    "ospf": lambda platform: platform.ospf_interfaces(),
 }
 
 

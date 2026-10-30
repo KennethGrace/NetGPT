@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 
@@ -24,6 +24,8 @@ from netgpt.primitives import (
     LldpNeighbor,
     MacEntry,
     NextHop,
+    OspfInterface,
+    OspfNeighbor,
     PingResult,
     Route,
 )
@@ -47,17 +49,36 @@ COUNTER_PATHS = [
     "/interface[name=*]/ethernet/port-speed",
     "/interface[name=*]/statistics",
 ]
+# Every OSPF instance's interfaces, with their neighbors, and its router ID. Narrow paths, so the link-state
+# database stays on the device.
+OSPF_PATHS = [
+    "/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]",
+    "/network-instance[name=*]/protocols/ospf/instance[name=*]/router-id",
+    # An area is normal unless it has one of these.
+    "/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/stub",
+    "/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/nssa",
+    # Each keychain's algorithm, and nothing else: its keys are never read.
+    "/system/authentication/keychain[name=*]/key[index=*]/algorithm",
+]
+# An interface that names no keychain sends OSPF packets unauthenticated.
+NO_AUTHENTICATION = "none"
+# SR Linux's OSPF names no router with 0.0.0.0, for example the DR of a point-to-point link.
+NO_ROUTER = "0.0.0.0"
+
 PORT_SPEED = re.compile(r"^(\d+)([MGT])$")
 SPEED_UNITS = {"M": 10**6, "G": 10**9, "T": 10**12}
 
-# Added to the error when SR Linux can't parse a command. Models reach for Cisco's commands, which SR Linux
-# doesn't have, and then try variations of them; working examples and the typed tools stop the guessing.
+# Added to the error when SR Linux can't parse a command. Models reach for Cisco's commands, or for SR OS's
+# (show router ospf), which SR Linux doesn't have, and then try variations of them; working examples and the
+# typed tools stop the guessing.
 CLI_HINT = (
-    "This device runs Nokia SR Linux, whose commands differ from Cisco's. For example: show interface brief, "
-    "show network-instance default route-table, show network-instance <name> bridge-table mac-table all, "
-    "show arpnd arp-entries, info from running network-instance default static-routes. For interfaces, ARP, "
-    "MAC tables, routes, and LLDP, the typed tools (interfaces, arp_table, mac_table, routes, lldp_neighbors) "
-    "work on every platform."
+    "This device runs Nokia SR Linux, whose commands differ from Cisco's and from Nokia SR OS's. For example: "
+    "show interface brief, show network-instance default route-table, "
+    "show network-instance <name> bridge-table mac-table all, show arpnd arp-entries, "
+    "show network-instance default protocols ospf neighbor, info from running network-instance default static-routes, "
+    "info from running network-instance default protocols ospf (OSPF's configuration: areas, costs, timers, "
+    "authentication). For interfaces, ARP, MAC tables, routes, LLDP, and OSPF, the typed tools (interfaces, "
+    "arp_table, mac_table, routes, lldp_neighbors, ospf_neighbors, ospf_interfaces) need no commands."
 )
 
 # What SR Linux's next-hop types do with a packet; any other type forwards it.
@@ -80,6 +101,27 @@ def as_list(node: Any) -> list[Any]:
     return node if isinstance(node, list) else [node]
 
 
+def ospf_instances(found: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Every OSPF instance in a get's result, as (network instance, the OSPF instance)."""
+    return [
+        (instance["name"], ospf)
+        for instance in as_list(found.get("network-instance"))
+        for ospf in as_list(instance.get("protocols", {}).get("ospf", {}).get("instance"))
+    ]
+
+
+class OspfPort(NamedTuple):
+    """One interface OSPF runs on, as SR Linux's state has it, with what its router, area, and keychain say."""
+
+    network_instance: str
+    router_id: str | None
+    area: str
+    area_type: str
+    interface: dict[str, Any]
+    authentication: str
+    keychain: str | None
+
+
 def next_hop(hop: dict[str, Any], protocol: str) -> NextHop:
     """
     Read one next hop. SR Linux gives a connected (local) route the router's own
@@ -92,6 +134,11 @@ def next_hop(hop: dict[str, Any], protocol: str) -> NextHop:
         return NextHop(action=action)
     address = None if protocol == "local" else hop.get("ip-address")
     return NextHop(address=address, interface=hop.get("subinterface"))
+
+
+def router_or_none(value: Any) -> str | None:
+    """Read a router ID, where 0.0.0.0 means none."""
+    return None if value in (None, NO_ROUTER) else str(value)
 
 
 def port_speed(value: Any) -> int | None:
@@ -320,6 +367,79 @@ class SRLinuxPlatform(Platform):
                 raise
             output = str(error)
         return parse_ping_output(self.device.name, str(address), output)
+
+    async def _ospf(self) -> list[OspfPort]:
+        """Every interface OSPF runs on, with what its router, area, and keychain say about it."""
+        interfaces, router_ids, stubs, nssas, keychains = await self._get_states(OSPF_PATHS)
+        ids = {(name, ospf["name"]): ospf.get("router-id") for name, ospf in ospf_instances(router_ids)}
+        area_types = {
+            (name, ospf["name"], area["area-id"]): kind
+            for kind, found in (("stub", stubs), ("nssa", nssas))
+            for name, ospf in ospf_instances(found)
+            for area in as_list(ospf.get("area"))
+            if kind in area
+        }
+        # The path has no wildcard until the keychain, so the result is rooted there.
+        algorithms = {
+            keychain["name"]: "/".join(sorted({key["algorithm"] for key in as_list(keychain.get("key")) if "algorithm" in key}))
+            for keychain in as_list(keychains.get("keychain"))
+        }
+        ports = []
+        for name, ospf in ospf_instances(interfaces):
+            for area in as_list(ospf.get("area")):
+                for interface in as_list(area.get("interface")):
+                    keychain = interface.get("authentication", {}).get("keychain")
+                    authentication = (algorithms.get(keychain) or "unknown") if keychain else NO_AUTHENTICATION
+                    area_type = area_types.get((name, ospf["name"], area["area-id"]), "normal")
+                    ports.append(OspfPort(name, ids.get((name, ospf["name"])), area["area-id"], area_type, interface,
+                                          authentication, keychain))
+        return ports
+
+    async def ospf_interfaces(self) -> list[OspfInterface]:
+        return [
+            OspfInterface(
+                device=self.device.name,
+                network_instance=port.network_instance,
+                router_id=port.router_id,
+                area=port.area,
+                area_type=port.area_type,
+                interface=port.interface["interface-name"],
+                address=port.interface.get("local-ip-address"),
+                network_type=port.interface.get("interface-type"),
+                state=port.interface.get("oper-state"),
+                passive=bool(port.interface.get("passive", False)),
+                authentication=port.authentication,
+                keychain=port.keychain,
+                cost=port.interface.get("metric"),
+                hello_interval=port.interface.get("hello-interval"),
+                dead_interval=port.interface.get("dead-interval"),
+                mtu=port.interface.get("mtu"),
+                neighbors=port.interface.get("neighbor-count"),
+                designated_router=router_or_none(port.interface.get("dr-id")),
+                backup_designated_router=router_or_none(port.interface.get("bdr-id")),
+            )
+            for port in await self._ospf()
+        ]
+
+    async def ospf_neighbors(self) -> list[OspfNeighbor]:
+        # up-time is in hundredths of a second.
+        return [
+            OspfNeighbor(
+                device=self.device.name,
+                network_instance=port.network_instance,
+                area=port.area,
+                interface=port.interface["interface-name"],
+                router_id=neighbor["router-id"],
+                address=neighbor.get("address"),
+                state=str(neighbor.get("adjacency-state", "unknown")).split(":")[-1],
+                priority=neighbor.get("priority"),
+                dead_seconds=neighbor.get("dead-time"),
+                uptime_seconds=neighbor["up-time"] // 100 if isinstance(neighbor.get("up-time"), int) else None,
+                state_changes=neighbor.get("state-changes"),
+            )
+            for port in await self._ospf()
+            for neighbor in as_list(port.interface.get("neighbor"))
+        ]
 
     async def routes(self, network_instance: str) -> list[Route]:
         # A path without wildcards comes back rooted at the route-table container itself.

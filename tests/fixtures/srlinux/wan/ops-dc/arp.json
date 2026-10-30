@@ -1,0 +1,82 @@
+{
+ "result": [
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "10.20.0.0",
+           "link-layer-address": "1A:ED:08:FF:00:03",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-30T03:52:34.203Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/10",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "10.20.100.10",
+           "link-layer-address": "AA:C1:AB:7F:A3:34",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-30T04:02:45.562Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "172.20.21.1",
+           "link-layer-address": "EE:87:68:D6:42:B0",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-30T04:03:11.995Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

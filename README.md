@@ -19,7 +19,9 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `arp_table`      | ARP bindings across many devices.                                                       |
 | `routes`         | The routing table of a network instance (VRF) across many devices: IPv4, and IPv6 where the platform reads it. |
 | `bgp_sessions`   | Each device's BGP sessions: the peer and local addresses and AS numbers, the state, the last error, the address families, and the prefixes received. |
-| `topology`       | The network as one graph at layer 2 or layer 3, merged from every device's tables, with the evidence for each link. |
+| `ospf_neighbors` | Each device's OSPF neighbors: the interface and area, the neighbor's router ID and address, and the adjacency's state. |
+| `ospf_interfaces`| The interfaces each device runs OSPF on: area, network type, cost, passive or not, hello and dead intervals, MTU, and the DR and BDR. |
+| `topology`       | The network as one graph at layer 2, at layer 3, or as OSPF sees it, merged from every device's tables, with the evidence for each link. |
 | `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
 | `ping_sweep`     | The addresses that answer ICMP in a network, pinged from a device (inside one of its network instances) or from the NetGPT host itself. |
@@ -27,7 +29,7 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 
 The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call.
 
-`topology` draws the network at one of two layers. At layer 2 (the default) it is the cabling. Each cable is reconciled from both ends, and a link only one end reports is flagged. Each host hangs off the port it is plugged into: ARP says which port an address was heard on, and where a switch is in the way, the switch's MAC table says which of its ports the address is behind. If a switch has forgotten a MAC, the host is drawn behind the switch with no port, and the evidence says why. At layer 3 the graph is the routing in one network instance: routers, the networks their interfaces are on, and the hosts on those networks. Switches drop out, and a network between just two routers is drawn as a link between them. Both layers keep the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
+`topology` draws the network at one of three layers. At layer 2 (the default) it is the cabling. Each cable is reconciled from both ends, and a link only one end reports is flagged. Each host hangs off the port it is plugged into: ARP says which port an address was heard on, and where a switch is in the way, the switch's MAC table says which of its ports the address is behind. If a switch has forgotten a MAC, the host is drawn behind the switch with no port, and the evidence says why. At layer 3 the graph is the routing in one network instance: routers, the networks their interfaces are on, and the hosts on those networks. Switches drop out, and a network between just two routers is drawn as a link between them. The OSPF view is the routing protocol: the routers that run it and the areas each is in, an adjacency for each pair of neighbors with each end's area, cost, and state, and the networks advertised from passive interfaces. Two OSPF interfaces on one network that aren't full neighbors are drawn as a link too, with what keeps them apart: areas, timers, network types, or MTUs that differ, a passive end, or a router that doesn't run OSPF there. Every layer keeps the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
 
 `forwarding_path` walks the routing tables the way the devices do. At each hop it takes the longest matching route, resolves the route's next hop down to an interface (a static route's next hop is often just an address), and follows the cable on that interface to the next device, through any switches in the way. Between two hosts on the same network, no router is involved: the path goes straight across the switch. It reports where the path ends: delivered, or lost, with the reason (no route, a route that drops the packet, a loop, a next hop nothing answers ARP for, or a device it couldn't read). It sends nothing on the network.
 
@@ -71,16 +73,26 @@ mkdir -p ~/.config/netgpt && printf 'NokiaSrl1!' > ~/.config/netgpt/srlinux-lab.
 chmod 600 ~/.config/netgpt/srlinux-lab.password
 ```
 
-To see whether NetGPT can troubleshoot, let a gremlin loose in the lab. [`lab/gremlin.py`](lab/gremlin.py) breaks one thing at random: a port shut, an address mistyped, a host's switch port pulled from its LAN, a blackhole route, a routing loop, or a missing route back. It prints only the complaint a user would make ("host2 and host3 can't reach host1"). Several faults share a complaint, so the model has to investigate rather than guess. The gremlin writes configuration through the lab's own login; NetGPT stays read-only.
+A second lab, [`lab/wan/`](lab/wan/), is a WAN routed by OSPF: three sites, HQ, Ops, and a branch, joined by links of 25G, 10G, and 1G. HQ and Ops each have a campus core with a datacenter router off it, and HQ's users sit behind an access switch. Link costs follow speed, so the branch reaches Ops through HQ rather than over its own 1G link. Each site's users send iperf3 traffic to the servers. It runs beside the first lab, on its own management network, and [`lab/wan/inventory.yml`](lab/wan/inventory.yml) describes it:
+
+```bash
+sudo containerlab deploy -t lab/wan/wan.clab.yml
+netgpt-chat --inventory lab/wan/inventory.yml
+```
+
+To see whether NetGPT can troubleshoot, let a gremlin loose in the lab. [`lab/gremlin.py`](lab/gremlin.py) breaks one thing at random: a port shut, an address mistyped, a host's switch port pulled from its LAN, a blackhole route, a routing loop, or a missing route back. It prints only the complaint a user would make ("host2 and host3 can't reach host1"). Several faults share a complaint, so the model has to investigate rather than guess. In the WAN lab, its faults are OSPF's: a cost that sends traffic over the backup link, an area mismatch, an MTU mismatch that leaves an adjacency stuck in exstart, a passive interface, mismatched hello intervals, and a static route that beats OSPF's. Harder ones leave every adjacency up and hide a network with a summary, or break an adjacency in a way only the configuration shows (a stub flag, authentication), and the game can break two at once. Each WAN fault has a usual place and variants elsewhere (either end of any adjacency, another router's static route), each with the complaint its symptoms would bring, and `--anywhere` picks one at random, so a model can't remember its way to the answer. The gremlin writes configuration through the lab's own login; NetGPT stays read-only.
 
 ```bash
 python lab/gremlin.py break     # then ask NetGPT about the complaint
 python lab/gremlin.py reveal    # what the gremlin broke
 python lab/gremlin.py repair    # put it back
 python lab/gremlin.py check     # dry-run every fault; nothing is committed
+python lab/gremlin.py --lab wan break   # OSPF faults in the WAN lab
+python lab/gremlin.py --lab wan break --pair   # two at once
+python lab/gremlin.py --lab wan break --anywhere   # a fault at a random one of its places
 ```
 
-[`lab/game.py`](lab/game.py) plays the gremlin's game with a model and keeps score. Each round, the gremlin breaks a fault, and the model gets the complaint in a fresh conversation and investigates with NetGPT's tools. The game then puts the lab back and waits for it to answer again. A judge model reads each answer beside what the gremlin broke. It names the devices the answer blames, and whether it hedges between causes, then decides: found, partly, or missed. An answer that blames another device, or hedges, has missed, however much it says along the way. One that blames the right device and an innocent one as well is at most partly right. The judge can be wrong too, so the scoreboard keeps every answer and the judge's reasons, for reading.
+[`lab/game.py`](lab/game.py) plays the gremlin's game with a model and keeps score. Each round, the gremlin breaks a fault, and the model gets the complaint in a fresh conversation and investigates with NetGPT's tools. The game then puts the lab back and waits for it to answer again. A judge model reads each answer beside what the gremlin broke. It names the devices the answer blames, and whether it hedges between causes, then decides: found, partly, or missed. An answer that blames another device, or hedges, has missed, however much it says along the way. One that blames the right device and an innocent one as well is at most partly right. The judge can be wrong too, so the scoreboard keeps every answer and the judge's reasons, for reading, and each answered round's whole conversation goes to `lab/.transcripts/`.
 
 ```bash
 python lab/game.py --model gemma4:26b --ollama http://127.0.0.1:11434   # each fault once, in random order
@@ -130,7 +142,7 @@ Anyone who can load the page can query the network, so every request needs a tok
 
 #### The map
 
-The page also has a map, drawn by a tool only the page offers: `display`. When a picture helps, such as for the topology, where a host is attached, or the path between two points, the model calls `display`. It draws the whole network from the devices' own tables, at layer 2 (cables, switches, and the port each host is on) or at layer 3 (routers and the networks between them), and it chooses which parts to focus on and highlight. Focused nodes move to the middle, and the rest of the network stays on the map, dimmed and pushed aside. The model can't draw anything the devices didn't report, and every name it uses is checked against the graph first. Click a node or link to see the evidence for it. Each view stays in the conversation as a button that brings it back.
+The page also has a map, drawn by a tool only the page offers: `display`. When a picture helps, such as for the topology, where a host is attached, or the path between two points, the model calls `display`. It draws the whole network from the devices' own tables, at layer 2 (cables, switches, and the port each host is on), at layer 3 (routers and the networks between them), or as OSPF sees it (each end of an adjacency labeled with its cost, each area but the backbone in its own color, and a link with a problem dashed in red), and it chooses which parts to focus on and highlight. Focused nodes move to the middle, and the rest of the network stays on the map, dimmed and pushed aside. The model can't draw anything the devices didn't report, and every name it uses is checked against the graph first. Click a node or link to see the evidence for it. Each view stays in the conversation as a button that brings it back.
 
 On a wide screen the map sits beside the conversation. On a phone they take turns on the whole screen: the header's **Map** button switches to the map, and **Chat** switches back. A new view doesn't take over the screen while an answer is coming. A dot on the button says something new is on the other side.
 
@@ -178,8 +190,8 @@ sweep_networks:
 
 | Platform        | Transport           | Status                                                                 |
 |-----------------|---------------------|------------------------------------------------------------------------|
-| `nokia_srlinux` | JSON-RPC over HTTPS | All tools verified against SR Linux 25.10.5 in the lab. The tests replay responses recorded there. `bgp_sessions` isn't implemented yet. |
-| `juniper_junos` | NETCONF over SSH    | Every tool but `ping` and `ping_sweep`, verified against Junos 23.4R2 on a QFX5120 and two EX4400s. The tests replay replies recorded there, renamed. |
+| `nokia_srlinux` | JSON-RPC over HTTPS | All tools verified against SR Linux 25.10.5 in the lab. The tests replay responses recorded there. `bgp_sessions` isn't implemented yet; the OSPF tools are, against the WAN lab. |
+| `juniper_junos` | NETCONF over SSH    | Every tool but `ping`, `ping_sweep`, and the OSPF tools, verified against Junos 23.4R2 on a QFX5120 and two EX4400s. The tests replay replies recorded there, renamed. |
 
 Platform names match containerlab node kinds where there is one. `juniper_junos` is for Junos on hardware, which has none.
 

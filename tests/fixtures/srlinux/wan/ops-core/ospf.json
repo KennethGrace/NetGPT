@@ -1,0 +1,366 @@
+{
+ "result": [
+  {
+   "srl_nokia-network-instance:network-instance": [
+    {
+     "name": "default",
+     "protocols": {
+      "srl_nokia-ospf:ospf": {
+       "instance": [
+        {
+         "name": "main",
+         "area": [
+          {
+           "area-id": "0.0.0.0",
+           "interface": [
+            {
+             "interface-name": "ethernet-1/1.0",
+             "advertise-router-capability": true,
+             "admin-state": "enable",
+             "advertise-subnet": true,
+             "interface-type": "point-to-point",
+             "lsa-filter-out": "none",
+             "metric": 4,
+             "mtu": 1500,
+             "priority": 1,
+             "hello-interval": 10,
+             "dead-interval": 40,
+             "retransmit-interval": 5,
+             "transit-delay": 1,
+             "oper-state": "point-to-point",
+             "dr-id": "0.0.0.0",
+             "bdr-id": "0.0.0.0",
+             "last-enabled-time": "2026-10-29T23:52:31.800Z",
+             "neighbor-count": 1,
+             "local-ip-address": "10.1.0.1",
+             "link-lsa-cksum-sum": "0x0",
+             "link-lsa-count": 0,
+             "events": 1,
+             "last-event-time": "2026-10-29T23:52:31.800Z",
+             "failure-detection": {
+              "enable-bfd": false
+             },
+             "neighbor": [
+              {
+               "router-id": "10.0.0.1",
+               "address": "10.1.0.0",
+               "priority": 1,
+               "dead-time": 32,
+               "designated-router": "0.0.0.0",
+               "backup-designated-router": "0.0.0.0",
+               "optional-capabilities": "42",
+               "last-established-time": "2026-10-29T23:59:04.600Z",
+               "adjacency-state": "srl_nokia-ospf-types:full",
+               "state-changes": 13,
+               "retransmission-queue-length": 0,
+               "restart-helper-status": "not-helping",
+               "up-time": 24700,
+               "last-event-time": "2026-10-29T23:59:14.000Z",
+               "statistics": {
+                "events": 14,
+                "bad-nbr-states": 3,
+                "lsa-install-failed": 0,
+                "bad-seq-nums": 0,
+                "bad-mtu": 0,
+                "bad-packets": 0,
+                "lsa-not-in-lsdbs": 0,
+                "option-mismatches": 0,
+                "duplicates": 0,
+                "num-restarts": 0
+               }
+              }
+             ],
+             "packets": {
+              "tx-total": 89,
+              "tx-hello": 65,
+              "tx-db-description": 6,
+              "tx-ls-request": 1,
+              "tx-ls-update": 8,
+              "tx-ls-ack": 9,
+              "rx-total": 88,
+              "rx-hello": 58,
+              "rx-db-description": 9,
+              "rx-ls-request": 1,
+              "rx-ls-update": 14,
+              "rx-ls-ack": 6,
+              "discarded": 0,
+              "retransmits": 0
+             }
+            },
+            {
+             "interface-name": "ethernet-1/10.0",
+             "advertise-router-capability": true,
+             "admin-state": "enable",
+             "advertise-subnet": true,
+             "interface-type": "broadcast",
+             "lsa-filter-out": "none",
+             "metric": 4,
+             "mtu": 1500,
+             "passive": true,
+             "priority": 1,
+             "hello-interval": 10,
+             "dead-interval": 40,
+             "retransmit-interval": 5,
+             "transit-delay": 1,
+             "oper-state": "designated-router",
+             "dr-id": "10.0.0.2",
+             "bdr-id": "0.0.0.0",
+             "last-enabled-time": "2026-10-29T23:52:33.100Z",
+             "neighbor-count": 0,
+             "local-ip-address": "10.20.10.1",
+             "link-lsa-cksum-sum": "0x0",
+             "link-lsa-count": 0,
+             "events": 6,
+             "last-event-time": "2026-10-29T23:53:13.800Z",
+             "failure-detection": {
+              "enable-bfd": false
+             },
+             "packets": {
+              "tx-total": 2,
+              "tx-hello": 2,
+              "tx-db-description": 0,
+              "tx-ls-request": 0,
+              "tx-ls-update": 0,
+              "tx-ls-ack": 0,
+              "rx-total": 0,
+              "rx-hello": 0,
+              "rx-db-description": 0,
+              "rx-ls-request": 0,
+              "rx-ls-update": 0,
+              "rx-ls-ack": 0,
+              "discarded": 0,
+              "retransmits": 0
+             }
+            },
+            {
+             "interface-name": "ethernet-1/20.0",
+             "advertise-router-capability": true,
+             "admin-state": "enable",
+             "advertise-subnet": true,
+             "interface-type": "point-to-point",
+             "lsa-filter-out": "none",
+             "metric": 100,
+             "mtu": 1500,
+             "priority": 1,
+             "hello-interval": 10,
+             "dead-interval": 40,
+             "retransmit-interval": 5,
+             "transit-delay": 1,
+             "oper-state": "point-to-point",
+             "dr-id": "0.0.0.0",
+             "bdr-id": "0.0.0.0",
+             "last-enabled-time": "2026-10-29T23:52:32.100Z",
+             "neighbor-count": 1,
+             "local-ip-address": "10.1.0.4",
+             "link-lsa-cksum-sum": "0x0",
+             "link-lsa-count": 0,
+             "events": 5,
+             "last-event-time": "2026-10-29T23:52:32.100Z",
+             "failure-detection": {
+              "enable-bfd": false
+             },
+             "neighbor": [
+              {
+               "router-id": "10.0.0.3",
+               "address": "10.1.0.5",
+               "priority": 1,
+               "dead-time": 32,
+               "designated-router": "0.0.0.0",
+               "backup-designated-router": "0.0.0.0",
+               "optional-capabilities": "42",
+               "last-established-time": "2026-10-29T23:52:34.100Z",
+               "adjacency-state": "srl_nokia-ospf-types:full",
+               "state-changes": 6,
+               "retransmission-queue-length": 0,
+               "restart-helper-status": "not-helping",
+               "up-time": 63800,
+               "last-event-time": "2026-10-29T23:52:38.600Z",
+               "statistics": {
+                "events": 5,
+                "bad-nbr-states": 0,
+                "lsa-install-failed": 0,
+                "bad-seq-nums": 0,
+                "bad-mtu": 0,
+                "bad-packets": 0,
+                "lsa-not-in-lsdbs": 0,
+                "option-mismatches": 0,
+                "duplicates": 0,
+                "num-restarts": 0
+               }
+              }
+             ],
+             "packets": {
+              "tx-total": 92,
+              "tx-hello": 69,
+              "tx-db-description": 3,
+              "tx-ls-request": 1,
+              "tx-ls-update": 15,
+              "tx-ls-ack": 4,
+              "rx-total": 76,
+              "rx-hello": 57,
+              "rx-db-description": 2,
+              "rx-ls-request": 0,
+              "rx-ls-update": 10,
+              "rx-ls-ack": 7,
+              "discarded": 0,
+              "retransmits": 2
+             }
+            },
+            {
+             "interface-name": "system0.0",
+             "advertise-router-capability": true,
+             "admin-state": "enable",
+             "advertise-subnet": true,
+             "interface-type": "broadcast",
+             "lsa-filter-out": "none",
+             "metric": 0,
+             "mtu": 1500,
+             "passive": true,
+             "priority": 1,
+             "hello-interval": 10,
+             "dead-interval": 40,
+             "retransmit-interval": 5,
+             "transit-delay": 1,
+             "oper-state": "designated-router",
+             "dr-id": "10.0.0.2",
+             "bdr-id": "0.0.0.0",
+             "last-enabled-time": "2026-10-29T23:52:26.800Z",
+             "neighbor-count": 0,
+             "local-ip-address": "10.0.0.2",
+             "link-lsa-cksum-sum": "0x0",
+             "link-lsa-count": 0,
+             "events": 6,
+             "last-event-time": "2026-10-29T23:53:06.800Z",
+             "failure-detection": {
+              "enable-bfd": false
+             },
+             "packets": {
+              "tx-total": 0,
+              "tx-hello": 0,
+              "tx-db-description": 0,
+              "tx-ls-request": 0,
+              "tx-ls-update": 0,
+              "tx-ls-ack": 0,
+              "rx-total": 0,
+              "rx-hello": 0,
+              "rx-db-description": 0,
+              "rx-ls-request": 0,
+              "rx-ls-update": 0,
+              "rx-ls-ack": 0,
+              "discarded": 0,
+              "retransmits": 0
+             }
+            }
+           ]
+          },
+          {
+           "area-id": "0.0.0.2",
+           "interface": [
+            {
+             "interface-name": "ethernet-1/3.0",
+             "advertise-router-capability": true,
+             "admin-state": "enable",
+             "advertise-subnet": true,
+             "interface-type": "point-to-point",
+             "lsa-filter-out": "none",
+             "metric": 4,
+             "mtu": 1500,
+             "priority": 1,
+             "hello-interval": 10,
+             "dead-interval": 40,
+             "retransmit-interval": 5,
+             "transit-delay": 1,
+             "oper-state": "point-to-point",
+             "dr-id": "0.0.0.0",
+             "bdr-id": "0.0.0.0",
+             "last-enabled-time": "2026-10-29T23:52:32.100Z",
+             "neighbor-count": 1,
+             "local-ip-address": "10.20.0.0",
+             "link-lsa-cksum-sum": "0x0",
+             "link-lsa-count": 0,
+             "events": 1,
+             "last-event-time": "2026-10-29T23:52:32.100Z",
+             "failure-detection": {
+              "enable-bfd": false
+             },
+             "neighbor": [
+              {
+               "router-id": "10.0.0.12",
+               "address": "10.20.0.1",
+               "priority": 1,
+               "dead-time": 31,
+               "designated-router": "0.0.0.0",
+               "backup-designated-router": "0.0.0.0",
+               "optional-capabilities": "42",
+               "last-established-time": "2026-10-29T23:52:32.800Z",
+               "adjacency-state": "srl_nokia-ospf-types:full",
+               "state-changes": 6,
+               "retransmission-queue-length": 0,
+               "restart-helper-status": "not-helping",
+               "up-time": 63900,
+               "last-event-time": "2026-10-29T23:52:32.900Z",
+               "statistics": {
+                "events": 5,
+                "bad-nbr-states": 0,
+                "lsa-install-failed": 0,
+                "bad-seq-nums": 0,
+                "bad-mtu": 0,
+                "bad-packets": 0,
+                "lsa-not-in-lsdbs": 0,
+                "option-mismatches": 0,
+                "duplicates": 0,
+                "num-restarts": 0
+               }
+              }
+             ],
+             "packets": {
+              "tx-total": 85,
+              "tx-hello": 65,
+              "tx-db-description": 3,
+              "tx-ls-request": 1,
+              "tx-ls-update": 14,
+              "tx-ls-ack": 2,
+              "rx-total": 74,
+              "rx-hello": 58,
+              "rx-db-description": 2,
+              "rx-ls-request": 1,
+              "rx-ls-update": 3,
+              "rx-ls-ack": 10,
+              "discarded": 0,
+              "retransmits": 3
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "srl_nokia-network-instance:network-instance": [
+    {
+     "name": "default",
+     "protocols": {
+      "srl_nokia-ospf:ospf": {
+       "instance": [
+        {
+         "name": "main",
+         "router-id": "10.0.0.2"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {},
+  {},
+  {}
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

@@ -198,6 +198,11 @@ class Chat:
         self._instructions = ""
         self.messages: list[dict[str, Any]] = []
 
+    @property
+    def tools(self) -> list[dict[str, Any]]:
+        """The tools as Ollama is offered them, once start has fetched them."""
+        return self._tools
+
     async def start(self) -> None:
         """Fetch the server's tools and instructions and begin an empty conversation."""
         self._tools = ollama_tools((await self._client.list_tools()).tools)

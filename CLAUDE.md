@@ -19,6 +19,8 @@ python lab/record_fixtures.py           # re-record the lab's responses as test 
 python lab/record_junos.py --inventory I --rename R   # record Junos devices' replies as renamed fixtures
 python lab/gremlin.py break|reveal|repair|check   # break one thing in the lab on purpose, and put it back
 python lab/game.py --model M --ollama URL         # the gremlin's game: break, ask the model why, keep score
+python lab/game.py --lab wan --model M ...        # the same with OSPF faults, in the WAN lab
+python lab/game.py --lab wan --anywhere ...       # each fault at a random one of its places
 ```
 
 ## Layout
@@ -35,6 +37,7 @@ python lab/game.py --model M --ollama URL         # the gremlin's game: break, a
 - `src/netgpt/chat.py`, `web.py`: the Ollama tool loop, and the web page's server.
 - `src/netgpt/static/`: the page. `map.js` is the map on vendored d3-force, with each link's traffic, and `chart.js` draws charts in the conversation and the map's inspector.
 - `lab/`: the containerlab lab (SR Linux spine, two leaves, a bridging switch, Linux hosts) and its inventory.
+- `lab/wan/`: the WAN lab: three sites (HQ, Ops, a branch) on 25G, 10G, and 1G links, routed by OSPF, with its own inventory.
 - `api/`, `www/`: the 2023 v0.3 app, kept for reference only. Never deploy it: its API accepts any bearer token.
 
 ## Rules that hold everywhere
@@ -50,6 +53,7 @@ python lab/game.py --model M --ollama URL         # the gremlin's game: break, a
 
 - **Layer 2:** LLDP gives cables. A port hearing several LLDP neighbors is a shared segment. For each ARP entry, `locate` follows the address from the port it was heard on through switches' MAC tables to the port it is plugged into. A forgotten MAC leaves the host behind the switch with no port.
 - **Layer 3:** routers, subnets (from routed interfaces), and the hosts on them. Switches drop out. A /30 or /31 between two routers becomes a link with `subnet` set.
+- **OSPF view** (`build_ospf`, layer `ospf`): OSPF interfaces are grouped by the network their addresses are on. Two routers on one network are a link whether or not they became neighbors, with each end's area, cost, and adjacency state, and `problems` naming what keeps them apart (settings that differ, area type and authentication among them, a passive end, how far each side got). A router on the network that doesn't run OSPF there is named too. A network with one OSPF router on it is a subnet node in its area. Router IDs map neighbors to devices; one outside the inventory is a `neighbor` node. `describe` gives the model every link's problems.
 - **Forwarding walk:** longest match, recursive next-hop resolution, then the cable. `beyond` crosses shared segments and bridged ports, and each switch crossed becomes a hop. Hosts on the same network reach each other without the router.
 - **Statistics:** while a client is connected, the server's lifespan runs the `Poller`: every device's interface counters every 30 seconds, the second poll 5 seconds after the first, and an hour of samples in memory. A rate is the difference of two readings over the time between them, and a counter that goes backwards is a reset, so that interval isn't measured. `interface_traffic` exists only when the server polls; the game's server doesn't. `chart` needs polling and the page: its structured content is a `Chart`, which the page draws in the conversation and asks `/api/chart` for again every poll. The map asks `/api/traffic` every poll for each port's latest rates and its errors over the last 5 minutes.
 - **Model and page:** a `display` result gives the model `describe(view)` as text and gives the page the whole view as structured content. The chat keeps it under `_structured` and strips that before Ollama sees the history.
@@ -74,6 +78,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **After changing the lab,** re-record (`python lab/record_fixtures.py`) and read the diff. A redeploy changes MAC addresses, which some tests name, and timestamps change every time.
 - **Junos fixtures** (`tests/fixtures/junos/`) are real switches' replies: a QFX5120 core and two EX4400 office switches, recorded by `lab/record_junos.py` through the real driver. `replies.json` says which RPC each file answers, and `test_junos.Replay` replays them.
   - **The repository is public, and the switches are real.** The recorder replaces every name and address listed in a YAML file kept outside the repository, and blanks serial numbers. Audit the fixtures before committing: LLDP on a management port carries the neighbor's management address, model, and software version.
+- **WAN fixtures** (`tests/fixtures/srlinux/wan/`) are the WAN lab's tables, OSPF included, and `fakes.recorded_wan()` parses them through the real driver. The OSPF view's failures (areas, MTUs, a passive or one-way end) are tested on synthetic routers in `test_ospf.py`.
 - **Synthetic networks:** `fakes.SwitchedNetwork` is a small routed network with a switch. `FakePlatform` backs the server, chat, and web tests. `ScriptedOllama` stands in for the model.
 - **Polling:** `FakePlatform`'s counters grow the same amount on every read (`counter_reads` resets them), and the `Poller` takes a clock, so a test sets the time between polls and knows the rates exactly.
 - **Check driver changes against the live lab** before calling them done. Recording the lab found that SR Linux spells a learned MAC `learnt`. SR Linux also reports an unanswered ping as either a result or an error.
@@ -87,7 +92,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 ## The lab
 
 - **Runtime:** containerlab on Docker, not podman: SR Linux 25.10.5 crashes during boot under podman. Shells may still export `DOCKER_HOST` pointing at podman; use `env -u DOCKER_HOST` for Docker commands.
-- **Deploying needs root.** Ask the user to run `sudo containerlab deploy -t lab/netgpt.clab.yml` (`--reconfigure` after changing the topology).
+- **Deploying needs root.** Ask the user to run `sudo containerlab deploy -t lab/netgpt.clab.yml` (`--reconfigure` after changing the topology). The WAN lab is `lab/wan/wan.clab.yml`, beside it on 172.20.21.0/24.
 - **The hosts send traffic,** so the counters have something to count: iperf3 from host1 to host2 and from host3 to host1, 5 to 45 Mbit/s, changing every minute (`lab/traffic.sh`, started by the topology's `exec`).
   - **The hosts' MTU is 1500,** to match SR Linux's IP MTU. At containerlab's default 9500, TCP connects, then stalls on its first full-size segment, which the leaf counts as an input error each time it is resent. `interface_traffic` found it: errors on exactly the two ports the senders plug into, and no traffic.
 - **A fresh deploy has empty ARP and MAC tables.** Sweep the host networks from their leaves (`ping_sweep` with `device`) before drawing the map or recording fixtures.
@@ -97,7 +102,10 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - One `get` can fetch several narrow paths, which is cheaper than whole subtrees.
   - Management lives in network instance `mgmt`.
   - Asking for routes in an instance a device lacks returns an empty list, not an error.
+  - OSPF: a neighbor's `up-time` is in hundredths of a second, and 0.0.0.0 names no router (the DR of a point-to-point link). A wildcard `get` on a device without OSPF returns `{}`.
+  - An OSPF area's type is in its `stub` and `nssa` containers, and an interface's authentication in its keychain, from the same one `get`. Only each keychain key's `algorithm` is read: a wider path would fetch the keys. With nothing configured, each of those paths answers `{}`.
   - Each ping is a CLI session; about 16 at once is the most a sweep gains from.
+  - The lab's nodes are 7220 IXR-D2L, whose 25G ports accept `port-speed` 1G, 10G, or 25G. Ports come in groups that share a speed mode: a port left at 25G goes down, "unsupported-speed", when another in its group is set to 10G or 1G, and `commit validate` doesn't catch it. Setting 25G explicitly fails validation even alone, so leave it unset.
 - **Junos details** (learned on real QFX5120 and EX4400 switches, Junos 23.4R2):
   - Every operational command has an RPC: `show ... | display xml rpc` names it.
   - The `<command>` RPC ignores pipes without saying so, so the driver filters the text itself. It answers some commands Junos lacks (`show ip route`) with an empty reply, not an error.
@@ -109,12 +117,18 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - The built-in `read-only` class can't run `show configuration` (it lacks `view-configuration`). A class with `view` and `view-configuration` can; Junos hides secret statements from it, but not comments, and the Mist agent leaves its device secret in one.
 - **The web page reads its assets and inventory at startup.** Restart it after changing `static/` or `lab/inventory.yml`.
 - **The gremlin** (`lab/gremlin.py`) is the one thing here that writes to devices. It is a lab tool outside `src/`, and the model never reaches it.
-  - Each fault is SR Linux CLI: commands that break, commands that repair, the user's complaint, and the cause.
+  - It knows two labs (`gremlin.LABS`): the fabric, with static-route faults, and the WAN, with OSPF faults (a cost, an area, an MTU, a passive interface, a hello interval, a static route that beats OSPF, an area range, a stub area, and authentication). Fault names don't repeat across labs, so `gremlin.FAULTS` finds any of them; `--lab` picks the lab.
+  - **Variants:** each WAN fault has a usual place (`WAN_FAULTS`) and variants (`Lab.variants`, 72 in all): the faults that kill an adjacency at either end of any of the five (`WAN_ADJACENCIES`), and other costs, static routes, and area ranges. Each carries the complaint its symptoms would bring. A fault always in one place can be remembered rather than found, so `--anywhere` (gremlin and game) breaks a random variant. A variant is named `fault@place` (`passive@hq-dc:ethernet-1/1.0`); the state file and each round keep those names, and the scoreboard keeps rounds played anywhere apart from rounds in the usual places.
+  - **Every variant was broken live** (all 72): each showed its symptoms, and every claim its complaint makes held (the routes it moves, the pings it stops and the ones it doesn't). `takes` is the slowest variant's time, with some to spare: a passive end or a wrong area drops the adjacency at once at its own end, but the far end holds it full until its dead interval runs out (up to 48 seconds), so before then the OSPF view shows one side full. The lab was whole within 45 seconds of every repair.
+  - Now and then SR Linux refuses a JSON-RPC request with "Invalid session id" before running it; `cli` tries once more. One ended a run of the checks after 59 faults.
+  - Each fault is SR Linux CLI: commands that break, commands that repair, the user's complaint, and the cause. `takes` is how long its symptoms take to show: a hello mismatch drops the adjacency only when the dead interval runs out.
   - `check` dry-runs every fault in a private candidate. The break must change something, and the break plus the repair must leave an empty `diff`.
-  - What it broke is kept in `lab/.gremlin.json` (gitignored) until it is repaired.
-  - It breaks only a whole lab: `settle` waits until a set of pings from the leaves all answer. A repaired interface takes a moment to come back, and without the wait the lab shows symptoms of two faults. The pings also refill ARP and MAC tables.
-  - Hosts aren't in the inventory, so NetGPT knows them only by address. The game's question gives the addresses (`gremlin.HOSTS`).
-- **The game** (`lab/game.py`) runs the model in-process through `Chat`, with no `display` tool, a fresh conversation each round, and the lab always repaired in a `finally`. Rounds go to `lab/.scoreboard.jsonl` (gitignored), marked with the NetGPT commit (plus `+` and a fingerprint of uncommitted changes to `src/`) and the reply limit.
+  - What it broke is kept in the lab's `.gremlin.json` (`lab/`, `lab/wan/`; gitignored) until it is repaired.
+  - It breaks only a whole lab: `settle` waits until a set of pings all answer, and in the WAN, until every router has its full OSPF neighbors, since OSPF routes around a missing adjacency and every ping still answers. A repaired interface takes a moment to come back, and without the wait the lab shows symptoms of two faults. The pings also refill ARP and MAC tables.
+  - Hosts aren't in the inventory, so NetGPT knows them only by address. The game's question gives the addresses (the lab's `hosts`).
+  - The WAN's pings get three tries each: its datapath drops the odd packet.
+- **The game** (`lab/game.py`) runs the model in-process through `Chat`, with no `display` tool, a fresh conversation each round, and the lab always repaired in a `finally`. Rounds go to `lab/.scoreboard.jsonl` (gitignored), marked with the NetGPT commit (plus `+` and a fingerprint of uncommitted changes to `src/`) and the reply limit. Each answered round's whole conversation, thinking and tool results included, goes to `lab/.transcripts/` (gitignored) in Ollama's message format with the tools as offered, and the round's `transcript` names it. Rounds before it kept only the calls and the answer.
+  - **Models write Unicode hyphens** ("hq‑core" with U+2011), so the rubric reads them as plain ones. Two of qwen's right answers had failed it on that alone.
   - **Keywords can't tell blame.** A `loop` answer that names spine1 and says "loop" passed the keyword rubric while blaming leaf1. So a judge model scores each answer, and the rubric is kept beside it.
   - **The judge says what an answer blames before it decides,** through Ollama's `format` schema: the device, any other devices it says need changing (`also_blamed`), and whether it hedges. The code then overrides it: a hedge, or blame that misses the fault's device, is `missed`, and the right device with another beside it is at most `partly`. One field for the blame ran "A and B" (both wrong) together with "A or B" (a hedge).
   - **Write each fault's cause so blame is unambiguous** ("leaf1's route is as it should be"). The judge reads it literally.
@@ -127,6 +141,8 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **Device data reaches the DOM only as text:** `textContent` and attributes, never HTML.
 - **Narrow screens (under 1000px) show the map or the conversation, not both.** `body.map-full` gives the map the screen. The header button names the screen it leads to, so it has no pressed state there. A live view or answer marks it `fresh` instead of switching screens. A view's chip opens the map.
 - **Pins are the viewer's, not the model's.** They are kept per plane in `localStorage`, and every access is wrapped in `try`.
+- **The OSPF view** labels each end of a link with its cost and drops the network from the middle. Area 0 keeps the plain wire, and each other area takes one of three `--area-n` tokens in turn, on its links and stub networks, below the highlight in the stylesheet. They weren't checked as carefully as the chart colors. A link with problems is dashed in `--error`. A link keeps its element from view to view, and layer 3 and OSPF name a link between routers alike, so `relabel` refreshes its labels on every view.
+- **The map orders a row of devices by the inventory.** The WAN inventory lists the branch between the two sites, so it sits between their cores.
 - **Chart colors** are six `--series-n` tokens in `app.css`, one per port in a fixed order, checked for both modes against the page's own surfaces. Three of the light ones are under 3:1 contrast, so every chart has a Data table, and values never wear a series color.
 - **Traffic on the map** is a weathermap: each link gets a lane per direction, on the right as it travels. A lane's color is its share of port speed, in five bands from the `--load-n` ramp. That ramp is one hue (teal, since blue means highlighted), checked as an ordinal ramp in both modes. A direction is the sending port's out counter, or else the receiving port's in. A subinterface's traffic is its port's.
   - Rate labels go at whichever end of their lane overlaps least with what is already drawn.
@@ -146,6 +162,22 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 1 is done: a bridging switch, and layer 2 and layer 3 views.
   - Phase 2, a second vendor: Junos, over NETCONF with an SSH key, built against real switches (a QFX5120 and two EX4400s, Junos 23.4R2) rather than a virtual lab. Virtual Junos needs KVM, which this VM lacks, except cRPD, which is only the routing daemon. Cisco IOL is legitimately available through CML-Free.
   - Mixing vendors on one cable will need port names normalized (`Gi1/0/45` and `GigabitEthernet1/0/45`), so both ends match.
+- **OSPF track** (branch `feature/ospf`):
+  - Phase 1 is done: the WAN lab. Every adjacency is Full, and the branch's traffic to Ops goes through HQ (cost 22) while its own 1G link to Ops sits idle.
+  - Phase 2 is done: `ospf_neighbors` and `ospf_interfaces`, read from SR Linux in one `get` of narrow paths (the link-state database stays on the device), with fixtures recorded from the WAN lab (`tests/fixtures/srlinux/wan/`). Routes already carried `ospfv2`, metric, and preference.
+  - The WAN lab's adjacencies reset now and then: hq-core's three went down and back at different times in its first 10 minutes, then held. hq-core carries every cross-site flow and counts the most input errors, so lost bursts of hellos are the guess.
+  - Phase 3 is done: the OSPF view, for `topology` and `display` (layer `ospf`), and on the map. Checked live (no problems on the WAN lab, and the branch-to-Ops path drawn along its adjacencies through HQ) and in headless Firefox with an area mismatch built from the fixtures.
+  - Later in the view: sites as groups on the map (an inventory `site`), and adjacency states on a network with several OSPF routers (drawn as a subnet node now, without them).
+  - Phase 4: Junos OSPF.
+  - Phase 5: WAN faults for the gremlin: a cost that moves traffic, an area mismatch, an MTU mismatch stuck in ExStart, a passive interface, mismatched hello timers, and a static blackhole that beats OSPF. Two pairs share a complaint. Each passes `check`, and each was broken live. The MTU change brings an adjacency that is already full down on its own.
+  - **Harder faults:** `summary` (hq-core keeps HQ's datacenter out of area 0 with an `area-range` set not to advertise: every adjacency stays full, and only the routes tell), and `stub` and `auth` (ops-dc's area stub at its end only, or MD5 on ops-core's end: the adjacency is gone, and no setting the typed tools reported differed, so the cause was in `show`). Each was checked live. `ospf_interfaces` reports area types and authentication now, so the OSPF view names both, and they are no longer hidden.
+  - **Pairs** (`--pairs`, `break --pair`): two faults at once, on different devices, whose complaints don't contradict each other. Anywhere, the first is a variant that changes the paths between sites (`effect` "wan") and the second one that cuts a datacenter off ("dc"), which leave each other's symptoms alone. Static routes and area ranges don't pair, so `hello+stub` replaced `static+stub`. The question numbers both complaints. The judge takes each break on its own, told about the other (`JUDGE_PAIR_PROMPT`), so blaming the other break's device isn't extra blame; a pair is found when both are, and partly when either is. The rubric needs both. A pair's scoreboard column is `cost+auth`.
+  - First WAN game (ee0ad09, qwen3.8 27b, 3 rounds of each, 10 replies): 18 of 18, none on the last reply, a median of 154 s and 4 replies. It used an OSPF tool in 17 rounds (`ospf_neighbors` 18 calls, `ospf_interfaces` 14, `topology` as ospf 6), and `bgp_sessions` 4 times, which SR Linux doesn't support. The OSPF faults don't test qwen either.
+  - Harder game (bc5166d, qwen3.8 27b, 3 rounds of each, 10 replies): 16 of 21, 3 partly. Alone, `summary` and `stub` 3 of 3 and `auth` 2 of 3; in pairs, `mtu+hello` and `area+passive` 3 of 3, `cost+auth` and `static+stub` 1 of 3.
+    - **The guesses were SR Linux's OSPF commands:** almost all of its failed `show` commands were attempts at OSPF's, in SR OS's spelling (`show router ospf`), Cisco's (`show ospf`), or nearly right (`protocol` for `protocols`). The parse-error hint had no OSPF example; it has since 12e0b4c.
+    - **A missing adjacency with no setting that differs reads as authentication.** In two `static+stub` rounds it never read the configuration, and blamed or hedged on authentication where the stub flag was. Its one `auth` miss hedged among authentication, timers, and stub for the same reason.
+    - **Which end of a mismatch is wrong is a convention.** Both `cost+auth` rounds not found named ops-core's keychain on the right interface, then offered to add it to ops-dc instead. The judge counts that as blaming ops-dc. The evidence for ops-core's end is that no other link authenticates.
+  - **The WAN lab's traffic is 1 to 9 Mbit/s a flow.** At the fabric's 5 to 45, hq-core, which forwards every cross-site flow, heard only about 60% of the hellos sent to it, while its neighbors heard about 97% of its own. Its adjacencies flapped whenever four in a row were lost. The other routers heard 89 to 98%, in step with how much each forwards.
 - **Gremlin track** (can a model troubleshoot with these tools?):
   - Phase 1 is done: `lab/gremlin.py`, six faults across all four devices, each checked live.
   - Phase 2 is done: `lab/game.py` breaks a fault, asks the model the complaint, has a judge score the answer against the cause, and keeps a scoreboard per model, NetGPT commit, and reply limit.
@@ -179,6 +211,6 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 3: the map inside MCP clients (MCP Apps).
 - **Known gaps:**
   - `topology` and the forwarding walk are IPv4 only. Junos's interfaces and routes include IPv6; SR Linux's don't yet.
-  - `bgp_sessions` is Junos only so far, and `ping` isn't on Junos yet.
+  - `bgp_sessions` is Junos only so far, the OSPF tools SR Linux only, and `ping` isn't on Junos yet.
   - A path and its return path are separate views.
   - A sweep from the NetGPT host can't tell "unreachable" from "empty".

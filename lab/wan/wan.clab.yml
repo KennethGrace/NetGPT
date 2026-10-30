@@ -1,0 +1,163 @@
+# NetGPT WAN lab: three sites joined by WAN links of different speeds, routed by
+# OSPF. Nokia SR Linux routers and an access switch, with Linux hosts.
+#
+#            Site A: HQ                                   Site B: Ops
+#   hq-user1 ┐                                                    ops-user1
+#   hq-user2 ┴ hq-sw1 ── hq-core ═════════ 25G ═════════ ops-core ─┘
+#                         │    ╲                        ╱    │
+#            hq-srv1 ── hq-dc   ╲ 10G              1G ╱   ops-dc ── ops-srv1
+#                                ╲                  ╱
+#                                 ╲──── branch ────╱
+#                                         │
+#                                      br-user1
+#                                  Site C: Branch
+#
+# The SR Linux ports (7220 IXR-D2L) come in groups that share a speed mode: a port
+# left at its default 25G goes down, "unsupported-speed", when another port in its
+# group is set to 10G or 1G. So the cores' slower links to the branch are on
+# ethernet-1/20, away from their 25G ports, and no config sets 25G explicitly
+# (that fails commit validate even alone).
+#
+# Each site's core (and the branch router) is on the WAN. HQ and Ops each have a
+# datacenter router off the core, with a server behind it. HQ's users are behind an
+# access switch that bridges the campus LAN; Ops's and the branch's are on the router.
+#
+# OSPF, version 2, reference bandwidth 100G, so a link's cost is 100G over its speed:
+# 25G costs 4, 10G costs 10, and 1G costs 100.
+#   - Area 0: the WAN links, the cores' and branch's loopbacks, and the campus LANs.
+#   - Area 1: HQ's datacenter (hq-core to hq-dc, and the server LAN).
+#   - Area 2: Ops's datacenter. The cores are the area border routers.
+# So the branch reaches Ops through HQ (10 + 4) and not on its own 1G link (100),
+# which carries traffic only when the way through HQ is down.
+#
+# Addresses:
+#   loopbacks (system0)  10.0.0.1 hq-core, .2 ops-core, .3 branch, .11 hq-dc, .12 ops-dc
+#   WAN /31s             10.1.0.0 hq-core–ops-core, 10.1.0.2 hq-core–branch, 10.1.0.4 ops-core–branch
+#   site links /31s      10.10.0.0 hq-core–hq-dc, 10.20.0.0 ops-core–ops-dc
+#   LANs /24s            10.10.10 HQ campus, 10.10.100 HQ datacenter, 10.20.10 Ops campus,
+#                        10.20.100 Ops datacenter, 10.30.10 branch
+#
+# The hosts keep traffic flowing (../traffic.sh): the branch's user sends to both
+# servers, HQ's user to Ops's server, and Ops's user to HQ's server. Each server runs
+# an iperf3 listener per client, on 5201 and 5202. Each flow is 1 to 9 Mbit/s, not the
+# other lab's 5 to 45: hq-core forwards all four, and at those rates its software
+# datapath dropped about 40% of the OSPF hellos sent to it, so its adjacencies
+# flapped whenever four in a row were lost.
+#
+# Use Docker, as for the other lab. It runs beside it, on its own management network.
+#
+#   sudo containerlab deploy -t lab/wan/wan.clab.yml
+#   sudo containerlab deploy -t lab/wan/wan.clab.yml --reconfigure   # after changing this file
+#   sudo containerlab destroy -t lab/wan/wan.clab.yml
+name: wan
+
+mgmt:
+  network: netgpt-wan-mgmt
+  ipv4-subnet: 172.20.21.0/24
+
+topology:
+  kinds:
+    nokia_srlinux:
+      image: ghcr.io/nokia/srlinux:25.10.5
+    linux:
+      image: ghcr.io/srl-labs/network-multitool:latest
+
+  nodes:
+    hq-core:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.21.11
+      startup-config: configs/hq-core.cli
+    hq-dc:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.21.12
+      startup-config: configs/hq-dc.cli
+    hq-sw1:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.21.13
+      startup-config: configs/hq-sw1.cli
+    ops-core:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.21.21
+      startup-config: configs/ops-core.cli
+    ops-dc:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.21.22
+      startup-config: configs/ops-dc.cli
+    branch:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.21.31
+      startup-config: configs/branch.cli
+
+    hq-user1:
+      kind: linux
+      mgmt-ipv4: 172.20.21.101
+      binds:
+        - ../traffic.sh:/traffic.sh:ro
+      exec:
+        - ip link set dev eth1 mtu 1500
+        - ip addr add 10.10.10.11/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.10.10.1
+        - sh -c "nohup sh /traffic.sh 10.20.100.10 5201 1 > /dev/null 2>&1 &"
+    hq-user2:
+      kind: linux
+      mgmt-ipv4: 172.20.21.102
+      exec:
+        - ip link set dev eth1 mtu 1500
+        - ip addr add 10.10.10.12/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.10.10.1
+    hq-srv1:
+      kind: linux
+      mgmt-ipv4: 172.20.21.103
+      exec:
+        - ip link set dev eth1 mtu 1500
+        - ip addr add 10.10.100.10/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.10.100.1
+        - iperf3 -s -D -p 5201
+        - iperf3 -s -D -p 5202
+    ops-user1:
+      kind: linux
+      mgmt-ipv4: 172.20.21.104
+      binds:
+        - ../traffic.sh:/traffic.sh:ro
+      exec:
+        - ip link set dev eth1 mtu 1500
+        - ip addr add 10.20.10.11/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.20.10.1
+        - sh -c "nohup sh /traffic.sh 10.10.100.10 5202 1 > /dev/null 2>&1 &"
+    ops-srv1:
+      kind: linux
+      mgmt-ipv4: 172.20.21.105
+      exec:
+        - ip link set dev eth1 mtu 1500
+        - ip addr add 10.20.100.10/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.20.100.1
+        - iperf3 -s -D -p 5201
+        - iperf3 -s -D -p 5202
+    br-user1:
+      kind: linux
+      mgmt-ipv4: 172.20.21.106
+      binds:
+        - ../traffic.sh:/traffic.sh:ro
+      exec:
+        - ip link set dev eth1 mtu 1500
+        - ip addr add 10.30.10.11/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.30.10.1
+        - sh -c "nohup sh /traffic.sh 10.10.100.10 5201 1 > /dev/null 2>&1 &"
+        - sh -c "nohup sh /traffic.sh 10.20.100.10 5202 1 > /dev/null 2>&1 &"
+
+  links:
+    # The WAN.
+    - endpoints: ["hq-core:e1-1", "ops-core:e1-1"]
+    - endpoints: ["hq-core:e1-20", "branch:e1-1"]
+    - endpoints: ["ops-core:e1-20", "branch:e1-2"]
+    # Each site's datacenter router.
+    - endpoints: ["hq-core:e1-3", "hq-dc:e1-1"]
+    - endpoints: ["ops-core:e1-3", "ops-dc:e1-1"]
+    # The LANs.
+    - endpoints: ["hq-core:e1-10", "hq-sw1:e1-1"]
+    - endpoints: ["hq-user1:eth1", "hq-sw1:e1-2"]
+    - endpoints: ["hq-user2:eth1", "hq-sw1:e1-3"]
+    - endpoints: ["hq-srv1:eth1", "hq-dc:e1-10"]
+    - endpoints: ["ops-user1:eth1", "ops-core:e1-10"]
+    - endpoints: ["ops-srv1:eth1", "ops-dc:e1-10"]
+    - endpoints: ["br-user1:eth1", "branch:e1-10"]
