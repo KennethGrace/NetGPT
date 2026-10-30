@@ -8,15 +8,18 @@ The gremlin writes configuration over SR Linux's JSON-RPC API with the lab's log
 It is a lab tool, apart from NetGPT, which stays read-only: the model never sees the
 gremlin or what it did.
 
-Run it from the repository root with the lab deployed:
+It knows two labs: the fabric (lab/netgpt.clab.yml, static routes) and the WAN
+(lab/wan/wan.clab.yml, OSPF across three sites), each with faults of its own. Run it
+from the repository root with the lab deployed:
 
     python lab/gremlin.py break             # break something at random and print the complaint
     python lab/gremlin.py break --fault loop
     python lab/gremlin.py reveal            # say what it broke
     python lab/gremlin.py repair            # put it back
     python lab/gremlin.py check             # dry-run every fault; nothing is committed
+    python lab/gremlin.py --lab wan break   # the same, in the WAN lab
 
-What it broke is kept in lab/.gremlin.json until it is repaired.
+What it broke is kept in the lab's .gremlin.json until it is repaired.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ import random
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -35,23 +38,9 @@ import httpx
 
 from netgpt.inventory import Inventory
 
-STATE = Path("lab/.gremlin.json")
 VALID = "All changes are valid."
 DISCARDED = "All changes have been discarded. Leaving candidate mode."
-
-# The lab's hosts, which complaints name. They aren't in the inventory, so NetGPT knows them only by address.
-HOSTS = {"host1": "192.168.11.2", "host2": "192.168.12.2", "host3": "192.168.12.3"}
-
-# Pings that all answer when the lab is whole: each host from its own leaf, and each host network from
-# across the fabric, sent from the gateway address. They also refill ARP and MAC tables a repair emptied.
-PROBES: list[tuple[str, str, str | None]] = [
-    ("leaf1", HOSTS["host1"], None),
-    ("leaf2", HOSTS["host2"], None),
-    ("leaf2", HOSTS["host3"], None),
-    ("leaf1", HOSTS["host2"], "192.168.11.1"),
-    ("leaf1", HOSTS["host3"], "192.168.11.1"),
-    ("leaf2", HOSTS["host1"], "192.168.12.1"),
-]
+OSPF = "/ network-instance default protocols ospf instance main"
 
 
 class GremlinError(Exception):
@@ -73,9 +62,36 @@ class Fault:
     complaint: str
     answer: str
     clues: tuple[tuple[str, ...], ...]
+    # Seconds the break takes to show. A routing protocol notices some faults only when a timer runs out.
+    takes: float = 0.0
 
 
-FAULTS = {
+@dataclass(frozen=True)
+class Lab:
+    """
+    A lab the gremlin knows: its inventory, the hosts complaints name (they aren't in
+    the inventory, so NetGPT knows them only by address), the probes that all answer
+    when it is whole, its faults, and where it keeps what it broke.
+    """
+
+    name: str
+    inventory: Path
+    hosts: dict[str, str]
+    # Pings (device, destination, source address or None) that all answer when the lab is whole. They also
+    # refill ARP and MAC tables a repair emptied.
+    probes: tuple[tuple[str, str, str | None], ...]
+    faults: dict[str, Fault]
+    state: Path
+    # How many full OSPF neighbors each router has when the lab is whole. OSPF routes around a broken
+    # adjacency, so pings alone can't tell it is back.
+    adjacencies: dict[str, int] = field(default_factory=dict)
+    # Pings per probe: a lab whose datapath drops the odd packet gets a few tries.
+    tries: int = 1
+
+
+FABRIC_HOSTS = {"host1": "192.168.11.2", "host2": "192.168.12.2", "host3": "192.168.12.3"}
+
+FABRIC_FAULTS = {
     fault.name: fault
     for fault in [
         Fault(
@@ -157,6 +173,168 @@ FAULTS = {
     ]
 }
 
+FABRIC = Lab(
+    name="fabric",
+    inventory=Path("lab/inventory.yml"),
+    hosts=FABRIC_HOSTS,
+    # Each host from its own leaf, and each host network from across the fabric, from the gateway address.
+    probes=(
+        ("leaf1", FABRIC_HOSTS["host1"], None),
+        ("leaf2", FABRIC_HOSTS["host2"], None),
+        ("leaf2", FABRIC_HOSTS["host3"], None),
+        ("leaf1", FABRIC_HOSTS["host2"], "192.168.11.1"),
+        ("leaf1", FABRIC_HOSTS["host3"], "192.168.11.1"),
+        ("leaf2", FABRIC_HOSTS["host1"], "192.168.12.1"),
+    ),
+    faults=FABRIC_FAULTS,
+    state=Path("lab/.gremlin.json"),
+)
+
+WAN_HOSTS = {
+    "hq-user1": "10.10.10.11",
+    "hq-user2": "10.10.10.12",
+    "hq-srv1": "10.10.100.10",
+    "ops-user1": "10.20.10.11",
+    "ops-srv1": "10.20.100.10",
+    "br-user1": "10.30.10.11",
+}
+
+BACKUP_IN_USE = "The 1G link between Ops and the branch, a backup, is carrying traffic, though the branch's 10G link to HQ is up."
+
+# Two pairs share a complaint, so the model has to look rather than guess. Each cause says the other end of
+# the link is as it should be, since a mismatch could be fixed at either end: the gremlin changed one, and
+# it is the one that differs from every other interface in the lab.
+WAN_FAULTS = {
+    fault.name: fault
+    for fault in [
+        Fault(
+            name="cost",
+            device="hq-core",
+            breaks=(f"set {OSPF} area 0.0.0.0 interface ethernet-1/20.0 metric 1000",),
+            repairs=(f"delete {OSPF} area 0.0.0.0 interface ethernet-1/20.0 metric",),
+            complaint=BACKUP_IN_USE,
+            answer=(
+                "hq-core's OSPF cost on ethernet-1/20.0, its 10G link to the branch, is 1000 where it should be 10, so "
+                "HQ sends its traffic for the branch through Ops and the 1G link. The branch's costs are as they should be."
+            ),
+            clues=(("cost", "metric"), ("1000", "ethernet-1/20")),
+        ),
+        Fault(
+            name="area",
+            device="branch",
+            breaks=(
+                f"delete {OSPF} area 0.0.0.0 interface ethernet-1/1.0",
+                f"set {OSPF} area 0.0.0.3 interface ethernet-1/1.0 interface-type point-to-point",
+            ),
+            repairs=(
+                f"delete {OSPF} area 0.0.0.3",
+                f"set {OSPF} area 0.0.0.0 interface ethernet-1/1.0 interface-type point-to-point",
+            ),
+            complaint=BACKUP_IN_USE,
+            answer=(
+                "The branch's ethernet-1/1.0, its 10G link to HQ, is in OSPF area 0.0.0.3, and hq-core's end is in area "
+                "0.0.0.0, so they aren't neighbors, and the branch's traffic to and from HQ goes through Ops and the 1G "
+                "link. hq-core's end is as it should be."
+            ),
+            clues=(("area",),),
+        ),
+        Fault(
+            name="mtu",
+            device="ops-core",
+            breaks=("set / interface ethernet-1/1 subinterface 0 ip-mtu 1400",),
+            repairs=("delete / interface ethernet-1/1 subinterface 0 ip-mtu",),
+            complaint=(
+                "Traffic between HQ and Ops is going the long way, through the branch, though the 25G link between them is up."
+            ),
+            answer=(
+                "ops-core's ethernet-1/1.0, its 25G link to HQ, has an IP MTU of 1400, and hq-core's end 1500, so their "
+                "OSPF adjacency sticks in exstart, and traffic between HQ and Ops goes around through the branch. "
+                "hq-core's end is as it should be."
+            ),
+            clues=(("mtu",),),
+        ),
+        Fault(
+            name="passive",
+            device="hq-core",
+            breaks=(f"set {OSPF} area 0.0.0.1 interface ethernet-1/3.0 passive true",),
+            repairs=(f"delete {OSPF} area 0.0.0.1 interface ethernet-1/3.0 passive",),
+            complaint="Nobody can reach HQ's server, hq-srv1, from anywhere, not even from HQ's own users.",
+            answer=(
+                "hq-core's ethernet-1/3.0, its link to hq-dc, is passive in OSPF, so it sends no hellos and the two "
+                "aren't neighbors: HQ's datacenter (area 0.0.0.1) is cut off, and nothing else has a route to "
+                "10.10.100.0/24. hq-dc is as it should be."
+            ),
+            clues=(("passive",),),
+        ),
+        Fault(
+            name="hello",
+            device="hq-dc",
+            breaks=(f"set {OSPF} area 0.0.0.1 interface ethernet-1/1.0 hello-interval 5",),
+            repairs=(f"delete {OSPF} area 0.0.0.1 interface ethernet-1/1.0 hello-interval",),
+            complaint="Nobody can reach HQ's server, hq-srv1, from anywhere, not even from HQ's own users.",
+            answer=(
+                "hq-dc's ethernet-1/1.0, its link to hq-core, sends OSPF hellos every 5 seconds, and hq-core's end every "
+                "10, so they aren't neighbors: HQ's datacenter (area 0.0.0.1) is cut off, and nothing else has a route "
+                "to 10.10.100.0/24. hq-core is as it should be."
+            ),
+            clues=(("hello",),),
+            # Each end drops the other when its dead interval (40 seconds) runs out with no matching hello. Live,
+            # hq-dc had dropped hq-core by 45 seconds and hq-core hq-dc by 74.
+            takes=75.0,
+        ),
+        Fault(
+            name="static",
+            device="ops-core",
+            breaks=(
+                "set / network-instance default next-hop-groups group null admin-state enable",
+                "set / network-instance default next-hop-groups group null blackhole generate-icmp false",
+                "set / network-instance default static-routes route 10.30.10.0/24 admin-state enable",
+                "set / network-instance default static-routes route 10.30.10.0/24 next-hop-group null",
+            ),
+            repairs=(
+                "delete / network-instance default static-routes",
+                "delete / network-instance default next-hop-groups",
+            ),
+            complaint="The branch's user can't reach anything at Ops, though everything at HQ works.",
+            answer=(
+                "ops-core has a static route for 10.30.10.0/24, the branch's LAN, that points at next-hop group null, a "
+                "blackhole. A static route beats OSPF's, so ops-core discards everything for the branch's user, "
+                "including Ops's replies."
+            ),
+            clues=(("static",), ("blackhole", "black hole", "null", "discard", "drop")),
+        ),
+    ]
+}
+
+WAN = Lab(
+    name="wan",
+    inventory=Path("lab/wan/inventory.yml"),
+    hosts=WAN_HOSTS,
+    # Each host from its own router, and the servers and the branch from across the WAN, from the gateway address.
+    probes=(
+        ("hq-core", WAN_HOSTS["hq-user1"], None),
+        ("hq-core", WAN_HOSTS["hq-user2"], None),
+        ("hq-dc", WAN_HOSTS["hq-srv1"], None),
+        ("ops-core", WAN_HOSTS["ops-user1"], None),
+        ("ops-dc", WAN_HOSTS["ops-srv1"], None),
+        ("branch", WAN_HOSTS["br-user1"], None),
+        ("branch", WAN_HOSTS["hq-srv1"], "10.30.10.1"),
+        ("branch", WAN_HOSTS["ops-srv1"], "10.30.10.1"),
+        ("ops-core", WAN_HOSTS["hq-srv1"], "10.20.10.1"),
+        ("hq-dc", WAN_HOSTS["ops-srv1"], "10.10.100.1"),
+        ("ops-dc", WAN_HOSTS["br-user1"], "10.20.100.1"),
+    ),
+    faults=WAN_FAULTS,
+    state=Path("lab/wan/.gremlin.json"),
+    adjacencies={"hq-core": 3, "hq-dc": 1, "branch": 2, "ops-core": 3, "ops-dc": 1},
+    tries=3,
+)
+
+LABS = {lab.name: lab for lab in (FABRIC, WAN)}
+# Every fault, by name, whichever lab it is in. The names don't repeat across labs.
+FAULTS = {name: fault for lab in LABS.values() for name, fault in lab.faults.items()}
+LAB_OF = {name: lab for lab in LABS.values() for name in lab.faults}
+
 
 def cli(inventory: Inventory, name: str, commands: list[str]) -> str:
     """Run commands in one CLI session on a lab device and return their output."""
@@ -186,9 +364,9 @@ def commit(inventory: Inventory, name: str, commands: tuple[str, ...]) -> None:
     cli(inventory, name, ["enter candidate private", *commands, "commit now"])
 
 
-def answers(inventory: Inventory, device: str, destination: str, source: str | None) -> bool:
-    """Whether a ping from a device, optionally from one of its addresses, gets a reply."""
-    command = f"ping {destination} network-instance default -c 1 -W 1" + (f" -I {source}" if source else "")
+def answers(inventory: Inventory, device: str, destination: str, source: str | None, tries: int = 1) -> bool:
+    """Whether a ping from a device, optionally from one of its addresses, gets a reply to any of its tries."""
+    command = f"ping {destination} network-instance default -c {tries} -i 0.2 -W 1" + (f" -I {source}" if source else "")
     try:
         output = cli(inventory, device, [command])
     except GremlinError as error:
@@ -198,20 +376,31 @@ def answers(inventory: Inventory, device: str, destination: str, source: str | N
     return received is not None and received.group(1) != "0"
 
 
-def settle(inventory: Inventory, timeout: float = 60.0) -> list[str]:
+def full_neighbors(inventory: Inventory, device: str) -> int:
+    """How many OSPF neighbors a router has in the full state."""
+    output = cli(inventory, device, ["show network-instance default protocols ospf neighbor"])
+    return len(re.findall(r"\|\s+\S+\s+\S+\s+full\s", output))
+
+
+def settle(inventory: Inventory, lab: Lab, timeout: float = 90.0) -> list[str]:
     """
-    Wait for the lab to be whole: every probe answering. A repaired interface takes
-    a moment to come back. Returns the probes still silent when time runs out.
+    Wait for the lab to be whole: every probe answering, and every OSPF adjacency
+    full. A repaired interface takes a moment to come back, and an adjacency longer.
+    Returns what is still wrong when time runs out.
     """
     deadline = time.monotonic() + timeout
     while True:
-        silent = [
+        wrong = [
             f"{device} to {destination}" + (f" from {source}" if source else "")
-            for device, destination, source in PROBES
-            if not answers(inventory, device, destination, source)
+            for device, destination, source in lab.probes
+            if not answers(inventory, device, destination, source, lab.tries)
         ]
-        if not silent or time.monotonic() > deadline:
-            return silent
+        for device, expected in lab.adjacencies.items():
+            found = full_neighbors(inventory, device)
+            if found != expected:
+                wrong.append(f"{device} has {found} full OSPF neighbors, not {expected}")
+        if not wrong or time.monotonic() > deadline:
+            return wrong
         time.sleep(2)
 
 
@@ -231,42 +420,45 @@ def dry_run(inventory: Inventory, fault: Fault) -> str | None:
     return None
 
 
-def broken() -> tuple[Fault, str] | None:
-    """The fault the gremlin committed, and when, if it hasn't been repaired."""
-    if not STATE.exists():
+def broken(lab: Lab) -> tuple[Fault, str] | None:
+    """The fault the gremlin committed in a lab, and when, if it hasn't been repaired."""
+    if not lab.state.exists():
         return None
-    state = json.loads(STATE.read_text())
+    state = json.loads(lab.state.read_text())
     return FAULTS[state["fault"]], state["broken"]
 
 
-def inflict(inventory: Inventory, fault: Fault) -> None:
+def inflict(inventory: Inventory, lab: Lab, fault: Fault) -> None:
     """Commit a fault and remember it. Only one at a time, on a whole lab, so the symptoms are all its own."""
-    if broken() is not None:
-        raise GremlinError("The gremlin has already broken something. Put it back first: python lab/gremlin.py repair")
-    silent = settle(inventory)
-    if silent:
-        raise GremlinError(f"The lab isn't whole, so a fault's symptoms would be muddled. No answer: {', '.join(silent)}.")
+    if broken(lab) is not None:
+        raise GremlinError(
+            f"The gremlin has already broken something. Put it back first: python lab/gremlin.py --lab {lab.name} repair"
+        )
+    wrong = settle(inventory, lab)
+    if wrong:
+        raise GremlinError(f"The lab isn't whole, so a fault's symptoms would be muddled: {', '.join(wrong)}.")
     commit(inventory, fault.device, fault.breaks)
-    STATE.write_text(json.dumps({"fault": fault.name, "broken": datetime.now().isoformat(timespec="seconds")}) + "\n")
+    lab.state.write_text(json.dumps({"fault": fault.name, "broken": datetime.now().isoformat(timespec="seconds")}) + "\n")
+    time.sleep(fault.takes)  # After the record, so a break interrupted here can still be repaired.
 
 
-def mend(inventory: Inventory, fault: Fault) -> None:
+def mend(inventory: Inventory, lab: Lab, fault: Fault) -> None:
     """Commit a fault's repair, and forget the fault if it is the one the gremlin committed."""
-    found = broken()
+    found = broken(lab)
     commit(inventory, fault.device, fault.repairs)
     if found is not None and found[0] == fault:
-        STATE.unlink()
+        lab.state.unlink()
 
 
-def break_something(inventory: Inventory, name: str | None) -> None:
-    fault = FAULTS[name] if name else random.choice(list(FAULTS.values()))
-    inflict(inventory, fault)
+def break_something(inventory: Inventory, lab: Lab, name: str | None) -> None:
+    fault = lab.faults[name] if name else random.choice(list(lab.faults.values()))
+    inflict(inventory, lab, fault)
     print(f"The gremlin broke something. The complaint:\n\n    {fault.complaint}\n")
     print("Ask NetGPT why. `python lab/gremlin.py reveal` says what it did, and `repair` puts it back.")
 
 
-def reveal() -> None:
-    found = broken()
+def reveal(lab: Lab) -> None:
+    found = broken(lab)
     if found is None:
         print("Nothing is broken, as far as the gremlin knows.")
         return
@@ -276,23 +468,23 @@ def reveal() -> None:
         print(f"    {command}")
 
 
-def repair(inventory: Inventory, name: str | None) -> None:
+def repair(inventory: Inventory, lab: Lab, name: str | None) -> None:
     """Put back the fault the gremlin committed, or a named one (if its record is lost)."""
-    found = broken()
+    found = broken(lab)
     if name is None and found is None:
         print("Nothing is broken, as far as the gremlin knows.")
         return
-    fault = FAULTS[name] if name else found[0]
-    mend(inventory, fault)
-    silent = settle(inventory)
-    print(f"Repaired {fault.name} on {fault.device}.", f"Still no answer: {', '.join(silent)}." if silent else "The lab is whole.")
+    fault = lab.faults[name] if name else found[0]
+    mend(inventory, lab, fault)
+    wrong = settle(inventory, lab)
+    print(f"Repaired {fault.name} on {fault.device}.", f"Still wrong: {', '.join(wrong)}." if wrong else "The lab is whole.")
 
 
-def check(inventory: Inventory) -> bool:
-    if broken() is not None:
+def check(inventory: Inventory, lab: Lab) -> bool:
+    if broken(lab) is not None:
         raise GremlinError("The checks compare against the running configuration. Repair the lab first.")
     passed = True
-    for fault in FAULTS.values():
+    for fault in lab.faults.values():
         problem = dry_run(inventory, fault)
         passed = passed and problem is None
         print(f"{fault.name} ({fault.device}): {problem or 'ok'}")
@@ -302,18 +494,22 @@ def check(inventory: Inventory) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Break one thing in the lab on purpose, and put it back.")
     parser.add_argument("action", choices=["break", "reveal", "repair", "check"], help="What the gremlin should do.")
+    parser.add_argument("--lab", choices=list(LABS), default="fabric", help="The lab (default: %(default)s).")
     parser.add_argument("--fault", choices=list(FAULTS), help="The fault to break or repair (break: at random).")
-    parser.add_argument("--inventory", type=Path, default=Path("lab/inventory.yml"), help="The lab inventory.")
+    parser.add_argument("--inventory", type=Path, help="The lab's inventory (default: the lab's own).")
     args = parser.parse_args()
-    inventory = Inventory.load(args.inventory)
+    lab = LABS[args.lab]
+    if args.fault and args.fault not in lab.faults:
+        sys.exit(f"{args.fault} is a fault in the {LAB_OF[args.fault].name} lab. Pass --lab {LAB_OF[args.fault].name}.")
+    inventory = Inventory.load(args.inventory or lab.inventory)
     try:
         if args.action == "break":
-            break_something(inventory, args.fault)
+            break_something(inventory, lab, args.fault)
         elif args.action == "reveal":
-            reveal()
+            reveal(lab)
         elif args.action == "repair":
-            repair(inventory, args.fault)
-        elif not check(inventory):
+            repair(inventory, lab, args.fault)
+        elif not check(inventory, lab):
             sys.exit(1)
     except GremlinError as error:
         sys.exit(str(error))

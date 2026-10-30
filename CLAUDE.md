@@ -19,6 +19,7 @@ python lab/record_fixtures.py           # re-record the lab's responses as test 
 python lab/record_junos.py --inventory I --rename R   # record Junos devices' replies as renamed fixtures
 python lab/gremlin.py break|reveal|repair|check   # break one thing in the lab on purpose, and put it back
 python lab/game.py --model M --ollama URL         # the gremlin's game: break, ask the model why, keep score
+python lab/game.py --lab wan --model M ...        # the same with OSPF faults, in the WAN lab
 ```
 
 ## Layout
@@ -114,11 +115,13 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - The built-in `read-only` class can't run `show configuration` (it lacks `view-configuration`). A class with `view` and `view-configuration` can; Junos hides secret statements from it, but not comments, and the Mist agent leaves its device secret in one.
 - **The web page reads its assets and inventory at startup.** Restart it after changing `static/` or `lab/inventory.yml`.
 - **The gremlin** (`lab/gremlin.py`) is the one thing here that writes to devices. It is a lab tool outside `src/`, and the model never reaches it.
-  - Each fault is SR Linux CLI: commands that break, commands that repair, the user's complaint, and the cause.
+  - It knows two labs (`gremlin.LABS`): the fabric, with static-route faults, and the WAN, with OSPF faults (a cost, an area, an MTU, a passive interface, a hello interval, and a static route that beats OSPF). Fault names don't repeat across labs, so `gremlin.FAULTS` finds any of them; `--lab` picks the lab.
+  - Each fault is SR Linux CLI: commands that break, commands that repair, the user's complaint, and the cause. `takes` is how long its symptoms take to show: a hello mismatch drops the adjacency only when the dead interval runs out.
   - `check` dry-runs every fault in a private candidate. The break must change something, and the break plus the repair must leave an empty `diff`.
-  - What it broke is kept in `lab/.gremlin.json` (gitignored) until it is repaired.
-  - It breaks only a whole lab: `settle` waits until a set of pings from the leaves all answer. A repaired interface takes a moment to come back, and without the wait the lab shows symptoms of two faults. The pings also refill ARP and MAC tables.
-  - Hosts aren't in the inventory, so NetGPT knows them only by address. The game's question gives the addresses (`gremlin.HOSTS`).
+  - What it broke is kept in the lab's `.gremlin.json` (`lab/`, `lab/wan/`; gitignored) until it is repaired.
+  - It breaks only a whole lab: `settle` waits until a set of pings all answer, and in the WAN, until every router has its full OSPF neighbors, since OSPF routes around a missing adjacency and every ping still answers. A repaired interface takes a moment to come back, and without the wait the lab shows symptoms of two faults. The pings also refill ARP and MAC tables.
+  - Hosts aren't in the inventory, so NetGPT knows them only by address. The game's question gives the addresses (the lab's `hosts`).
+  - The WAN's pings get three tries each: its datapath drops the odd packet.
 - **The game** (`lab/game.py`) runs the model in-process through `Chat`, with no `display` tool, a fresh conversation each round, and the lab always repaired in a `finally`. Rounds go to `lab/.scoreboard.jsonl` (gitignored), marked with the NetGPT commit (plus `+` and a fingerprint of uncommitted changes to `src/`) and the reply limit.
   - **Keywords can't tell blame.** A `loop` answer that names spine1 and says "loop" passed the keyword rubric while blaming leaf1. So a judge model scores each answer, and the rubric is kept beside it.
   - **The judge says what an answer blames before it decides,** through Ollama's `format` schema: the device, any other devices it says need changing (`also_blamed`), and whether it hedges. The code then overrides it: a hedge, or blame that misses the fault's device, is `missed`, and the right device with another beside it is at most `partly`. One field for the blame ran "A and B" (both wrong) together with "A or B" (a hedge).
@@ -160,7 +163,8 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 3 is done: the OSPF view, for `topology` and `display` (layer `ospf`), and on the map. Checked live (no problems on the WAN lab, and the branch-to-Ops path drawn along its adjacencies through HQ) and in headless Firefox with an area mismatch built from the fixtures.
   - Later in the view: sites as groups on the map (an inventory `site`), and adjacency states on a network with several OSPF routers (drawn as a subnet node now, without them).
   - Phase 4: Junos OSPF.
-  - Phase 5: WAN faults for the gremlin: a cost that moves traffic, an area mismatch, an MTU mismatch stuck in ExStart, a passive interface, mismatched hello timers.
+  - Phase 5: WAN faults for the gremlin: a cost that moves traffic, an area mismatch, an MTU mismatch stuck in ExStart, a passive interface, mismatched hello timers, and a static blackhole that beats OSPF. Two pairs share a complaint. Each passes `check`, and each was broken live: every one showed its symptoms within 25 seconds but the hello mismatch (`takes` 75), and the lab was whole again within 45 seconds of each repair. The MTU change brings an adjacency that is already full down on its own.
+  - **The WAN lab's traffic is 1 to 9 Mbit/s a flow.** At the fabric's 5 to 45, hq-core, which forwards every cross-site flow, heard only about 60% of the hellos sent to it, while its neighbors heard about 97% of its own. Its adjacencies flapped whenever four in a row were lost. The other routers heard 89 to 98%, in step with how much each forwards.
 - **Gremlin track** (can a model troubleshoot with these tools?):
   - Phase 1 is done: `lab/gremlin.py`, six faults across all four devices, each checked live.
   - Phase 2 is done: `lab/game.py` breaks a fault, asks the model the complaint, has a judge score the answer against the cause, and keeps a scoreboard per model, NetGPT commit, and reply limit.

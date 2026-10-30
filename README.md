@@ -80,13 +80,14 @@ sudo containerlab deploy -t lab/wan/wan.clab.yml
 netgpt-chat --inventory lab/wan/inventory.yml
 ```
 
-To see whether NetGPT can troubleshoot, let a gremlin loose in the lab. [`lab/gremlin.py`](lab/gremlin.py) breaks one thing at random: a port shut, an address mistyped, a host's switch port pulled from its LAN, a blackhole route, a routing loop, or a missing route back. It prints only the complaint a user would make ("host2 and host3 can't reach host1"). Several faults share a complaint, so the model has to investigate rather than guess. The gremlin writes configuration through the lab's own login; NetGPT stays read-only.
+To see whether NetGPT can troubleshoot, let a gremlin loose in the lab. [`lab/gremlin.py`](lab/gremlin.py) breaks one thing at random: a port shut, an address mistyped, a host's switch port pulled from its LAN, a blackhole route, a routing loop, or a missing route back. It prints only the complaint a user would make ("host2 and host3 can't reach host1"). Several faults share a complaint, so the model has to investigate rather than guess. In the WAN lab, its faults are OSPF's: a cost that sends traffic over the backup link, an area mismatch, an MTU mismatch that leaves an adjacency stuck in exstart, a passive interface, mismatched hello intervals, and a static route that beats OSPF's. The gremlin writes configuration through the lab's own login; NetGPT stays read-only.
 
 ```bash
 python lab/gremlin.py break     # then ask NetGPT about the complaint
 python lab/gremlin.py reveal    # what the gremlin broke
 python lab/gremlin.py repair    # put it back
 python lab/gremlin.py check     # dry-run every fault; nothing is committed
+python lab/gremlin.py --lab wan break   # OSPF faults in the WAN lab
 ```
 
 [`lab/game.py`](lab/game.py) plays the gremlin's game with a model and keeps score. Each round, the gremlin breaks a fault, and the model gets the complaint in a fresh conversation and investigates with NetGPT's tools. The game then puts the lab back and waits for it to answer again. A judge model reads each answer beside what the gremlin broke. It names the devices the answer blames, and whether it hedges between causes, then decides: found, partly, or missed. An answer that blames another device, or hedges, has missed, however much it says along the way. One that blames the right device and an innocent one as well is at most partly right. The judge can be wrong too, so the scoreboard keeps every answer and the judge's reasons, for reading.

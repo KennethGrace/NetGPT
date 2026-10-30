@@ -39,7 +39,10 @@
 #
 # The hosts keep traffic flowing (../traffic.sh): the branch's user sends to both
 # servers, HQ's user to Ops's server, and Ops's user to HQ's server. Each server runs
-# an iperf3 listener per client, on 5201 and 5202.
+# an iperf3 listener per client, on 5201 and 5202. Each flow is 1 to 9 Mbit/s, not the
+# other lab's 5 to 45: hq-core forwards all four, and at those rates its software
+# datapath dropped about 40% of the OSPF hellos sent to it, so its adjacencies
+# flapped whenever four in a row were lost.
 #
 # Use Docker, as for the other lab. It runs beside it, on its own management network.
 #
@@ -94,7 +97,7 @@ topology:
         - ip link set dev eth1 mtu 1500
         - ip addr add 10.10.10.11/24 dev eth1
         - ip route add 10.0.0.0/8 via 10.10.10.1
-        - sh -c "nohup sh /traffic.sh 10.20.100.10 5201 > /dev/null 2>&1 &"
+        - sh -c "nohup sh /traffic.sh 10.20.100.10 5201 1 > /dev/null 2>&1 &"
     hq-user2:
       kind: linux
       mgmt-ipv4: 172.20.21.102
@@ -120,7 +123,7 @@ topology:
         - ip link set dev eth1 mtu 1500
         - ip addr add 10.20.10.11/24 dev eth1
         - ip route add 10.0.0.0/8 via 10.20.10.1
-        - sh -c "nohup sh /traffic.sh 10.10.100.10 5202 > /dev/null 2>&1 &"
+        - sh -c "nohup sh /traffic.sh 10.10.100.10 5202 1 > /dev/null 2>&1 &"
     ops-srv1:
       kind: linux
       mgmt-ipv4: 172.20.21.105
@@ -139,8 +142,8 @@ topology:
         - ip link set dev eth1 mtu 1500
         - ip addr add 10.30.10.11/24 dev eth1
         - ip route add 10.0.0.0/8 via 10.30.10.1
-        - sh -c "nohup sh /traffic.sh 10.10.100.10 5201 > /dev/null 2>&1 &"
-        - sh -c "nohup sh /traffic.sh 10.20.100.10 5202 > /dev/null 2>&1 &"
+        - sh -c "nohup sh /traffic.sh 10.10.100.10 5201 1 > /dev/null 2>&1 &"
+        - sh -c "nohup sh /traffic.sh 10.20.100.10 5202 1 > /dev/null 2>&1 &"
 
   links:
     # The WAN.

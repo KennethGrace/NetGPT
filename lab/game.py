@@ -9,6 +9,7 @@ round and no map to draw on. Run it from the repository root with the lab deploy
 
     python lab/game.py --model gemma4:26b-mlx --ollama http://HOST:11434    # each fault once, in random order
     python lab/game.py --model ... --faults loop blackhole --rounds 3
+    python lab/game.py --lab wan --model ...                                # OSPF faults in the WAN lab
     python lab/game.py --scoreboard                                         # add --answers to read them
     python lab/game.py --rejudge --model ... --ollama ...                   # judge every round again
 
@@ -19,8 +20,9 @@ The judge is the model that played unless --judge names another. A keyword rubri
 rubric can't tell which device an answer blames, and the judge can be wrong, so read
 the answers where the two disagree.
 
-Rounds are appended to lab/.scoreboard.jsonl, each marked with the NetGPT commit it
-was played against, plus a fingerprint of any uncommitted changes to src/.
+Rounds are appended to lab/.scoreboard.jsonl, each marked with its lab and the NetGPT
+commit it was played against, plus a fingerprint of any uncommitted changes to src/.
+The scoreboard has a table for each lab.
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ import httpx
 from mcp import Client
 
 import gremlin
-from gremlin import Fault, GremlinError
+from gremlin import Fault, GremlinError, Lab
 from netgpt.chat import (
     DEFAULT_CONTEXT,
     DEFAULT_MODEL,
@@ -119,9 +121,9 @@ class Watcher(TerminalObserver):
         self.errors += is_error
 
 
-def question(fault: Fault) -> str:
+def question(lab: Lab, fault: Fault) -> str:
     """The complaint as users would bring it, with the hosts' addresses, since NetGPT knows hosts only by address."""
-    hosts = ", ".join(f"{name} is {address}" for name, address in gremlin.HOSTS.items())
+    hosts = ", ".join(f"{name} is {address}" for name, address in lab.hosts.items())
     return f"Users report a problem: {fault.complaint} ({hosts}.) What's wrong?"
 
 
@@ -193,25 +195,26 @@ def netgpt_version() -> str:
     return commit.stdout.strip() + fingerprint
 
 
-async def play_round(chat: Chat, inventory: Inventory, fault: Fault) -> dict[str, Any]:
+async def play_round(chat: Chat, inventory: Inventory, lab: Lab, fault: Fault) -> dict[str, Any]:
     """Break the fault, let the model investigate, and put the lab back. The round is judged afterwards."""
     watcher = Watcher()
-    gremlin.inflict(inventory, fault)
+    gremlin.inflict(inventory, lab, fault)
     started = time.monotonic()
     answer, error = None, None
     try:
         chat.reset()
-        answer = await chat.ask(question(fault), watcher)
+        answer = await chat.ask(question(lab, fault), watcher)
     except ChatError as failure:
         error = str(failure)
     finally:
         seconds = time.monotonic() - started
-        gremlin.mend(inventory, fault)
-    silent = gremlin.settle(inventory)
-    if silent:
-        raise GremlinError(f"The lab didn't come back after repairing {fault.name}. No answer: {', '.join(silent)}.")
+        gremlin.mend(inventory, lab, fault)
+    wrong = gremlin.settle(inventory, lab)
+    if wrong:
+        raise GremlinError(f"The lab didn't come back after repairing {fault.name}: {', '.join(wrong)}.")
     return {
         "when": datetime.now().isoformat(timespec="seconds"),
+        "lab": lab.name,
         "fault": fault.name,
         "rubric": rubric(fault, answer),
         "seconds": round(seconds, 1),
@@ -241,8 +244,12 @@ def show_round(record: dict[str, Any]) -> None:
 
 
 async def play(args: argparse.Namespace) -> None:
-    inventory = Inventory.load(args.inventory)
-    faults = [gremlin.FAULTS[name] for name in args.faults or gremlin.FAULTS] * args.rounds
+    lab = gremlin.LABS[args.lab]
+    strays = [name for name in args.faults or [] if name not in lab.faults]
+    if strays:
+        raise GremlinError(f"Not faults in the {lab.name} lab: {', '.join(strays)}. Its faults are {', '.join(lab.faults)}.")
+    inventory = Inventory.load(args.inventory or lab.inventory)
+    faults = [lab.faults[name] for name in args.faults or lab.faults] * args.rounds
     random.shuffle(faults)
     version = netgpt_version()
     async with (
@@ -254,7 +261,7 @@ async def play(args: argparse.Namespace) -> None:
         await chat.start()
         for number, fault in enumerate(faults, 1):
             print(f"\nRound {number} of {len(faults)}: {fault.complaint}", flush=True)
-            record = await play_round(chat, inventory, fault)
+            record = await play_round(chat, inventory, lab, fault)
             await judge_round(http, args.judge or args.model, record)
             record.update(model=args.model, think=think, max_rounds=args.max_rounds, version=version)
             with SCOREBOARD.open("a") as log:
@@ -294,12 +301,26 @@ def scoreboard(answers: bool) -> None:
     if not records:
         print("No rounds played yet.")
         return
+    for lab in gremlin.LABS.values():
+        # Rounds from before there were two labs were all played in the fabric.
+        played = [record for record in records if record.get("lab", "fabric") == lab.name]
+        if played:
+            print(f"\nThe {lab.name} lab:")
+            table(lab, played)
+    if answers:
+        for record in records:
+            print(f"\n{record['when']} {record['model']} @ {record['version']}")
+            show_round(record)
+
+
+def table(lab: Lab, records: list[dict[str, Any]]) -> None:
+    """One lab's rounds: found/played per fault, for each model, NetGPT version, and limit on replies."""
     groups: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
     for record in records:
         groups.setdefault((record["model"], record["version"], record["max_rounds"]), []).append(record)
-    names = list(gremlin.FAULTS)
+    names = list(lab.faults)
     print(
-        f"{'model':<20} {'netgpt':<14}{'replies':>8}" + "".join(f"{name:>12}" for name in names)
+        f"{'model':<30} {'netgpt':<16}{'replies':>8}" + "".join(f"{name:>12}" for name in names)
         + f"{'found':>8}{'partly':>8}{'no answer':>11}{'last word':>11}{'median s':>10}"
     )
     for (model, version, limit), rounds in groups.items():
@@ -313,18 +334,15 @@ def scoreboard(answers: bool) -> None:
         last_word = sum(bool(record.get("last_word")) for record in rounds)
         median = statistics.median(record["seconds"] for record in rounds)
         print(
-            f"{model:<20} {version:<14}{f'≤{limit}':>8}" + "".join(f"{cell:>12}" for cell in cells)
+            f"{model:<30} {version:<16}{f'≤{limit}':>8}" + "".join(f"{cell:>12}" for cell in cells)
             + f"{f'{found}/{len(rounds)}':>8}{partly:>8}{unanswered:>11}{last_word:>11}{median:>10.0f}"
         )
-    if answers:
-        for record in records:
-            print(f"\n{record['when']} {record['model']} @ {record['version']}")
-            show_round(record)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Play the gremlin's game: break the lab, ask a model why, keep score.")
-    parser.add_argument("--faults", nargs="+", choices=list(gremlin.FAULTS), help="Faults to play (default: all).")
+    parser.add_argument("--lab", choices=list(gremlin.LABS), default="fabric", help="The lab to play in (default: %(default)s).")
+    parser.add_argument("--faults", nargs="+", choices=list(gremlin.FAULTS), help="Faults to play (default: all the lab's).")
     parser.add_argument("--rounds", type=int, default=1, help="Rounds of each fault (default: %(default)s).")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Ollama model (default: {DEFAULT_MODEL}).")
     parser.add_argument("--judge", help="Ollama model that judges the answers (default: --model).")
@@ -335,7 +353,7 @@ def main() -> None:
     )
     parser.add_argument("--max-rounds", type=int, default=10, help="Model replies allowed per question (default: %(default)s).")
     parser.add_argument("--timeout", type=float, default=900.0, help="Seconds to wait for Ollama (default: %(default)s).")
-    parser.add_argument("--inventory", type=Path, default=Path("lab/inventory.yml"), help="The lab inventory.")
+    parser.add_argument("--inventory", type=Path, help="The lab's inventory (default: the lab's own).")
     parser.add_argument("--scoreboard", action="store_true", help="Print the scoreboard instead of playing.")
     parser.add_argument("--answers", action="store_true", help="With --scoreboard, print every answer and its cause.")
     parser.add_argument("--rejudge", action="store_true", help="Judge every round again, instead of playing.")
