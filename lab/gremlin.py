@@ -20,6 +20,12 @@ from the repository root with the lab deployed:
     python lab/gremlin.py --lab wan break   # the same, in the WAN lab
     python lab/gremlin.py --lab wan break --pair             # two faults at once, from the lab's pairs
     python lab/gremlin.py --lab wan break --fault mtu hello  # or two named ones
+    python lab/gremlin.py --lab wan break --anywhere         # a fault wherever it can go, not its usual place
+    python lab/gremlin.py --lab wan break --fault passive@hq-dc:ethernet-1/1.0
+
+Each WAN fault has a usual place, and variants: the same mistake on another
+interface or router, with the complaint its symptoms would bring. A fault always
+in one place can be remembered rather than found.
 
 What it broke is kept in the lab's .gremlin.json until it is repaired.
 """
@@ -64,8 +70,20 @@ class Fault:
     complaint: str
     answer: str
     clues: tuple[tuple[str, ...], ...]
-    # Seconds the break takes to show. A routing protocol notices some faults only when a timer runs out.
+    # Seconds the break takes to show everywhere, the slowest of its variants when it was broken live. A routing
+    # protocol notices some faults only when a timer runs out, and an adjacency one end gives up at once can stay
+    # full at the other until its dead interval (40 seconds) runs out.
     takes: float = 0.0
+    # Where in the lab it is, for a fault with variants: a device and an interface, area, or prefix.
+    where: str = ""
+    # What its symptoms touch, for pairing variants: "wan" changes the paths between sites and leaves everything
+    # reachable; "dc" cuts a datacenter off. Faults with neither don't pair.
+    effect: str = ""
+
+    @property
+    def key(self) -> str:
+        """The name of this variant: the fault's name and where it is, such as passive@hq-dc:ethernet-1/1.0."""
+        return f"{self.name}@{self.where}" if self.where else self.name
 
 
 @dataclass(frozen=True)
@@ -89,8 +107,12 @@ class Lab:
     adjacencies: dict[str, int] = field(default_factory=dict)
     # Pings per probe: a lab whose datapath drops the odd packet gets a few tries.
     tries: int = 1
-    # Faults to break together, on different devices, whose complaints don't contradict each other.
+    # Faults to break together, on different devices, whose complaints don't contradict each other. Broken
+    # anywhere, the first is a variant that changes the paths between sites and the second one that cuts a
+    # datacenter off, which leave each other's symptoms alone.
     pairs: tuple[tuple[str, str], ...] = ()
+    # Every place each fault can go, by name, its usual place first.
+    variants: dict[str, tuple[Fault, ...]] = field(default_factory=dict)
 
 
 FABRIC_HOSTS = {"host1": "192.168.11.2", "host2": "192.168.12.2", "host3": "192.168.12.3"}
@@ -204,6 +226,11 @@ WAN_HOSTS = {
 }
 
 BACKUP_IN_USE = "The 1G link between Ops and the branch, a backup, is carrying traffic, though the branch's 10G link to HQ is up."
+LONG_WAY = "Traffic between HQ and Ops is going the long way, through the branch, though the 25G link between them is up."
+HQ_SERVER_GONE = "Nobody can reach HQ's server, hq-srv1, from anywhere, not even from HQ's own users."
+OPS_SERVER_GONE = "Nobody can reach Ops's server, ops-srv1, from anywhere, not even from Ops's own user."
+HQ_SERVER_FROM_AFAR = "The branch and Ops can't reach HQ's server, hq-srv1, though HQ's own users can."
+OPS_SERVER_FROM_AFAR = "HQ and the branch can't reach Ops's server, ops-srv1, though Ops's own user can."
 
 # Two pairs share a complaint, so the model has to look rather than guess. Each cause says the other end of
 # the link is as it should be, since a mismatch could be fixed at either end: the gremlin changed one, and
@@ -222,6 +249,9 @@ WAN_FAULTS = {
                 "HQ sends its traffic for the branch through Ops and the 1G link. The branch's costs are as they should be."
             ),
             clues=(("cost", "metric"), ("1000", "ethernet-1/20")),
+            takes=5.0,
+            where="hq-core:ethernet-1/20.0",
+            effect="wan",
         ),
         Fault(
             name="area",
@@ -241,41 +271,48 @@ WAN_FAULTS = {
                 "link. hq-core's end is as it should be."
             ),
             clues=(("area",),),
+            takes=50.0,
+            where="branch:ethernet-1/1.0",
+            effect="wan",
         ),
         Fault(
             name="mtu",
             device="ops-core",
             breaks=("set / interface ethernet-1/1 subinterface 0 ip-mtu 1400",),
             repairs=("delete / interface ethernet-1/1 subinterface 0 ip-mtu",),
-            complaint=(
-                "Traffic between HQ and Ops is going the long way, through the branch, though the 25G link between them is up."
-            ),
+            complaint=LONG_WAY,
             answer=(
                 "ops-core's ethernet-1/1.0, its 25G link to HQ, has an IP MTU of 1400, and hq-core's end 1500, so their "
                 "OSPF adjacency sticks in exstart, and traffic between HQ and Ops goes around through the branch. "
                 "hq-core's end is as it should be."
             ),
             clues=(("mtu",),),
+            takes=20.0,
+            where="ops-core:ethernet-1/1.0",
+            effect="wan",
         ),
         Fault(
             name="passive",
             device="hq-core",
             breaks=(f"set {OSPF} area 0.0.0.1 interface ethernet-1/3.0 passive true",),
             repairs=(f"delete {OSPF} area 0.0.0.1 interface ethernet-1/3.0 passive",),
-            complaint="Nobody can reach HQ's server, hq-srv1, from anywhere, not even from HQ's own users.",
+            complaint=HQ_SERVER_GONE,
             answer=(
                 "hq-core's ethernet-1/3.0, its link to hq-dc, is passive in OSPF, so it sends no hellos and the two "
                 "aren't neighbors: HQ's datacenter (area 0.0.0.1) is cut off, and nothing else has a route to "
                 "10.10.100.0/24. hq-dc is as it should be."
             ),
             clues=(("passive",),),
+            takes=50.0,
+            where="hq-core:ethernet-1/3.0",
+            effect="dc",
         ),
         Fault(
             name="hello",
             device="hq-dc",
             breaks=(f"set {OSPF} area 0.0.0.1 interface ethernet-1/1.0 hello-interval 5",),
             repairs=(f"delete {OSPF} area 0.0.0.1 interface ethernet-1/1.0 hello-interval",),
-            complaint="Nobody can reach HQ's server, hq-srv1, from anywhere, not even from HQ's own users.",
+            complaint=HQ_SERVER_GONE,
             answer=(
                 "hq-dc's ethernet-1/1.0, its link to hq-core, sends OSPF hellos every 5 seconds, and hq-core's end every "
                 "10, so they aren't neighbors: HQ's datacenter (area 0.0.0.1) is cut off, and nothing else has a route "
@@ -285,6 +322,8 @@ WAN_FAULTS = {
             # Each end drops the other when its dead interval (40 seconds) runs out with no matching hello. Live,
             # hq-dc had dropped hq-core by 45 seconds and hq-core hq-dc by 74.
             takes=75.0,
+            where="hq-dc:ethernet-1/1.0",
+            effect="dc",
         ),
         Fault(
             name="static",
@@ -306,6 +345,8 @@ WAN_FAULTS = {
                 "including Ops's replies."
             ),
             clues=(("static",), ("blackhole", "black hole", "null", "discard", "drop")),
+            takes=10.0,
+            where="ops-core:10.30.10.0/24",
         ),
         # Harder: every adjacency stays full, and only the routes say anything is wrong.
         Fault(
@@ -313,13 +354,15 @@ WAN_FAULTS = {
             device="hq-core",
             breaks=(f"set {OSPF} area 0.0.0.1 area-range 10.10.0.0/16 advertise false",),
             repairs=(f"delete {OSPF} area 0.0.0.1 area-range 10.10.0.0/16",),
-            complaint="The branch and Ops can't reach HQ's server, hq-srv1, though HQ's own users can.",
+            complaint=HQ_SERVER_FROM_AFAR,
             answer=(
                 "hq-core, the border router for HQ's datacenter area (0.0.0.1), has an area range 10.10.0.0/16 set not to "
                 "advertise, so it keeps the datacenter's networks out of area 0, and the rest of the WAN has no route to "
                 "10.10.100.0/24. Every adjacency is full, and hq-dc is as it should be."
             ),
             clues=(("range", "summar", "advertise"),),
+            takes=15.0,
+            where="hq-core:10.10.0.0/16",
         ),
         # Harder: an adjacency is missing, and the typed tools show no setting that differs; the cause is in the
         # configuration.
@@ -328,7 +371,7 @@ WAN_FAULTS = {
             device="ops-dc",
             breaks=(f"set {OSPF} area 0.0.0.2 stub summaries true",),
             repairs=(f"delete {OSPF} area 0.0.0.2 stub",),
-            complaint="Nobody can reach Ops's server, ops-srv1, from anywhere, not even from Ops's own user.",
+            complaint=OPS_SERVER_GONE,
             answer=(
                 "ops-dc treats area 0.0.0.2 as a stub area and ops-core doesn't, so their hellos disagree (the E bit) and "
                 "they aren't neighbors: Ops's datacenter is cut off, and nothing else has a route to 10.20.100.0/24. "
@@ -336,6 +379,8 @@ WAN_FAULTS = {
             ),
             clues=(("stub",),),
             takes=75.0,
+            where="ops-dc:0.0.0.2",
+            effect="dc",
         ),
         Fault(
             name="auth",
@@ -351,7 +396,7 @@ WAN_FAULTS = {
                 f"delete {OSPF} area 0.0.0.2 interface ethernet-1/3.0 authentication",
                 "delete / system authentication keychain ospf-dc",
             ),
-            complaint="Nobody can reach Ops's server, ops-srv1, from anywhere, not even from Ops's own user.",
+            complaint=OPS_SERVER_GONE,
             answer=(
                 "ops-core's ethernet-1/3.0, its link to ops-dc, uses OSPF authentication (MD5, keychain ospf-dc) and "
                 "ops-dc's end uses none, so they aren't neighbors: Ops's datacenter is cut off, and nothing else has a "
@@ -359,9 +404,312 @@ WAN_FAULTS = {
             ),
             clues=(("authenticat", "md5", "keychain"),),
             takes=75.0,
+            where="ops-core:ethernet-1/3.0",
+            effect="dc",
         ),
     ]
 }
+
+# Variants: each WAN fault anywhere it fits. A fault that kills an adjacency can go on either end of any of the
+# five, and its complaint is whatever losing that adjacency looks like to users.
+
+
+@dataclass(frozen=True)
+class LinkEnd:
+    """One end of an OSPF adjacency: the router, the subinterface OSPF runs on, and what the link leads to."""
+
+    device: str
+    interface: str
+    to: str
+
+
+@dataclass(frozen=True)
+class Adjacency:
+    """One of the WAN's OSPF adjacencies, and what users notice when it is gone."""
+
+    ends: tuple[LinkEnd, LinkEnd]
+    area: str
+    # An area no router has, for the area fault: the backbone's links go to 0.0.0.3, and a datacenter's to the other
+    # datacenter's area, as if its configuration had been copied.
+    wrong_area: str
+    speed: str
+    complaint: str
+    # What follows from losing it, after "so they aren't neighbors: ".
+    consequence: str
+    effect: str
+
+
+FAILOVER = (
+    "In last night's failover test, with its 10G link to HQ shut, the branch lost touch with everything, though its 1G "
+    "backup link to Ops was up. The 10G link is back, and everything works again."
+)
+
+WAN_ADJACENCIES = (
+    Adjacency(
+        ends=(LinkEnd("hq-core", "ethernet-1/1.0", "Ops"), LinkEnd("ops-core", "ethernet-1/1.0", "HQ")),
+        area="0.0.0.0", wrong_area="0.0.0.3", speed="25G", complaint=LONG_WAY,
+        consequence="traffic between HQ and Ops goes around through the branch", effect="wan",
+    ),
+    Adjacency(
+        ends=(LinkEnd("hq-core", "ethernet-1/20.0", "the branch"), LinkEnd("branch", "ethernet-1/1.0", "HQ")),
+        area="0.0.0.0", wrong_area="0.0.0.3", speed="10G", complaint=BACKUP_IN_USE,
+        consequence="the branch's traffic to and from HQ goes through Ops and the 1G link", effect="wan",
+    ),
+    Adjacency(
+        ends=(LinkEnd("ops-core", "ethernet-1/20.0", "the branch"), LinkEnd("branch", "ethernet-1/2.0", "Ops")),
+        area="0.0.0.0", wrong_area="0.0.0.3", speed="1G", complaint=FAILOVER,
+        consequence="the 1G backup link carries nothing, so with its 10G link to HQ down, the branch is cut off",
+        effect="wan",
+    ),
+    Adjacency(
+        ends=(LinkEnd("hq-core", "ethernet-1/3.0", "hq-dc"), LinkEnd("hq-dc", "ethernet-1/1.0", "hq-core")),
+        area="0.0.0.1", wrong_area="0.0.0.2", speed="", complaint=HQ_SERVER_GONE,
+        consequence="HQ's datacenter (area 0.0.0.1) is cut off, and nothing else has a route to 10.10.100.0/24",
+        effect="dc",
+    ),
+    Adjacency(
+        ends=(LinkEnd("ops-core", "ethernet-1/3.0", "ops-dc"), LinkEnd("ops-dc", "ethernet-1/1.0", "ops-core")),
+        area="0.0.0.2", wrong_area="0.0.0.1", speed="", complaint=OPS_SERVER_GONE,
+        consequence="Ops's datacenter (area 0.0.0.2) is cut off, and nothing else has a route to 10.20.100.0/24",
+        effect="dc",
+    ),
+)
+
+KEYCHAIN = (
+    "set / system authentication keychain {chain} admin-state enable",
+    "set / system authentication keychain {chain} type ospf",
+    "set / system authentication keychain {chain} key 1 algorithm md5",
+    'set / system authentication keychain {chain} key 1 authentication-key "lab-key-1"',
+)
+
+
+def adjacency_faults(adjacency: Adjacency, end: LinkEnd, peer: LinkEnd) -> list[Fault]:
+    """The faults that keep two routers from being neighbors, made at one end of their adjacency."""
+    area, interface = adjacency.area, end.interface
+    port, subinterface = interface.rsplit(".", 1)
+    link = f"its {adjacency.speed} link to {end.to}" if adjacency.speed else f"its link to {end.to}"
+    at = f"{end.device}'s {interface}, {link},"
+    lost = adjacency.consequence
+    chain = "ospf-wan" if adjacency.effect == "wan" else "ospf-dc"
+    common = dict(device=end.device, complaint=adjacency.complaint, where=f"{end.device}:{interface}", effect=adjacency.effect)
+    return [
+        Fault(
+            name="passive",
+            breaks=(f"set {OSPF} area {area} interface {interface} passive true",),
+            repairs=(f"delete {OSPF} area {area} interface {interface} passive",),
+            answer=(
+                f"{at} is passive in OSPF, so it sends no hellos and the two aren't neighbors: {lost}. "
+                f"{peer.device} is as it should be."
+            ),
+            clues=(("passive",),),
+            takes=50.0,
+            **common,
+        ),
+        Fault(
+            name="hello",
+            breaks=(f"set {OSPF} area {area} interface {interface} hello-interval 5",),
+            repairs=(f"delete {OSPF} area {area} interface {interface} hello-interval",),
+            answer=(
+                f"{at} sends OSPF hellos every 5 seconds, and {peer.device}'s end every 10, so they aren't neighbors: "
+                f"{lost}. {peer.device} is as it should be."
+            ),
+            clues=(("hello",),),
+            takes=75.0,
+            **common,
+        ),
+        Fault(
+            name="area",
+            breaks=(
+                f"delete {OSPF} area {area} interface {interface}",
+                f"set {OSPF} area {adjacency.wrong_area} interface {interface} interface-type point-to-point",
+            ),
+            repairs=(
+                f"delete {OSPF} area {adjacency.wrong_area}",
+                f"set {OSPF} area {area} interface {interface} interface-type point-to-point",
+            ),
+            answer=(
+                f"{at} is in OSPF area {adjacency.wrong_area}, and {peer.device}'s end is in area {area}, so they aren't "
+                f"neighbors: {lost}. {peer.device}'s end is as it should be."
+            ),
+            clues=(("area",),),
+            takes=50.0,
+            **common,
+        ),
+        Fault(
+            name="mtu",
+            breaks=(f"set / interface {port} subinterface {subinterface} ip-mtu 1400",),
+            repairs=(f"delete / interface {port} subinterface {subinterface} ip-mtu",),
+            answer=(
+                f"{at} has an IP MTU of 1400, and {peer.device}'s end 1500, so their OSPF adjacency sticks in exstart: "
+                f"{lost}. {peer.device}'s end is as it should be."
+            ),
+            clues=(("mtu",),),
+            takes=20.0,
+            **common,
+        ),
+        Fault(
+            name="auth",
+            breaks=(
+                *(command.format(chain=chain) for command in KEYCHAIN),
+                f"set {OSPF} area {area} interface {interface} authentication keychain {chain}",
+            ),
+            repairs=(
+                f"delete {OSPF} area {area} interface {interface} authentication",
+                f"delete / system authentication keychain {chain}",
+            ),
+            answer=(
+                f"{at} uses OSPF authentication (MD5, keychain {chain}) and {peer.device}'s end uses none, so they aren't "
+                f"neighbors: {lost}. {peer.device} is as it should be."
+            ),
+            clues=(("authenticat", "md5", "keychain"),),
+            takes=75.0,
+            **common,
+        ),
+    ]
+
+
+def stub_fault(adjacency: Adjacency, end: LinkEnd, peer: LinkEnd) -> Fault:
+    """A datacenter's area made a stub at one router only."""
+    area = adjacency.area
+    return Fault(
+        name="stub",
+        device=end.device,
+        breaks=(f"set {OSPF} area {area} stub summaries true",),
+        repairs=(f"delete {OSPF} area {area} stub",),
+        complaint=adjacency.complaint,
+        answer=(
+            f"{end.device} treats area {area} as a stub area and {peer.device} doesn't, so their hellos disagree (the E "
+            f"bit) and they aren't neighbors: {adjacency.consequence}. {peer.device}'s area settings are as they should be."
+        ),
+        clues=(("stub",),),
+        takes=75.0,
+        where=f"{end.device}:{area}",
+        effect="dc",
+    )
+
+
+def cost_fault(device: str, interface: str, metric: int, usual: int, link: str, complaint: str, result: str, peer: str) -> Fault:
+    """An OSPF cost that moves traffic: raised on a link it should take, or lowered on the backup."""
+    port = interface.rsplit(".", 1)[0]
+    return Fault(
+        name="cost",
+        device=device,
+        breaks=(f"set {OSPF} area 0.0.0.0 interface {interface} metric {metric}",),
+        repairs=(f"delete {OSPF} area 0.0.0.0 interface {interface} metric",),
+        complaint=complaint,
+        answer=(
+            f"{device}'s OSPF cost on {interface}, {link}, is {metric} where it should be {usual}, so {result}. "
+            f"{peer}'s costs are as they should be."
+        ),
+        clues=(("cost", "metric"), (port,)),
+        takes=5.0,
+        where=f"{device}:{interface}",
+        effect="wan",
+    )
+
+
+def static_fault(device: str, prefix: str, network: str, complaint: str, discards: str) -> Fault:
+    """A static route to a blackhole, for a network OSPF should reach."""
+    return Fault(
+        name="static",
+        device=device,
+        breaks=(
+            "set / network-instance default next-hop-groups group null admin-state enable",
+            "set / network-instance default next-hop-groups group null blackhole generate-icmp false",
+            f"set / network-instance default static-routes route {prefix} admin-state enable",
+            f"set / network-instance default static-routes route {prefix} next-hop-group null",
+        ),
+        repairs=("delete / network-instance default static-routes", "delete / network-instance default next-hop-groups"),
+        complaint=complaint,
+        answer=(
+            f"{device} has a static route for {prefix}, {network}, that points at next-hop group null, a blackhole. A "
+            f"static route beats OSPF's, so {device} discards {discards}."
+        ),
+        clues=(("static",), ("blackhole", "black hole", "null", "discard", "drop")),
+        takes=10.0,
+        where=f"{device}:{prefix}",
+    )
+
+
+def summary_fault(device: str, area: str, prefix: str, complaint: str, kept: str, server: str, peer: str) -> Fault:
+    """A datacenter's networks kept out of the backbone by its border router's area range."""
+    return Fault(
+        name="summary",
+        device=device,
+        breaks=(f"set {OSPF} area {area} area-range {prefix} advertise false",),
+        repairs=(f"delete {OSPF} area {area} area-range {prefix}",),
+        complaint=complaint,
+        answer=(
+            f"{device}, the border router for {kept} area ({area}), has an area range {prefix} set not to advertise, so "
+            f"it keeps {server} out of area 0, and the rest of the WAN has no route to it. Every adjacency is full, and "
+            f"{peer} is as it should be."
+        ),
+        clues=(("range", "summar", "advertise"),),
+        takes=15.0,
+        where=f"{device}:{prefix}",
+    )
+
+
+SERVERS_APART = "The two servers, hq-srv1 and ops-srv1, can't reach each other, though everyone else reaches both."
+
+
+def wan_variants() -> dict[str, tuple[Fault, ...]]:
+    """Every place each WAN fault can go, its usual place (WAN_FAULTS) first."""
+    found: dict[str, list[Fault]] = {}
+    for adjacency in WAN_ADJACENCIES:
+        for end, peer in (adjacency.ends, adjacency.ends[::-1]):
+            for fault in adjacency_faults(adjacency, end, peer):
+                found.setdefault(fault.name, []).append(fault)
+            if adjacency.effect == "dc":
+                found.setdefault("stub", []).append(stub_fault(adjacency, end, peer))
+    found["cost"] = [
+        cost_fault("branch", "ethernet-1/1.0", 1000, 10, "its 10G link to HQ", BACKUP_IN_USE,
+                   "the branch sends its traffic for HQ, and for Ops, over the 1G link", "hq-core"),
+        cost_fault("hq-core", "ethernet-1/1.0", 1000, 4, "its 25G link to Ops",
+                   "Traffic from HQ to Ops is going the long way, through the branch, though the 25G link between them is up.",
+                   "HQ sends its traffic for Ops through the branch", "ops-core"),
+        cost_fault("ops-core", "ethernet-1/1.0", 1000, 4, "its 25G link to HQ",
+                   "Traffic from Ops to HQ is going the long way, through the branch, though the 25G link between them is up.",
+                   "Ops sends its traffic for HQ through the branch", "hq-core"),
+        cost_fault("ops-core", "ethernet-1/20.0", 1, 100, "its 1G link to the branch", BACKUP_IN_USE,
+                   "Ops sends its traffic for the branch over the 1G link instead of through HQ", "branch"),
+        cost_fault("branch", "ethernet-1/2.0", 1, 100, "its 1G link to Ops", BACKUP_IN_USE,
+                   "the branch sends its traffic for Ops, and for HQ, over the 1G link", "ops-core"),
+    ]
+    found["static"] = [
+        static_fault("hq-core", "10.30.10.0/24", "the branch's LAN", "The branch's user can't reach anything at HQ or Ops.",
+                     "everything for the branch's user, including the replies from HQ, and from Ops, which go through HQ"),
+        static_fault("hq-core", "10.20.100.0/24", "Ops's datacenter LAN", OPS_SERVER_FROM_AFAR,
+                     "everything for Ops's server from HQ, and from the branch, whose traffic for Ops goes through HQ"),
+        static_fault("ops-core", "10.10.100.0/24", "HQ's datacenter LAN",
+                     "Nobody at Ops can reach HQ's server, hq-srv1, though HQ's users and the branch can.",
+                     "everything Ops sends HQ's server"),
+        static_fault("branch", "10.10.100.0/24", "HQ's datacenter LAN",
+                     "The branch's user can't reach HQ's server, hq-srv1, though everything else answers.",
+                     "everything the branch's user sends HQ's server"),
+        static_fault("branch", "10.20.100.0/24", "Ops's datacenter LAN",
+                     "The branch's user can't reach Ops's server, ops-srv1, though everything else answers.",
+                     "everything the branch's user sends Ops's server"),
+        static_fault("hq-dc", "10.20.100.0/24", "Ops's datacenter LAN", SERVERS_APART,
+                     "everything HQ's server sends Ops's server, replies included"),
+        static_fault("ops-dc", "10.10.100.0/24", "HQ's datacenter LAN", SERVERS_APART,
+                     "everything Ops's server sends HQ's server, replies included"),
+    ]
+    found["summary"] = [
+        summary_fault("hq-core", "0.0.0.1", "10.10.100.0/24", HQ_SERVER_FROM_AFAR, "HQ's datacenter",
+                      "HQ's server network, 10.10.100.0/24,", "hq-dc"),
+        summary_fault("ops-core", "0.0.0.2", "10.20.0.0/16", OPS_SERVER_FROM_AFAR, "Ops's datacenter",
+                      "the datacenter's networks, 10.20.100.0/24 among them,", "ops-dc"),
+        summary_fault("ops-core", "0.0.0.2", "10.20.100.0/24", OPS_SERVER_FROM_AFAR, "Ops's datacenter",
+                      "Ops's server network, 10.20.100.0/24,", "ops-dc"),
+    ]
+    variants = {}
+    for name, usual in WAN_FAULTS.items():
+        others = [fault for fault in found[name] if fault.key != usual.key]
+        variants[name] = (usual, *others)
+    return variants
+
+
 
 WAN = Lab(
     name="wan",
@@ -386,14 +734,64 @@ WAN = Lab(
     adjacencies={"hq-core": 3, "hq-dc": 1, "branch": 2, "ops-core": 3, "ops-dc": 1},
     tries=3,
     # Each pair touches separate parts of the WAN, so both sets of symptoms show and neither complaint denies
-    # the other (the static route's "everything at HQ works" rules out a pair that breaks HQ's server).
-    pairs=(("mtu", "hello"), ("area", "passive"), ("cost", "auth"), ("static", "stub")),
+    # the other: in its usual places, and anywhere (see Lab.pairs).
+    pairs=(("mtu", "hello"), ("area", "passive"), ("cost", "auth"), ("hello", "stub")),
+    variants=wan_variants(),
 )
 
 LABS = {lab.name: lab for lab in (FABRIC, WAN)}
 # Every fault, by name, whichever lab it is in. The names don't repeat across labs.
 FAULTS = {name: fault for lab in LABS.values() for name, fault in lab.faults.items()}
 LAB_OF = {name: lab for lab in LABS.values() for name in lab.faults}
+# Every variant, by key (passive@hq-dc:ethernet-1/1.0), the usual places included.
+VARIANTS = {fault.key: fault for lab in LABS.values() for faults in lab.variants.values() for fault in faults}
+
+
+def fault_named(name: str) -> Fault:
+    """A fault by name, in its usual place, or a variant by key."""
+    if name in VARIANTS:
+        return VARIANTS[name]
+    if name in FAULTS:
+        return FAULTS[name]
+    raise GremlinError(f"No fault is called {name}. The faults are {', '.join(FAULTS)}, and a variant is fault@place.")
+
+
+def label(fault: Fault) -> str:
+    return fault.key if fault.where else f"{fault.name} on {fault.device}"
+
+
+def anywhere_pair(lab: Lab, names: list[str]) -> list[Fault]:
+    """
+    Two faults in random places that leave each other's symptoms alone: the first
+    where it changes the paths between sites, and the second where it cuts a
+    datacenter off, on another device.
+    """
+    if len(names) != 2:
+        raise GremlinError(f"Anywhere, the gremlin breaks one fault or a pair, not {len(names)}.")
+    first, second = (lab.variants.get(name, ()) for name in names)
+    choices = [
+        [one, other]
+        for one in first if one.effect == "wan"
+        for other in second if other.effect == "dc" and other.device != one.device
+    ]
+    if not choices:
+        raise GremlinError(
+            f"{names[0]} can't go anywhere it changes the paths between sites with {names[1]} somewhere it cuts a "
+            f"datacenter off, on another device."
+        )
+    return random.choice(choices)
+
+
+def place(lab: Lab, names: list[str], anywhere: bool) -> list[Fault]:
+    """
+    The faults to break: each named one in its usual place, or anywhere, one of its
+    variants at random (a pair's, chosen together). A variant's key is that variant.
+    """
+    if not anywhere or any("@" in name for name in names):
+        return [fault_named(name) for name in names]
+    if len(names) == 1:
+        return [random.choice(lab.variants.get(names[0]) or (lab.faults[names[0]],))]
+    return anywhere_pair(lab, names)
 
 
 def cli(inventory: Inventory, name: str, commands: list[str]) -> str:
@@ -402,21 +800,27 @@ def cli(inventory: Inventory, name: str, commands: list[str]) -> str:
     credentials = inventory.credentials_for(device)
     verify: str | bool = str(device.tls_ca) if device.tls_ca else True
     payload = {"jsonrpc": "2.0", "id": 1, "method": "cli", "params": {"commands": commands, "output-format": "text"}}
-    try:
-        with httpx.Client(
-            base_url=f"https://{device.host}",
-            auth=(credentials.username, credentials.password()),
-            verify=verify,
-            timeout=60.0,
-        ) as client:
-            response = client.post("/jsonrpc", json=payload)
-            response.raise_for_status()
-    except httpx.HTTPError as error:
-        raise GremlinError(f"{name}: {type(error).__name__}: {error}") from error
-    body = response.json()
-    if "error" in body:
-        raise GremlinError(f"{name}: {body['error'].get('message', body['error'])}")
-    return "".join(str(item) for item in body["result"])
+    for attempt in range(2):
+        try:
+            with httpx.Client(
+                base_url=f"https://{device.host}",
+                auth=(credentials.username, credentials.password()),
+                verify=verify,
+                timeout=60.0,
+            ) as client:
+                response = client.post("/jsonrpc", json=payload)
+                response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise GremlinError(f"{name}: {type(error).__name__}: {error}") from error
+        body = response.json()
+        if "error" not in body:
+            return "".join(str(item) for item in body["result"])
+        message = str(body["error"].get("message", body["error"]))
+        # Now and then SR Linux refuses a request with "Invalid session id" before running any of it, so a
+        # second try is safe. One ended a run of the gremlin's checks after 59 faults.
+        if "Invalid session id" not in message or attempt:
+            raise GremlinError(f"{name}: {message}")
+    raise AssertionError("unreachable")
 
 
 def commit(inventory: Inventory, name: str, commands: tuple[str, ...]) -> None:
@@ -492,7 +896,7 @@ def broken(lab: Lab) -> tuple[list[Fault], str] | None:
     if not lab.state.exists():
         return None
     state = json.loads(lab.state.read_text())
-    return [FAULTS[name] for name in state.get("faults") or [state["fault"]]], state["broken"]
+    return [fault_named(name) for name in state.get("faults") or [state["fault"]]], state["broken"]
 
 
 def inflict(inventory: Inventory, lab: Lab, faults: list[Fault]) -> None:
@@ -509,8 +913,8 @@ def inflict(inventory: Inventory, lab: Lab, faults: list[Fault]) -> None:
         raise GremlinError(f"The lab isn't whole, so a fault's symptoms would be muddled: {', '.join(wrong)}.")
     for fault in faults:
         commit(inventory, fault.device, fault.breaks)
-    names = [fault.name for fault in faults]
-    lab.state.write_text(json.dumps({"faults": names, "broken": datetime.now().isoformat(timespec="seconds")}) + "\n")
+    keys = [fault.key for fault in faults]
+    lab.state.write_text(json.dumps({"faults": keys, "broken": datetime.now().isoformat(timespec="seconds")}) + "\n")
     time.sleep(max(fault.takes for fault in faults))  # After the record, so a break interrupted here can still be repaired.
 
 
@@ -523,13 +927,10 @@ def mend(inventory: Inventory, lab: Lab, faults: list[Fault]) -> None:
         lab.state.unlink()
 
 
-def break_something(inventory: Inventory, lab: Lab, names: list[str] | None, pair: bool) -> None:
-    if names:
-        faults = [lab.faults[name] for name in names]
-    elif pair:
-        faults = [lab.faults[name] for name in random.choice(lab.pairs)]
-    else:
-        faults = [random.choice(list(lab.faults.values()))]
+def break_something(inventory: Inventory, lab: Lab, names: list[str] | None, pair: bool, anywhere: bool) -> None:
+    if not names:
+        names = list(random.choice(lab.pairs)) if pair else [random.choice(list(lab.faults))]
+    faults = place(lab, names, anywhere)
     inflict(inventory, lab, faults)
     print(f"The gremlin broke something. The complaint:\n\n    {complaint(faults)}\n")
     print(f"Ask NetGPT why. `python lab/gremlin.py --lab {lab.name} reveal` says what it did, and `repair` puts it back.")
@@ -542,7 +943,7 @@ def reveal(lab: Lab) -> None:
         return
     faults, when = found
     for fault in faults:
-        print(f"{fault.name}, on {fault.device}, since {when}:\n\n    {fault.answer}\n\nThe gremlin ran:")
+        print(f"{label(fault)}, since {when}:\n\n    {fault.answer}\n\nThe gremlin ran:")
         for command in fault.breaks:
             print(f"    {command}")
         print()
@@ -554,10 +955,10 @@ def repair(inventory: Inventory, lab: Lab, names: list[str] | None) -> None:
     if not names and found is None:
         print("Nothing is broken, as far as the gremlin knows.")
         return
-    faults = [lab.faults[name] for name in names] if names else found[0]
+    faults = [fault_named(name) for name in names] if names else found[0]
     mend(inventory, lab, faults)
     wrong = settle(inventory, lab)
-    repaired = ", ".join(f"{fault.name} on {fault.device}" for fault in faults)
+    repaired = ", ".join(label(fault) for fault in faults)
     print(f"Repaired {repaired}.", f"Still wrong: {', '.join(wrong)}." if wrong else "The lab is whole.")
 
 
@@ -565,15 +966,22 @@ def check(inventory: Inventory, lab: Lab) -> bool:
     if broken(lab) is not None:
         raise GremlinError("The checks compare against the running configuration. Repair the lab first.")
     passed = True
-    for fault in lab.faults.values():
+    faults = [fault for variants in lab.variants.values() for fault in variants] or list(lab.faults.values())
+    for fault in faults:
         problem = dry_run(inventory, fault)
         passed = passed and problem is None
-        print(f"{fault.name} ({fault.device}): {problem or 'ok'}")
+        print(f"{label(fault)}: {problem or 'ok'}")
     for pair in lab.pairs:
         devices = {lab.faults[name].device for name in pair}
         if len(devices) < len(pair):
             passed = False
             print(f"{' + '.join(pair)}: both on {devices.pop()}; a pair's faults belong on different devices")
+        if lab.variants:
+            try:
+                anywhere_pair(lab, list(pair))
+            except GremlinError as error:
+                passed = False
+                print(f"{' + '.join(pair)}: {error}")
     return passed
 
 
@@ -581,18 +989,31 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Break one thing in the lab on purpose, and put it back.")
     parser.add_argument("action", choices=["break", "reveal", "repair", "check"], help="What the gremlin should do.")
     parser.add_argument("--lab", choices=list(LABS), default="fabric", help="The lab (default: %(default)s).")
-    parser.add_argument("--fault", nargs="+", choices=list(FAULTS), help="The faults to break or repair (break: one at random).")
+    parser.add_argument(
+        "--fault", nargs="+", help="The faults to break or repair, by name or variant (fault@place). Break: one at random."
+    )
     parser.add_argument("--pair", action="store_true", help="Break two faults at once, a pair of the lab's at random.")
+    parser.add_argument(
+        "--anywhere", action="store_true", help="Break each fault in one of its places at random, not its usual one."
+    )
     parser.add_argument("--inventory", type=Path, help="The lab's inventory (default: the lab's own).")
     args = parser.parse_args()
     lab = LABS[args.lab]
     for name in args.fault or []:
-        if name not in lab.faults:
-            sys.exit(f"{name} is a fault in the {LAB_OF[name].name} lab. Pass --lab {LAB_OF[name].name}.")
+        fault = name.split("@", 1)[0]
+        if fault not in FAULTS:
+            sys.exit(f"No fault is called {fault}. The {lab.name} lab's are {', '.join(lab.faults)}.")
+        if fault not in lab.faults:
+            sys.exit(f"{fault} is a fault in the {LAB_OF[fault].name} lab. Pass --lab {LAB_OF[fault].name}.")
+        if "@" in name and name not in VARIANTS:
+            places = ", ".join(variant.key for variant in lab.variants.get(fault, ()))
+            sys.exit(f"{fault} doesn't go at {name.split('@', 1)[1]}. It goes at {places or 'its usual place only'}.")
+    if args.anywhere and not lab.variants:
+        sys.exit(f"The {lab.name} lab's faults each have one place.")
     inventory = Inventory.load(args.inventory or lab.inventory)
     try:
         if args.action == "break":
-            break_something(inventory, lab, args.fault, args.pair)
+            break_something(inventory, lab, args.fault, args.pair, args.anywhere)
         elif args.action == "reveal":
             reveal(lab)
         elif args.action == "repair":

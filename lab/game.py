@@ -11,6 +11,7 @@ round and no map to draw on. Run it from the repository root with the lab deploy
     python lab/game.py --model ... --faults loop blackhole --rounds 3
     python lab/game.py --lab wan --model ...                                # OSPF faults in the WAN lab
     python lab/game.py --lab wan --pairs --model ...                        # two faults at once
+    python lab/game.py --lab wan --anywhere --model ...                     # each fault in a random one of its places
     python lab/game.py --scoreboard                                         # add --answers to read them
     python lab/game.py --rejudge --model ... --ollama ...                   # judge every round again
 
@@ -23,7 +24,8 @@ the answers where the two disagree.
 
 Rounds are appended to lab/.scoreboard.jsonl, each marked with its lab and the NetGPT
 commit it was played against, plus a fingerprint of any uncommitted changes to src/.
-The scoreboard has a table for each lab. Each answered round's whole conversation (the
+The scoreboard has a table for each lab, and keeps rounds played with faults in their
+usual places apart from rounds played --anywhere. Each answered round's whole conversation (the
 instructions, the tools as offered, the model's thinking and calls, and every tool
 result) goes to lab/.transcripts/, named in the round's "transcript".
 """
@@ -138,7 +140,7 @@ JUDGEMENT = {
 }
 
 # Every device a fault can be on: the names looked for in what the judge says is blamed.
-DEVICES = {fault.device for fault in gremlin.FAULTS.values()}
+DEVICES = {fault.device for fault in [*gremlin.FAULTS.values(), *gremlin.VARIANTS.values()]}
 
 
 class Watcher(TerminalObserver):
@@ -246,8 +248,11 @@ async def judge_round(http: httpx.AsyncClient, model: str, record: dict[str, Any
 
 
 def faults_of(record: dict[str, Any]) -> list[Fault]:
-    """The faults a round broke: one, or a pair. Rounds from before pairs name one."""
-    return [gremlin.FAULTS[name] for name in record.get("faults") or [record["fault"]]]
+    """
+    The faults a round broke: one, or a pair, where they were. Rounds from before
+    variants were in their usual places, and rounds from before pairs name one.
+    """
+    return [gremlin.fault_named(name) for name in record.get("variants") or record.get("faults") or [record["fault"]]]
 
 
 def netgpt_version() -> str:
@@ -277,7 +282,7 @@ def keep_transcript(chat: Chat, when: datetime, lab: Lab, names: list[str]) -> s
     return name
 
 
-async def play_round(chat: Chat, inventory: Inventory, lab: Lab, faults: list[Fault]) -> dict[str, Any]:
+async def play_round(chat: Chat, inventory: Inventory, lab: Lab, faults: list[Fault], anywhere: bool) -> dict[str, Any]:
     """Break the faults, let the model investigate, and put the lab back. The round is judged afterwards."""
     watcher = Watcher()
     names = [fault.name for fault in faults]
@@ -304,6 +309,9 @@ async def play_round(chat: Chat, inventory: Inventory, lab: Lab, faults: list[Fa
         # A pair goes on the scoreboard as one column, cost+auth.
         "fault": "+".join(names),
         "faults": names,
+        # Where each was, and whether it could have been anywhere or was in its usual place.
+        "variants": [fault.key for fault in faults],
+        "anywhere": anywhere,
         "rubric": rubric(faults, answer),
         "seconds": round(seconds, 1),
         "replies": sum(message["role"] == "assistant" for message in chat.messages) if answer is not None else None,
@@ -322,8 +330,9 @@ def show_round(record: dict[str, Any]) -> None:
     faults = faults_of(record)
     disagreement = f"; the rubric said {record['rubric']}" if record.get("rubric", record["verdict"]) != record["verdict"] else ""
     last_word = ", answered when out of tool calls" if record.get("last_word") else ""
+    where = " + ".join(record["variants"]) if record.get("anywhere") else record["fault"]
     print(
-        f"{record['fault']}: {record['verdict'].upper()} in {record['seconds']:.0f} s, "
+        f"{where}: {record['verdict'].upper()} in {record['seconds']:.0f} s, "
         f"{len(record['tool_calls'])} tool calls ({record['tool_errors']} errors){last_word}{disagreement}"
     )
     print(f"  answer: {' '.join((record['answer'] or record['error']).split())}")
@@ -339,10 +348,12 @@ async def play(args: argparse.Namespace) -> None:
     if strays:
         raise GremlinError(f"Not faults in the {lab.name} lab: {', '.join(strays)}. Its faults are {', '.join(lab.faults)}.")
     inventory = Inventory.load(args.inventory or lab.inventory)
+    if args.anywhere and not lab.variants:
+        raise GremlinError(f"The {lab.name} lab's faults each have one place.")
     if args.pairs:
-        breaks = [[lab.faults[name] for name in pair] for pair in lab.pairs] * args.rounds
+        breaks = [list(pair) for pair in lab.pairs] * args.rounds
     else:
-        breaks = [[lab.faults[name]] for name in args.faults or lab.faults] * args.rounds
+        breaks = [[name] for name in args.faults or lab.faults] * args.rounds
     random.shuffle(breaks)
     version = netgpt_version()
     async with (
@@ -352,9 +363,10 @@ async def play(args: argparse.Namespace) -> None:
         think = args.think if args.think is not None else await supports_thinking(http, args.model)
         chat = Chat(client, http, args.model, {"num_ctx": args.context}, think=think, max_rounds=args.max_rounds)
         await chat.start()
-        for number, faults in enumerate(breaks, 1):
+        for number, names in enumerate(breaks, 1):
+            faults = gremlin.place(lab, names, args.anywhere)
             print(f"\nRound {number} of {len(breaks)}: {gremlin.complaint(faults)}", flush=True)
-            record = await play_round(chat, inventory, lab, faults)
+            record = await play_round(chat, inventory, lab, faults, args.anywhere)
             await judge_round(http, args.judge or args.model, record)
             record.update(model=args.model, think=think, max_rounds=args.max_rounds, version=version)
             with SCOREBOARD.open("a") as log:
@@ -408,15 +420,20 @@ def scoreboard(answers: bool) -> None:
 
 def table(lab: Lab, records: list[dict[str, Any]]) -> None:
     """One lab's rounds: found/played per fault, for each model, NetGPT version, and limit on replies."""
-    groups: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
+    groups: dict[tuple[str, str, int, bool], list[dict[str, Any]]] = {}
     for record in records:
-        groups.setdefault((record["model"], record["version"], record["max_rounds"]), []).append(record)
-    names = list(lab.faults) + ["+".join(pair) for pair in lab.pairs if any(r["fault"] == "+".join(pair) for r in records)]
+        key = (record["model"], record["version"], record["max_rounds"], bool(record.get("anywhere")))
+        groups.setdefault(key, []).append(record)
+    # Pairs the lab plays now, and any it played before.
+    pairs = dict.fromkeys(["+".join(pair) for pair in lab.pairs] + [r["fault"] for r in records if "+" in r["fault"]])
+    names = list(lab.faults) + [pair for pair in pairs if any(record["fault"] == pair for record in records)]
+    widths = [max(12, len(name) + 2) for name in names]
     print(
-        f"{'model':<30} {'netgpt':<16}{'replies':>8}" + "".join(f"{name:>12}" for name in names)
+        f"{'model':<30} {'netgpt':<16}{'replies':>8}{'places':>10}"
+        + "".join(f"{name:>{width}}" for name, width in zip(names, widths))
         + f"{'found':>8}{'partly':>8}{'no answer':>11}{'last word':>11}{'median s':>10}"
     )
-    for (model, version, limit), rounds in groups.items():
+    for (model, version, limit, anywhere), rounds in groups.items():
         cells = []
         for name in names:
             played = [record for record in rounds if record["fault"] == name]
@@ -427,7 +444,8 @@ def table(lab: Lab, records: list[dict[str, Any]]) -> None:
         last_word = sum(bool(record.get("last_word")) for record in rounds)
         median = statistics.median(record["seconds"] for record in rounds)
         print(
-            f"{model:<30} {version:<16}{f'≤{limit}':>8}" + "".join(f"{cell:>12}" for cell in cells)
+            f"{model:<30} {version:<16}{f'≤{limit}':>8}{'anywhere' if anywhere else 'usual':>10}"
+            + "".join(f"{cell:>{width}}" for cell, width in zip(cells, widths))
             + f"{f'{found}/{len(rounds)}':>8}{partly:>8}{unanswered:>11}{last_word:>11}{median:>10.0f}"
         )
 
@@ -437,6 +455,9 @@ def main() -> None:
     parser.add_argument("--lab", choices=list(gremlin.LABS), default="fabric", help="The lab to play in (default: %(default)s).")
     parser.add_argument("--faults", nargs="+", choices=list(gremlin.FAULTS), help="Faults to play (default: all the lab's).")
     parser.add_argument("--pairs", action="store_true", help="Play the lab's pairs of faults, two broken at once.")
+    parser.add_argument(
+        "--anywhere", action="store_true", help="Break each fault in one of its places at random, not its usual one (WAN)."
+    )
     parser.add_argument("--rounds", type=int, default=1, help="Rounds of each fault (default: %(default)s).")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Ollama model (default: {DEFAULT_MODEL}).")
     parser.add_argument("--judge", help="Ollama model that judges the answers (default: --model).")
