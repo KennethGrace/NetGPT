@@ -29,11 +29,14 @@ from pydantic import BaseModel, Field
 from netgpt.inventory import Inventory, InventoryError
 from netgpt.platforms import PLATFORMS, Platform, PlatformError, connect
 from netgpt.primitives import DeviceError, InterfaceTraffic
-from netgpt.store import MemoryStore, Sample, Store
+from netgpt.store import MemoryStore, Sample, Store, StoreError
 
 logger = logging.getLogger("netgpt")
 
 DEFAULT_INTERVAL = 30.0
+# How far back statistics look, in seconds, however long the store keeps samples: a chart of a longer window
+# would be thousands of points a line until there are rollups to read instead.
+REACH = 3600.0
 # The second poll comes this soon after the first, so there are rates within seconds of starting.
 FIRST_INTERVAL = 5.0
 
@@ -237,8 +240,13 @@ class Poller:
                 logger.info("Polling %s failed: %s", name, error)
                 self._errors[name] = str(error)
                 return
+            try:
+                await self.store.add(self._clock(), readings)
+            except StoreError as error:
+                logger.warning("Keeping %s's counters failed: %s", name, error)
+                self._errors[name] = f"{name} answered, but its counters couldn't be kept: {error}"
+                return
             self._errors.pop(name, None)
-            await self.store.add(self._clock(), readings)
 
         await asyncio.gather(*(one(device.name) for device in self._inventory.devices))
 
@@ -256,7 +264,12 @@ class Poller:
 
     @contextlib.asynccontextmanager
     async def running(self) -> AsyncIterator[Poller]:
-        """Poll in the background while the block runs. Nested blocks share one poller."""
+        """
+        Poll in the background while the block runs, with the store open. Nested blocks
+        share one poller. Raises StoreError if the store can't be opened.
+        """
+        if self._users == 0:
+            await self.store.open()
         self._users += 1
         if self._task is None:
             self._task = asyncio.create_task(self.run())
@@ -269,11 +282,12 @@ class Poller:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._task
                 self._task = None
+                await self.store.close()
 
     @property
     def window(self) -> float:
-        """How far back, in seconds, the store keeps samples: no statistic reaches further."""
-        return self.store.window
+        """How far back, in seconds, statistics reach: no further than REACH, or than the store keeps samples."""
+        return min(self.store.window, REACH)
 
     async def traffic(self, devices: list[str] | None, minutes: float) -> tuple[list[InterfaceTraffic], list[DeviceError]]:
         """Each port's traffic over the last minutes, on the named devices or all of them, and why any device has none."""

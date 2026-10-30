@@ -7,13 +7,14 @@ between polls, so the rates are known exactly.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 import pytest
 
 from netgpt.inventory import Inventory
 from netgpt.primitives import InterfaceCounters
 from netgpt.statistics import ChartError, Poller, rate, speed_name, summarize
-from netgpt.store import MemoryStore, Sample
+from netgpt.store import MemoryStore, Sample, StoreError
 
 from fakes import FakePlatform
 
@@ -81,6 +82,27 @@ async def test_a_device_that_fails_or_cannot_be_polled_says_why_and_the_rest_sti
     assert [item.device for item in items] == ["leaf1", "leaf2"]
     reasons = {error.device: error.error for error in errors}
     assert "connection refused" in reasons["broken"] and "supported platforms: fake" in reasons["mystery"]
+
+
+class FullStore(MemoryStore):
+    """A store that can't keep anything."""
+
+    async def add(self, at: float, readings: Sequence[InterfaceCounters]) -> None:
+        raise StoreError("could not extend file: No space left on device")
+
+
+@pytest.mark.anyio
+async def test_counters_the_store_cannot_keep_are_reported_for_each_device_and_polling_goes_on(
+    inventory: Inventory, counter_reads: dict[str, int]
+) -> None:
+    polls = Poller(inventory, platforms={"fake": FakePlatform}, interval=30, store=FullStore(), clock=Clock())
+    await polls.poll()
+    await polls.poll()
+    assert counter_reads["leaf1"] == 2
+    _, errors = await polls.traffic(["leaf1"], minutes=15)
+    assert [error.error for error in errors] == [
+        "leaf1 answered, but its counters couldn't be kept: could not extend file: No space left on device"
+    ]
 
 
 def test_a_counter_that_goes_backwards_was_reset_and_that_interval_is_not_measured() -> None:

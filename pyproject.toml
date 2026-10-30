@@ -24,6 +24,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# The TimescaleDB (PostgreSQL) store for statistics: --store postgresql://...
+store = ["psycopg[binary,pool]>=3.2"]
 
 [project.scripts]
 netgpt-mcp = "netgpt.server:main"

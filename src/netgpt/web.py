@@ -38,6 +38,7 @@ from starlette.routing import Route
 
 from netgpt.chat import Chat, ChatError, ChatObserver
 from netgpt.statistics import MAX_CHART_PORTS, ChartError, Metric, Poller
+from netgpt.store import StoreError
 
 COOKIE = "netgpt_token"
 DISPLAY_TOOL = "display"
@@ -225,12 +226,17 @@ def build_app(chat: Chat, token: str, statistics: Poller | None = None) -> Starl
             # ChartError is a ValueError, and names the ports that are polled.
             message = str(error) if isinstance(error, ChartError) else "Send JSON with a title, ports, metric, and minutes."
             return JSONResponse({"error": message}, status_code=400, headers=SECURITY_HEADERS)
+        except StoreError as error:
+            return JSONResponse({"error": str(error)}, status_code=503, headers=SECURITY_HEADERS)
         return JSONResponse(drawn.model_dump(mode="json"), headers=SECURITY_HEADERS)
 
     async def traffic(request: Request) -> Response:
         if statistics is None:
             return JSONResponse({"error": "NetGPT isn't polling."}, status_code=404, headers=SECURITY_HEADERS)
-        items, _ = await statistics.traffic(None, MAP_MINUTES)
+        try:
+            items, _ = await statistics.traffic(None, MAP_MINUTES)
+        except StoreError as error:
+            return JSONResponse({"error": str(error)}, status_code=503, headers=SECURITY_HEADERS)
         ports = [item.model_dump(mode="json") for item in items]
         return JSONResponse({"interval": statistics.interval, "minutes": MAP_MINUTES, "ports": ports}, headers=SECURITY_HEADERS)
 

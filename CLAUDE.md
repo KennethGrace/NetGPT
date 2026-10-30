@@ -21,12 +21,15 @@ for the assistant to use, so it gives better answers?
 ## Commands
 
 ```bash
-pip install -e '.[dev]'                 # Python 3.12+, in the pyenv virtualenv "netgpt"
+pip install -e '.[dev,store]'           # Python 3.12+, in the pyenv virtualenv "netgpt"; store is psycopg
 pytest                                  # the whole suite; quick, needs no devices
+NETGPT_TEST_STORE=postgresql://netgpt@127.0.0.1:5432/netgpt_test pytest   # and the TimescaleDB store
+podman compose -f dev/compose.yml up -d # TimescaleDB on 127.0.0.1:5432 (start podman.socket first: see the file)
 netgpt-mcp --inventory lab/inventory.yml
 netgpt-chat --inventory lab/inventory.yml --model gemma4:e4b --ollama http://127.0.0.1:11434
 netgpt-chat ... --web 127.0.0.1:8080    # sign-in token from $NETGPT_WEB_TOKEN, or printed
 netgpt-chat ... --poll-interval 10      # interface counters every 10 s (default 30; 0 turns polling off)
+netgpt-chat ... --store postgresql://netgpt@127.0.0.1:5432/netgpt   # keep them in TimescaleDB, across restarts
 python lab/record_fixtures.py           # re-record the lab's responses as test fixtures
 python lab/record_junos.py --inventory I --rename R   # record Junos devices' replies as renamed fixtures
 python lab/gremlin.py break|reveal|repair|check   # break one thing in the lab on purpose, and put it back
@@ -44,7 +47,8 @@ python lab/game.py --lab wan --anywhere ...       # each fault at a random one o
 - `src/netgpt/topology.py`: merges the tables into one graph: `build_topology` (layer 2), `build_l3` (layer 3).
 - `src/netgpt/forwarding.py`: walks routing tables hop by hop (`trace_path`). It sends nothing.
 - `src/netgpt/statistics.py`: the `Poller`, which reads every device's interface counters on an interval, and the rates worked out from them.
-- `src/netgpt/store.py`: where the poller's samples are kept. `Store` is the interface (async, so a database can stand behind it), and `MemoryStore` keeps the last hour in the process.
+- `src/netgpt/store.py`: where the poller's samples are kept. `Store` is the interface (async, so a database can stand behind it). `MemoryStore` keeps the last hour in the process; `TimescaleStore` keeps a week in TimescaleDB, across restarts.
+- `dev/compose.yml`: TimescaleDB for development, under rootless podman.
 - `src/netgpt/views.py`: turns the model's choices into a `View` of the graph. `describe` is the text the model reads back.
 - `src/netgpt/server.py`: the MCP tools. `display` exists only when `build_server(display=True)`.
 - `src/netgpt/chat.py`, `web.py`: the Ollama tool loop, and the web page's server.
@@ -57,7 +61,7 @@ python lab/game.py --lab wan --anywhere ...       # each fault at a random one o
 
 - **Read-only.** Every tool is annotated read-only and nothing writes to a device. `show` passes the guard first. Where a command is built for the device (ping), it is built from validated parts, never from model text.
 - **Inventory only.** Tools reach only inventory devices, and sweeps only the inventory's `sweep_networks`.
-- **Credentials never reach the model.** They are not in tool arguments, results, errors, or logs.
+- **Credentials never reach the model.** They are not in tool arguments, results, errors, or logs. The store's password is in `~/.pgpass`, where libpq finds it, and a `--store` URL with a password in it is refused.
 - **Devices supply facts; the model supplies choices.** The model picks what to focus on, highlight, and note. Every name it uses is checked against the graph, and a refusal lists the names that exist.
 - **Evidence for everything.** Every node and link carries the lines of device output it came from.
 - **One device's failure is not the answer's.** Multi-device tools return a `Collection` with per-device errors. A query a platform hasn't implemented raises `UnsupportedError`. The topology treats MAC tables and interfaces as optional.
@@ -93,6 +97,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - **The repository is public, and the switches are real.** The recorder replaces every name and address listed in a YAML file kept outside the repository, and blanks serial numbers. Audit the fixtures before committing: LLDP on a management port carries the neighbor's management address, model, and software version.
 - **WAN fixtures** (`tests/fixtures/srlinux/wan/`) are the WAN lab's tables, OSPF included, and `fakes.recorded_wan()` parses them through the real driver. The OSPF view's failures (areas, MTUs, a passive or one-way end, and how the other interfaces are set) are tested on synthetic routers in `test_ospf.py`.
 - **Synthetic networks:** `fakes.SwitchedNetwork` is a small routed network with a switch. `FakePlatform` backs the server, chat, and web tests. `ScriptedOllama` stands in for the model.
+- **Stores:** `tests/test_store.py` holds what every store must do, and runs it against each kind. The TimescaleDB store is tested only when `NETGPT_TEST_STORE` names a database the tests may write to; each test makes a schema of its own and drops it.
 - **Polling:** `FakePlatform`'s counters grow the same amount on every read (`counter_reads` resets them), and the `Poller` takes a clock, so a test sets the time between polls and knows the rates exactly.
 - **Check driver changes against the live lab** before calling them done. Recording the lab found that SR Linux spells a learned MAC `learnt`. SR Linux also reports an unanswered ping as either a result or an error.
 - **The page has no JS test suite.** Check it in headless Firefox:
@@ -220,8 +225,14 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 2, the page: charts in the conversation (`chart`, live, from the model), traffic and errors on the map's links, and a chart of the selected link or device.
   - Phase 3, persistence (branch `feature/persist-store`): TimescaleDB (PostgreSQL) in a compose dev environment under rootless podman. Postgres holds the counters, and later the protocol state, events, and table snapshots, in one place. Neo4j isn't planned: the graphs are built from the tables by tested Python, so keeping the tables over time and running the same builders on old ones answers "what did the network look like then" without writing the topology a second time in Cypher.
     - 3a is done: the `Store` interface, with the in-memory store behind it, and tests every store must pass (`tests/test_store.py`, one fixture per kind of store).
-    - 3b: the Timescale store, the compose file, raw counters plus each interval's rate written as each poll arrives, and `--store postgresql://...`, with its password from an env var or a `chmod 600` file. Exit: history survives a restart.
-    - 3c: rollups and retention (7 days raw, 90 days of 5-minute, 2 years hourly, unless Ken says otherwise), and `interface_traffic` and `chart` reading past windows from the rollups.
+    - 3b is done: `TimescaleStore`, `dev/compose.yml`, and `--store` for `netgpt-mcp` and `netgpt-chat`.
+      - Raw counters go in a hypertable, as `numeric(20)`, since an unsigned 64-bit counter outgrows `bigint`. Each poll goes in with `COPY`, and `interface_ports` lists the ports, so listing them doesn't scan a week of samples. A retention policy drops samples older than the store's window (7 days).
+      - The password is in `~/.pgpass` for NetGPT and in `~/.config/netgpt/timescale.env` for the container, both `chmod 600`. `dev/.env` (gitignored) can put the data in a directory of its own instead of a named volume.
+      - The statistics still reach back an hour (`statistics.REACH`), whatever the store keeps: longer windows wait for rollups.
+      - A store that can't keep a poll is reported for each device it polled, and polling goes on. `open` connects once without the pool first, since a pool that can't connect only says it timed out.
+      - Checked live: a poller ran against the WAN lab and stopped, and a new one, before it had polled, read the old one's rates and drew a chart from them.
+      - The container is started by hand. A restart policy needs `podman-restart.service`, which would restart every rootless container on the machine, not just this one.
+    - 3c: rollups (each interval's rate, written as each poll arrives, averaged into 5-minute and hourly rollups) and retention (7 days raw, 90 days of 5-minute, 2 years hourly, unless Ken says otherwise), and `interface_traffic` and `chart` reading past windows from the rollups.
     - 3d: snapshots of the tables the tools read (OSPF neighbors, LLDP, routes), kept when they change, so "what changed since" is answerable, OSPF state over time with it, and Phase 4's events have something to come from.
   - Phase 4, events: errors climbing, a link saturated or down, shown on the page and told to the agent.
   - Later: BGP state, and gNMI streaming in place of polling.

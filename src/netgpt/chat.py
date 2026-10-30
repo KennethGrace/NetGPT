@@ -31,6 +31,7 @@ from prompt_toolkit import PromptSession
 from netgpt.inventory import Inventory
 from netgpt.server import build_server
 from netgpt.statistics import DEFAULT_INTERVAL, Poller
+from netgpt.store import STORE_HELP, StoreError, check_store, open_store
 
 DEFAULT_MODEL = "gemma4:e4b"
 DEFAULT_OLLAMA = "http://127.0.0.1:11434"
@@ -377,7 +378,16 @@ async def run(args: argparse.Namespace) -> int:
     if args.threads:
         options["num_thread"] = args.threads
     timeout = httpx.Timeout(args.timeout, connect=10.0)
-    statistics = Poller(inventory, interval=args.poll_interval) if args.poll_interval > 0 else None
+    statistics = None
+    if args.poll_interval > 0:
+        try:
+            store = open_store(args.store)
+            # Find out now if the store can't be used, rather than when the server starts polling.
+            await check_store(store)
+        except StoreError as error:
+            progress(str(error), RED)
+            return 1
+        statistics = Poller(inventory, interval=args.poll_interval, store=store)
     # Only the web page can show the map, so only it gets the tool that draws one.
     async with (
         Client(build_server(inventory, display=args.web is not None, statistics=statistics)) as client,
@@ -464,6 +474,7 @@ def main() -> None:
         help="Seconds between polls of every device's interface counters, which interface_traffic reads. "
         "0 turns polling, and the tool, off (default: %(default)g).",
     )
+    parser.add_argument("--store", metavar="memory|URL", help=STORE_HELP)
     parser.add_argument(
         "--web",
         type=web_address,
