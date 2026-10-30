@@ -11,14 +11,16 @@ credentials:
     username: admin
     password_file: ~/.config/netgpt/srlinux-lab.password
 
-# containerlab signs each node's API certificate with a per-lab CA.
+# containerlab signs each node's API certificate with a per-lab CA. The map lays a row
+# of devices out in this order, so the branch is listed between the two sites: it
+# sits between their cores, with each datacenter on the outside.
 devices:
   - {name: hq-core,  host: 172.20.21.11, platform: nokia_srlinux, credentials: srlinux-lab, role: core,       tls_ca: clab-wan/.tls/ca/ca.pem}
   - {name: hq-dc,    host: 172.20.21.12, platform: nokia_srlinux, credentials: srlinux-lab, role: datacenter, tls_ca: clab-wan/.tls/ca/ca.pem}
   - {name: hq-sw1,   host: 172.20.21.13, platform: nokia_srlinux, credentials: srlinux-lab, role: access,     tls_ca: clab-wan/.tls/ca/ca.pem}
+  - {name: branch,   host: 172.20.21.31, platform: nokia_srlinux, credentials: srlinux-lab, role: branch,     tls_ca: clab-wan/.tls/ca/ca.pem}
   - {name: ops-core, host: 172.20.21.21, platform: nokia_srlinux, credentials: srlinux-lab, role: core,       tls_ca: clab-wan/.tls/ca/ca.pem}
   - {name: ops-dc,   host: 172.20.21.22, platform: nokia_srlinux, credentials: srlinux-lab, role: datacenter, tls_ca: clab-wan/.tls/ca/ca.pem}
-  - {name: branch,   host: 172.20.21.31, platform: nokia_srlinux, credentials: srlinux-lab, role: branch,     tls_ca: clab-wan/.tls/ca/ca.pem}
 
 # The networks ping_sweep may sweep. The NetGPT host reaches only the management
 # network; the rest are swept from a device (ping_sweep with device: hq-core), which

@@ -2,9 +2,11 @@
 
 // The network map: draws the views the model makes with the display tool.
 //
-// A view is the network graph, at layer 2 (cables and switches) or layer 3
-// (routers, and the networks between them, drawn as pills), plus the model's
-// choices. Every node and link is in focus, near the focus, or context, and some
+// A view is the network graph, at layer 2 (cables and switches), at layer 3
+// (routers, and the networks between them, drawn as pills), or as OSPF sees it
+// (adjacencies labeled with each end's cost, each area but the backbone in a color
+// of its own, and a link with a problem dashed in red), plus the model's choices.
+// Every node and link is in focus, near the focus, or context, and some
 // are highlighted. The layout is a force simulation (d3-force): nodes push each
 // other apart like bubbles and links pull like springs. The view sets the forces. Focus is pulled to the middle in
 // tiers (spines above leaves above hosts), near nodes ring it, and context is
@@ -58,6 +60,9 @@ const netmap = (() => {
   const SPRING = { focus: 0.8, near: 0.4, context: 0.1 };
   const LENGTH = { focus: 100, near: 120, context: 120 };
   const CHAR_WIDTH = 7; // roughly, for the 12–13px label and note text
+  const BACKBONE = "0.0.0.0";
+  const AREA_COLORS = 3; // --area-1 to -3 in app.css, used in turn
+  const LAYER_NAMES = { l2: "", l3: " · layer 3", ospf: " · OSPF" };
   const SNAP = 8; // screen pixels: a dragged node this close to a pinned node's row or column joins it
   const DOUBLE_TAP = 400; // milliseconds
   const PINS = "netgpt.map.pins";
@@ -178,7 +183,9 @@ const netmap = (() => {
   const reach = (node) => (node.data.kind === "subnet" ? node.radius * 1.6 : node.radius);
 
   function endLabel(end) {
-    // At layer 3 an end is its address, just the host part where the network is a /24 or smaller.
+    // In the OSPF view an end is its cost. At layer 3 an end is its address, just the host
+    // part where the network is a /24 or smaller.
+    if (end.cost !== null && end.cost !== undefined) return String(end.cost);
     if (end.address) {
       const [address, length] = end.address.split("/");
       return Number(length) >= 24 ? `.${address.split(".").pop()}` : address;
@@ -226,6 +233,17 @@ const netmap = (() => {
     return group;
   }
 
+  function relabel(element, data, layer) {
+    // A link keeps its drawing from view to view, and the same link can be in another
+    // layer's view (layer 3 and OSPF name a link between routers alike), so its labels
+    // follow the view: costs or addresses at the ends, and the network between them
+    // except in the OSPF view, where the inspector has it.
+    const [a, b] = element.querySelectorAll(".port:not(.network)");
+    a.firstChild.textContent = endLabel(data.a);
+    b.firstChild.textContent = endLabel(data.b);
+    element.querySelector(".port.network").textContent = layer === "ospf" ? "" : data.subnet || "";
+  }
+
   function place(data, view, tier, middle) {
     // A node new to the map starts beside a neighbor already there. On an empty map,
     // nodes start in rows by tier, in the view's order (inventory order for devices),
@@ -246,7 +264,7 @@ const netmap = (() => {
     document.body.classList.add("map-open");
     panel.hidden = false;
     const planes = { data: "", management: " · management plane", all: " · all planes" }[view.plane];
-    heading.textContent = `${view.title}${planes}${view.layer === "l3" ? " · layer 3" : ""}`;
+    heading.textContent = `${view.title}${planes}${LAYER_NAMES[view.layer] ?? ""}`;
 
     const tier = tiers(view);
     const lit = new Set(view.highlight);
@@ -285,6 +303,7 @@ const netmap = (() => {
     links = view.links.map((data) => {
       seen.add(data.id);
       if (!linkShapes.has(data.id)) linkShapes.set(data.id, linkShape(data));
+      relabel(linkShapes.get(data.id), data, view.layer);
       return {
         id: data.id,
         data,
@@ -366,6 +385,7 @@ const netmap = (() => {
           node.lit && "lit",
           node.trouble && "trouble",
           data.error && "failed",
+          data.kind === "subnet" && areaClass(data.areas),
           isPinned(node) && "pinned",
           selected === node.id && "selected",
         ]
@@ -400,6 +420,8 @@ const netmap = (() => {
           link.emphasis,
           link.lit && "lit",
           link.data.one_sided && "one-sided",
+          link.data.problems && link.data.problems.length && "problem",
+          areaClass([...new Set([link.data.a.area, link.data.b.area].filter(Boolean))]),
           link.data.plane === "management" && "management",
           selected === link.id && "selected",
         ]
@@ -677,6 +699,48 @@ const netmap = (() => {
     panel.append(html("p", errors ? "warned" : "kind", errors ? `⚠ ${text}` : text));
   }
 
+  function ospfAreas() {
+    // The areas in the OSPF view, the backbone first.
+    if (!current || current.layer !== "ospf") return [];
+    const areas = new Set(current.nodes.flatMap((node) => node.areas || []));
+    const order = (a, b) => (a === BACKBONE ? -1 : b === BACKBONE ? 1 : a.localeCompare(b, undefined, { numeric: true }));
+    return [...areas].sort(order);
+  }
+
+  function areaClass(areas) {
+    // The color class of something in exactly one area other than the backbone.
+    if (!areas || areas.length !== 1 || areas[0] === BACKBONE) return null;
+    const index = ospfAreas().filter((area) => area !== BACKBONE).indexOf(areas[0]);
+    return index < 0 ? null : `area-${(index % AREA_COLORS) + 1}`;
+  }
+
+  function areaLegend() {
+    const panel = html("div", "ospf");
+    panel.append(html("p", "hint", "The number at each end of a link is that end's OSPF cost, for traffic it sends across."));
+    const row = html("p", "area-legend");
+    row.append(html("span", "", "Areas:"));
+    for (const area of ospfAreas()) {
+      const item = html("span", "item");
+      const name = area === BACKBONE ? `${area} (backbone)` : area;
+      item.append(html("span", `swatch ${areaClass([area]) || ""}`), document.createTextNode(name));
+      row.append(item);
+    }
+    panel.append(row);
+    return panel;
+  }
+
+  function ospfLines(data) {
+    // A link's two OSPF ends: area, cost, and how far each side's adjacency got; then its problems.
+    const panel = html("div", "ospf");
+    for (const side of [data.a, data.b]) {
+      if (!side.area) continue;
+      const state = side.state ? side.state : "hears no neighbor";
+      panel.append(html("p", "", `${side.node} ${side.interface}: area ${side.area}, cost ${side.cost ?? "unknown"}, ${state}`));
+    }
+    for (const problem of data.problems || []) panel.append(html("p", "failed", problem));
+    return panel;
+  }
+
   function laneKey(level) {
     const key = shape("svg", { class: "lane-key", viewBox: "0 0 22 10", width: "22", height: "10", "aria-hidden": "true" });
     key.append(shape("path", { class: `lane u${level}`, d: "M2,6L20,6M13,2L20,6" }));
@@ -820,6 +884,10 @@ const netmap = (() => {
       const kind = data.kind === "device" ? [data.role, data.platform].filter(Boolean).join(" · ") || "device" : data.kind;
       inspector.append(html("p", "kind", kind));
       if (data.addresses.length) inspector.append(html("p", "addresses", data.addresses.join(", ")));
+      if (data.router_id) inspector.append(html("p", "kind", `OSPF router ID ${data.router_id}`));
+      const areas = data.areas || [];
+      if (areas.length > 1) inspector.append(html("p", "kind", `Area border router: areas ${areas.join(", ")}`));
+      else if (areas.length) inspector.append(html("p", "kind", `Area ${areas[0]}`));
       if (data.error) inspector.append(html("p", "failed", data.error));
       const hop = current.path && current.path.hops.find((candidate) => candidate.node === id);
       if (hop && hop.route) inspector.append(html("p", node.trouble ? "failed" : "remark", forwarding(hop)));
@@ -837,6 +905,7 @@ const netmap = (() => {
         inspector.append(html("p", "kind", bridging.map((side) => `${side.node} bridges it in ${side.bridges.join(", ")}`).join("; ") + "."));
       }
       if (data.one_sided) inspector.append(html("p", "failed", "Only one end reports this link, though both were asked."));
+      if (current.layer === "ospf") inspector.append(ospfLines(data));
       if (link.note) inspector.append(html("p", "remark", link.note));
       inspector.append(trafficLines(id));
       // One port tells both directions; the far end's would only say the same again.
@@ -845,6 +914,7 @@ const netmap = (() => {
     } else if (current) {
       if (current.path) inspector.append(html("p", current.path.outcome === "delivered" ? "remark" : "failed", current.path.detail));
       for (const error of current.errors) inspector.append(html("p", "failed", `${error.device}: ${error.error}`));
+      if (current.layer === "ospf") inspector.append(areaLegend());
       inspector.append(html("p", "hint", "Select a node or link for the evidence. Drag a node to pin it; double-click to pin or let go."));
       const count = [...nodes.values()].filter(isPinned).length;
       if (count) {

@@ -51,7 +51,7 @@ from netgpt.primitives import (
 )
 from netgpt.forwarding import ForwardingPath, TraceError, trace_path
 from netgpt.statistics import DEFAULT_INTERVAL, DEFAULT_WINDOW, MAX_CHART_PORTS, Chart, ChartError, Metric, Poller, describe_chart
-from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_topology, port_of
+from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_ospf, build_topology, port_of
 from netgpt.views import View, ViewError, describe, make_view
 
 logger = logging.getLogger("netgpt")
@@ -60,10 +60,11 @@ INSTRUCTIONS = """\
 NetGPT gives read-only access to the network devices in its inventory.
 Call list_devices first: every other tool takes device names from that list and cannot reach anything else.
 lldp_neighbors, interfaces, arp_table, mac_table, routes, bgp_sessions, ospf_interfaces, and ospf_neighbors
-return typed records from every device in one call, with per-device errors alongside the results. Ask for every device you need in one call, rather
-than one device at a time. topology merges them into one graph: at layer 2
-(the default) the cables, switches, and the port each host is plugged into; at layer 3 the routers and
-the networks between them. forwarding_path follows the routing tables hop by hop to show where packets
+return typed records from every device in one call, with per-device errors alongside the results. Ask for
+every device you need in one call, rather than one device at a time. topology merges them into one graph:
+at layer 2 (the default) the cables, switches, and the port each host is plugged into; at layer 3 the
+routers and the networks between them; as ospf, the OSPF adjacencies, areas, and costs, and what keeps a
+missing adjacency from forming. forwarding_path follows the routing tables hop by hop to show where packets
 from a source to a destination go, and where they are lost. Use show for anything the typed tools don't
 cover; it accepts only read-only commands and says why when it refuses one.
 """
@@ -237,8 +238,18 @@ def build_server(
         errors = list({(error.device, error.error): error for error in failures}.values())
         return build_topology(list_devices(), neighbors, bindings, errors, is_management, macs, found), found
 
-    def at_layer(topology: Topology, found: list[Interface], layer: Layer, network_instance: str) -> Topology:
-        return topology if layer == "l2" else build_l3(list_devices(), topology, found, is_management, network_instance)
+    async def at_layer(topology: Topology, found: list[Interface], layer: Layer, network_instance: str) -> Topology:
+        if layer == "l2":
+            return topology
+        if layer == "l3":
+            return build_l3(list_devices(), topology, found, is_management, network_instance)
+        (ospf, interface_errors), (heard, neighbor_errors) = await asyncio.gather(
+            collect(None, lambda platform: platform.ospf_interfaces()),
+            collect(None, lambda platform: platform.ospf_neighbors()),
+        )
+        failures = topology.errors + interface_errors + neighbor_errors
+        errors = list({(error.device, error.error): error for error in failures}.values())
+        return build_ospf(list_devices(), found, ospf, heard, errors, network_instance)
 
     async def trace(
         source: str, destination: str, network_instance: str
@@ -402,10 +413,14 @@ def build_server(
         cabling: devices, LLDP neighbors outside the inventory, shared segments, and hosts on the
         switch port their MAC is behind. layer l3 is the routing in one network instance: routers,
         the networks (subnets) they are on, and the hosts on those networks; switches drop out, and
-        a network between just two routers is a link between them. The data plane is the default;
-        the management network rarely matters to a question.
+        a network between just two routers is a link between them. layer ospf is OSPF in one network
+        instance: the routers that run it and the areas each is in, an adjacency between each pair
+        of neighbors with each end's area, cost, and state, and the networks advertised from passive
+        interfaces. Two OSPF interfaces on one network that aren't full neighbors are a link too, and
+        its problems say what keeps them apart. The data plane is the default; the management network
+        rarely matters to a question.
         """
-        return at_layer(*await gather_topology(), layer, network_instance).on_plane(plane)
+        return (await at_layer(*await gather_topology(), layer, network_instance)).on_plane(plane)
 
     @server.tool(annotations=READ_ONLY)
     async def forwarding_path(source: str, destination: str, network_instance: str = "default") -> ForwardingPath:
@@ -442,7 +457,9 @@ def build_server(
             path takes a source and a destination: the server traces the way packets go
             between them through the routing tables and highlights it hop by hop, with
             where it is lost if it is. layer l2 (the default) draws the cabling and switches;
-            l3 draws routers and the networks (subnets) between them, in network_instance.
+            l3 draws routers and the networks (subnets) between them, in network_instance; ospf
+            draws OSPF's adjacencies with their costs and areas, and links that should be
+            adjacencies but aren't.
             Name nodes by device name, host address, or network (192.168.12.0/24), and links
             by their two nodes (leaf1--spine1) or by one end (leaf1:ethernet-1/49). notes
             attach a few words to a node or link, keyed by its name.
@@ -452,7 +469,7 @@ def build_server(
                     topology, found, traced = await trace(path.source, path.destination, network_instance)
                 else:
                     (topology, found), traced = await gather_topology(), None
-                graph = at_layer(topology, found, layer, network_instance)
+                graph = await at_layer(topology, found, layer, network_instance)
                 view = make_view(graph, title, focus or [], highlight or [], notes or {}, plane, traced)
             except (TraceError, ViewError) as error:
                 raise ToolError(str(error)) from error

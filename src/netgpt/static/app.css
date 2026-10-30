@@ -25,6 +25,9 @@
   --load-3: #1d8374;
   --load-4: #126357;
   --load-5: #07453c;
+  --area-1: #1a9e6e;
+  --area-2: #8a63d2;
+  --area-3: #d4669a;
   color-scheme: light;
 }
 
@@ -56,6 +59,9 @@
     --load-3: #27af9b;
     --load-4: #5dd2bd;
     --load-5: #9feddd;
+    --area-1: #3cc293;
+    --area-2: #a98bec;
+    --area-3: #ec8cb6;
     color-scheme: dark;
   }
 }
@@ -283,9 +289,17 @@ pre code { background: none; padding: 0; }
 #map-graph .near { opacity: 0.7; }
 #map-graph .context { opacity: 0.25; }
 #map-graph .wire { stroke: var(--edge); stroke-width: 2; }
+/* OSPF areas other than the backbone: before the highlight, so a highlighted link is still blue. */
+#map-graph .link.area-1 .wire { stroke: var(--area-1); stroke-width: 3; }
+#map-graph .link.area-2 .wire { stroke: var(--area-2); stroke-width: 3; }
+#map-graph .link.area-3 .wire { stroke: var(--area-3); stroke-width: 3; }
+#map-graph .kind-subnet.area-1 .body { stroke: var(--area-1); }
+#map-graph .kind-subnet.area-2 .body { stroke: var(--area-2); }
+#map-graph .kind-subnet.area-3 .body { stroke: var(--area-3); }
 #map-graph .hit { stroke: transparent; stroke-width: 14; cursor: pointer; }
 #map-graph .link.lit .wire { stroke: var(--accent); stroke-width: 4; }
 #map-graph .link.one-sided .wire { stroke: var(--warn); stroke-dasharray: 6 4; }
+#map-graph .link.problem .wire { stroke: var(--error); stroke-dasharray: 6 4; stroke-width: 3; }
 #map-graph .link.management .wire { stroke-dasharray: 2 4; }
 #map-graph .link.selected .wire { stroke-width: 5; }
 #map-graph .port { font-size: 10px; fill: var(--muted); text-anchor: middle; dominant-baseline: middle; visibility: hidden; }
@@ -308,6 +322,12 @@ pre code { background: none; padding: 0; }
 .traffic-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; color: var(--muted); }
 .traffic-legend .item { display: inline-flex; align-items: center; gap: 4px; }
 .traffic-legend .flag { color: var(--warn); font-weight: 600; }
+.area-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; color: var(--muted); }
+.area-legend .item { display: inline-flex; align-items: center; gap: 4px; }
+.area-legend .swatch { display: inline-block; width: 18px; height: 3px; background: var(--edge); }
+.area-legend .swatch.area-1 { background: var(--area-1); }
+.area-legend .swatch.area-2 { background: var(--area-2); }
+.area-legend .swatch.area-3 { background: var(--area-3); }
 
 #map-graph .node { cursor: grab; }
 #map-graph .body { fill: var(--surface); stroke: var(--fg); stroke-width: 2; }

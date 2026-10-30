@@ -166,6 +166,10 @@ def _routed(graph: Topology, path: ForwardingPath) -> tuple[set[str], set[str]]:
     return nodes, links
 
 
+# How a refusal names the layer it looked at.
+LAYER_NAMES = {"l2": "at layer 2", "l3": "at layer 3", "ospf": "in the OSPF view"}
+
+
 def make_view(
     topology: Topology,
     title: str,
@@ -192,7 +196,7 @@ def make_view(
     if resolver.unknown:
         named = ", ".join(node.id for node in graph.nodes)
         raise ViewError(
-            f"There is nothing on the {plane} plane at {'layer 3' if graph.layer == 'l3' else 'layer 2'} "
+            f"There is nothing on the {plane} plane {LAYER_NAMES[graph.layer]} "
             f"called {', '.join(resolver.unknown)}. "
             f"Its nodes are: {named}. Name a link by its two nodes (a--b) or by one end (device:interface)."
         )
@@ -260,10 +264,12 @@ def describe(view: View) -> str:
     layer = {
         "l2": "layer 2 (cables, switches, and where hosts are plugged in)",
         "l3": "layer 3 (routers and the networks between them)",
+        "ospf": "OSPF (adjacencies, with each end's area and cost, and the networks advertised)",
     }
     planes = "all planes" if view.plane == "all" else f"the {view.plane} plane"
     lines = [
-        f'The user now sees "{view.title}": {planes} at {layer[view.layer]}, {len(view.nodes)} nodes and {len(view.links)} links.'
+        f'The user now sees "{view.title}": {planes} {"as" if view.layer == "ospf" else "at"} {layer[view.layer]}, '
+        f"{len(view.nodes)} nodes and {len(view.links)} links."
     ]
     if len(focused) == len(view.nodes):
         lines.append("Nothing is singled out; the whole graph is in focus.")
@@ -280,6 +286,9 @@ def describe(view: View) -> str:
     one_sided = [link.id for link in view.links if link.one_sided]
     if one_sided:
         lines.append(f"Only one end reports these links: {', '.join(one_sided)}.")
+    for link in view.links:
+        if link.problems:
+            lines.append(f"{link.id}: {' '.join(link.problems)}")
     if view.errors:
         lines.append(f"Could not query: {', '.join(sorted({error.device for error in view.errors}))}.")
     return "\n".join(lines)

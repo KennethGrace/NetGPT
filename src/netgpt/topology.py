@@ -1,6 +1,6 @@
 """
 The topology module merges what devices report about their neighbors into one
-graph of the network, at layer 2 or at layer 3.
+graph of the network, at layer 2, at layer 3, or as OSPF sees it.
 
 At layer 2 the graph is the cabling. LLDP says which ports are cabled together.
 ARP says which addresses answer behind a port, and where a switch is in the way,
@@ -10,6 +10,12 @@ off the port it is plugged into. Interfaces say which ports route and which brid
 At layer 3 the graph is the routing: routers, the networks their interfaces are
 on, and the hosts on those networks. Switches drop out, since they route nothing.
 A network between just two routers is drawn as a link between them.
+
+In the OSPF view the graph is the routing protocol: the routers that run OSPF,
+the adjacencies between them with each end's area, cost, and state, and the
+networks they advertise without forming adjacencies (passive interfaces). Two
+OSPF interfaces on one network with no full adjacency are drawn too, with what
+their settings disagree on, since a missing neighbor is often the question.
 
 Every node and link keeps the evidence it came from, so a drawing can always say
 why a line is there.
@@ -25,11 +31,20 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from netgpt.primitives import ArpEntry, DeviceError, DeviceInfo, Interface, LldpNeighbor, MacEntry
+from netgpt.primitives import (
+    ArpEntry,
+    DeviceError,
+    DeviceInfo,
+    Interface,
+    LldpNeighbor,
+    MacEntry,
+    OspfInterface,
+    OspfNeighbor,
+)
 
 Plane = Literal["data", "management"]
 PlaneChoice = Literal["data", "management", "all"]
-Layer = Literal["l2", "l3"]
+Layer = Literal["l2", "l3", "ospf"]
 
 # A subinterface (ethernet-1/1.0, GigabitEthernet0/0.100) belongs to the port before the dot.
 SUBINTERFACE = re.compile(r"^(?P<port>.+)\.\d+$")
@@ -73,6 +88,10 @@ class TopologyNode(BaseModel):
     platform: str | None = None
     addresses: list[str] = Field(default_factory=list)
     error: str | None = Field(None, description="Why the device could not be fully queried.")
+    router_id: str | None = Field(None, description="In the OSPF view, the router's OSPF router ID.")
+    areas: list[str] = Field(
+        default_factory=list, description="In the OSPF view, the areas the router is in. More than one is an area border router."
+    )
     evidence: list[str] = Field(default_factory=list)
 
 
@@ -84,6 +103,11 @@ class LinkEnd(BaseModel):
     address: str | None = Field(None, description="At layer 3, this end's address with prefix length.")
     bridges: list[str] = Field(
         default_factory=list, description="At layer 2, the bridges (layer 2 network instances) this port switches in."
+    )
+    area: str | None = Field(None, description="In the OSPF view, the area this end's interface is in.")
+    cost: int | None = Field(None, description="In the OSPF view, this end's cost to send across the link.")
+    state: str | None = Field(
+        None, description="In the OSPF view, the adjacency's state as this end sees it; none if it doesn't hear the other end."
     )
 
     def __str__(self) -> str:
@@ -99,6 +123,10 @@ class TopologyLink(BaseModel):
     plane: Plane
     subnet: str | None = Field(None, description="At layer 3, the network a link between two routers is.")
     one_sided: bool = Field(False, description="Only one end reported this link, though both ends were asked.")
+    problems: list[str] = Field(
+        default_factory=list,
+        description="In the OSPF view, why the link has no full adjacency, or what its two ends disagree on.",
+    )
     evidence: list[str] = Field(default_factory=list)
 
 
@@ -453,3 +481,186 @@ def build_l3(
 
     nodes, links = graph.sorted(devices)
     return Topology(layer="l3", nodes=nodes, links=links, errors=l2.errors)
+
+
+# The settings both ends of a link must agree on before OSPF makes them neighbors.
+OSPF_AGREEMENT = (
+    ("areas", "area"),
+    ("network types", "network_type"),
+    ("hello intervals", "hello_interval"),
+    ("dead intervals", "dead_interval"),
+    ("MTUs", "mtu"),
+)
+
+
+def _ospf_says(interface: OspfInterface) -> str:
+    """What a router says about one of its OSPF interfaces, in a line."""
+    settings = [f"area {interface.area}", interface.network_type or "network type unknown", f"cost {interface.cost}"]
+    settings += [f"hello {interface.hello_interval}s, dead {interface.dead_interval}s", f"MTU {interface.mtu}"]
+    if interface.passive:
+        settings.append("passive")
+    return f"{interface.device} {interface.interface} runs OSPF: {', '.join(settings)}."
+
+
+def _ospf_problems(ends: list[OspfInterface], states: dict[str, str | None]) -> list[str]:
+    """
+    What keeps two OSPF interfaces on one network from a full adjacency: the settings
+    they disagree on, a passive end, and how far the adjacency got from each side.
+    """
+    problems = []
+    first, second = ends
+    for name, field in OSPF_AGREEMENT:
+        mine, theirs = getattr(first, field), getattr(second, field)
+        if mine is not None and theirs is not None and mine != theirs:
+            problems.append(
+                f"The {name} differ: {mine} at {first.device} {first.interface}, {theirs} at {second.device} {second.interface}."
+            )
+    problems += [f"{end.device} {end.interface} is passive, so it sends no hellos." for end in ends if end.passive]
+    if all(state == "full" for state in states.values()):
+        return problems
+    # Two routers alone on a network always elect a DR, so between them even 2-way is stuck.
+    for end in ends:
+        state = states[end.device]
+        other = next(other for other in ends if other is not end)
+        if state is None:
+            problems.append(f"{end.device} doesn't hear {other.device} on {end.interface}.")
+        elif state != "full":
+            problems.append(f"{end.device} sees its adjacency with {other.device} at {state}, not full.")
+    return problems
+
+
+def build_ospf(
+    devices: list[DeviceInfo],
+    interfaces: Iterable[Interface],
+    ospf_interfaces: Iterable[OspfInterface],
+    neighbors: Iterable[OspfNeighbor],
+    errors: list[DeviceError],
+    network_instance: str = "default",
+) -> Topology:
+    """
+    The network as OSPF sees it, in one network instance: the routers that run it,
+    the adjacencies between them, and the networks they advertise from passive
+    interfaces. Two OSPF interfaces on one network are a link whether or not they
+    became neighbors; one that doesn't hear the other, or whose settings differ,
+    says so in the link's problems.
+    """
+    graph = _Graph()
+    info = {device.name: device for device in devices}
+    mine = [interface for interface in ospf_interfaces if interface.network_instance == network_instance]
+    heard = [neighbor for neighbor in neighbors if neighbor.network_instance == network_instance]
+    router_of = {interface.router_id: interface.device for interface in mine if interface.router_id}
+    id_of = {device: router_id for router_id, device in router_of.items()}
+
+    for name, device in info.items():
+        own = [interface for interface in mine if interface.device == name]
+        if not own:
+            continue
+        areas = sorted({interface.area for interface in own})
+        router_id = own[0].router_id
+        role = f" in area {areas[0]}" if len(areas) == 1 else f" in areas {', '.join(areas)}: an area border router"
+        graph.node(
+            name, kind="device", role=device.role, platform=device.platform, router_id=router_id, areas=areas,
+            evidence=[f"{name} runs OSPF with router ID {router_id}{role}."],
+        )
+    for error in errors:
+        device = info.get(error.device)
+        graph.node(error.device, kind="device", error=error.error, role=device.role if device else None,
+                   platform=device.platform if device else None)
+
+    # Which network each interface is on, from the device's own addresses.
+    prefixes: dict[tuple[str, str], list[ipaddress.IPv4Interface]] = defaultdict(list)
+    on_network: dict[ipaddress.IPv4Network, list[tuple[str, str, ipaddress.IPv4Interface]]] = defaultdict(list)
+    for interface in interfaces:
+        for address in interface.addresses:
+            try:
+                prefix = ipaddress.IPv4Interface(address)
+            except ValueError:
+                continue
+            prefixes[(interface.device, interface.name)].append(prefix)
+            if interface.network_instance == network_instance and interface.mode == "routed":
+                on_network[prefix.network].append((interface.device, interface.name, prefix))
+
+    def network_of(interface: OspfInterface) -> ipaddress.IPv4Network | None:
+        found = prefixes.get((interface.device, interface.interface), [])
+        exact = [prefix for prefix in found if str(prefix.ip) == interface.address]
+        chosen = (exact or found)[:1]
+        return chosen[0].network if chosen else None
+
+    def state_of(device: str, interface: str, other: str) -> str | None:
+        """How far device's adjacency with other got on interface, or None if it doesn't hear it."""
+        other_id = id_of.get(other)
+        for neighbor in heard:
+            if neighbor.device == device and neighbor.interface == interface and neighbor.router_id == other_id:
+                return neighbor.state
+        return None
+
+    members: dict[ipaddress.IPv4Network, list[OspfInterface]] = defaultdict(list)
+    for interface in mine:
+        network = network_of(interface)
+        if network is not None and network.prefixlen < network.max_prefixlen:
+            members[network].append(interface)
+    paired: set[tuple[str, str]] = set()
+    for network, ends in sorted(members.items(), key=lambda item: (item[0].network_address, item[0].prefixlen)):
+        routers = {end.device for end in ends}
+        evidence = [_ospf_says(end) for end in ends]
+        if len(ends) == 2 and len(routers) == 2:
+            states = {end.device: state_of(end.device, end.interface, other.device) for end, other in (ends, ends[::-1])}
+            a, b = (
+                LinkEnd(node=end.device, interface=end.interface, address=str(prefix), area=end.area, cost=end.cost,
+                        state=states[end.device])
+                for end, prefix in ((end, next(p for p in prefixes[(end.device, end.interface)] if p.network == network))
+                                    for end in ends)
+            )
+            link = graph.link(a, b, "data", evidence[0], ends[0].device, subnet=str(network))
+            for line in evidence[1:] + [f"{end.device} hears {other.device} on {end.interface}: {states[end.device]}."
+                                        for end, other in (ends, ends[::-1]) if states[end.device]]:
+                if line not in link.evidence:
+                    link.evidence.append(line)
+            link.problems = _ospf_problems(ends, states)
+            link.one_sided = sum(state is not None for state in states.values()) == 1
+            paired |= {(end.device, end.interface) for end in ends}
+            continue
+        silent = [
+            (device, name, prefix) for device, name, prefix in on_network[network] if device in info and device not in routers
+        ]
+        if len(ends) == 1 and not ends[0].passive and silent:
+            # Another router is on the network but doesn't run OSPF there, so this end hears no one.
+            end, (device, name, prefix) = ends[0], silent[0]
+            if device not in graph.nodes:
+                graph.node(device, kind="device", role=info[device].role, platform=info[device].platform)
+            own = next((p for p in prefixes[(end.device, end.interface)] if p.network == network), None)
+            link = graph.link(
+                LinkEnd(node=end.device, interface=end.interface, address=str(own) if own else None, area=end.area,
+                        cost=end.cost),
+                LinkEnd(node=device, interface=name, address=str(prefix)),
+                "data", evidence[0], end.device, subnet=str(network),
+            )
+            link.problems = [
+                f"{device} {name} is on {network} but doesn't run OSPF there, so {end.device} {end.interface} hears no neighbor."
+            ]
+            paired.add((end.device, end.interface))
+            continue
+        # A network with one OSPF router on it (a LAN it advertises) or several (a shared segment): a node.
+        areas = sorted({end.area for end in ends})
+        subnet = graph.node(str(network), kind="subnet", plane="data", areas=areas, evidence=evidence)
+        for end in ends:
+            graph.link(
+                LinkEnd(node=end.device, interface=end.interface, area=end.area, cost=end.cost), LinkEnd(node=subnet.id),
+                "data", _ospf_says(end), end.device,
+            )
+            paired.add((end.device, end.interface))
+
+    # A neighbor no inventory router accounts for: a router outside the inventory.
+    for neighbor in heard:
+        if (neighbor.device, neighbor.interface) in paired or neighbor.router_id in router_of:
+            continue
+        graph.node(neighbor.router_id, kind="neighbor", plane="data", router_id=neighbor.router_id,
+                   evidence=[f"{neighbor.device} hears router {neighbor.router_id} at {neighbor.address}."])
+        graph.link(
+            LinkEnd(node=neighbor.device, interface=neighbor.interface, area=neighbor.area, state=neighbor.state),
+            LinkEnd(node=neighbor.router_id, address=neighbor.address), "data",
+            f"{neighbor.device} hears {neighbor.router_id} on {neighbor.interface}: {neighbor.state}.", neighbor.device,
+        )
+
+    nodes, links = graph.sorted(devices)
+    return Topology(layer="ospf", nodes=nodes, links=links, errors=errors)

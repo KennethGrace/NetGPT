@@ -172,7 +172,7 @@ class Route(BaseModel):
     device: str
     network_instance: str
     prefix: str
-    protocol: str = Field(description="The route owner, for example local, static, or bgp.")
+    protocol: str = Field(description="The route owner, for example local, static, ospfv2, or bgp.")
     next_hops: list[NextHop] = Field(default_factory=list)
     active: bool | None = None
     metric: int | None = None
@@ -226,11 +226,19 @@ class OspfInterface(BaseModel):
         None,
         description="Its OSPF state: point-to-point, designated-router, backup-designated-router, dr-other, waiting, or down.",
     )
-    passive: bool = Field(False, description="Passive: OSPF advertises the network but sends no hellos and forms no adjacency on it.")
-    cost: int | None = Field(None, description="This end's cost to send out of the interface. Each direction of a link has its own.")
-    hello_interval: int | None = Field(None, description="Seconds between hellos. Both ends of a link must agree, as on the dead interval.")
+    passive: bool = Field(
+        False, description="Passive: OSPF advertises the network but sends no hellos and forms no adjacency on it."
+    )
+    cost: int | None = Field(
+        None, description="This end's cost to send out of the interface. Each direction of a link has its own."
+    )
+    hello_interval: int | None = Field(
+        None, description="Seconds between hellos. Both ends of a link must agree, as on the dead interval."
+    )
     dead_interval: int | None = None
-    mtu: int | None = Field(None, description="The MTU OSPF advertises. When the two ends differ, their adjacency sticks in exstart.")
+    mtu: int | None = Field(
+        None, description="The MTU OSPF advertises. When the two ends differ, their adjacency sticks in exstart."
+    )
     neighbors: int | None = Field(None, description="How many neighbors it hears.")
     designated_router: str | None = Field(None, description="On a broadcast network, the router ID of the designated router.")
     backup_designated_router: str | None = None
@@ -256,7 +264,9 @@ class OspfNeighbor(BaseModel):
     priority: int | None = None
     dead_seconds: int | None = Field(None, description="Seconds left before it is declared down, unless it says hello again.")
     uptime_seconds: int | None = Field(None, description="How long the adjacency has been up.")
-    state_changes: int | None = Field(None, description="How many times its state has changed. A count that keeps climbing is a flap.")
+    state_changes: int | None = Field(
+        None, description="How many times its state has changed. A count that keeps climbing is a flap."
+    )
 
 
 class PingResult(BaseModel):

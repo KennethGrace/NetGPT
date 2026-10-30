@@ -20,16 +20,19 @@ from netgpt.inventory import Credentials, Device
 from netgpt.platforms.srlinux import SRLinuxPlatform
 from netgpt.primitives import (
     ArpEntry,
+    DeviceError,
     DeviceInfo,
     Interface,
     InterfaceCounters,
     LldpNeighbor,
     MacEntry,
     NextHop,
+    OspfInterface,
+    OspfNeighbor,
     PingResult,
     Route,
 )
-from netgpt.topology import Topology, build_topology
+from netgpt.topology import Topology, build_ospf, build_topology
 
 FIXTURES = Path(__file__).parent / "fixtures" / "srlinux"
 
@@ -100,6 +103,49 @@ async def recorded_lab() -> RecordedLab:
             lab.interfaces.extend(await platform.interfaces())
             lab.routes[info.name] = await platform.routes("default")
     return lab
+
+
+# The WAN lab (lab/wan/): three sites joined by OSPF, and the responses recorded from each of its devices.
+WAN = [
+    DeviceInfo(name="hq-core", platform="nokia_srlinux", host="172.20.21.11", role="core"),
+    DeviceInfo(name="hq-dc", platform="nokia_srlinux", host="172.20.21.12", role="datacenter"),
+    DeviceInfo(name="hq-sw1", platform="nokia_srlinux", host="172.20.21.13", role="access"),
+    DeviceInfo(name="branch", platform="nokia_srlinux", host="172.20.21.31", role="branch"),
+    DeviceInfo(name="ops-core", platform="nokia_srlinux", host="172.20.21.21", role="core"),
+    DeviceInfo(name="ops-dc", platform="nokia_srlinux", host="172.20.21.22", role="datacenter"),
+]
+WAN_TABLES = TABLES | {"/network-instance[name=*]/protocols/ospf": "ospf.json"}
+RECORDED_WAN = {device.name: {path: f"wan/{device.name}/{name}" for path, name in WAN_TABLES.items()} for device in WAN}
+
+
+class RecordedWan(NamedTuple):
+    """Every WAN lab device's interfaces, OSPF, and routes, as the SR Linux driver parses them."""
+
+    interfaces: list[Interface]
+    ospf_interfaces: list[OspfInterface]
+    ospf_neighbors: list[OspfNeighbor]
+    routes: dict[str, list[Route]]
+
+    def ospf(self, errors: list[DeviceError] | None = None) -> Topology:
+        return build_ospf(WAN, self.interfaces, self.ospf_interfaces, self.ospf_neighbors, errors or [])
+
+
+async def recorded_wan() -> RecordedWan:
+    """
+    The WAN lab's tables, parsed by the real SR Linux driver from recorded responses.
+    Needs NETGPT_TEST_PASSWORD set to anything.
+    """
+    credentials = Credentials(username="admin", password_env="NETGPT_TEST_PASSWORD")
+    wan = RecordedWan([], [], [], {})
+    for info in WAN:
+        transport, _ = replay(RECORDED_WAN[info.name])
+        device = Device(name=info.name, host=info.host, platform=info.platform, credentials="lab")
+        async with SRLinuxPlatform(device, credentials, transport=transport) as platform:
+            wan.interfaces.extend(await platform.interfaces())
+            wan.ospf_interfaces.extend(await platform.ospf_interfaces())
+            wan.ospf_neighbors.extend(await platform.ospf_neighbors())
+            wan.routes[info.name] = await platform.routes("default")
+    return wan
 
 
 class SwitchedNetwork:
