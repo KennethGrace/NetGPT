@@ -19,6 +19,8 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `arp_table`      | ARP bindings across many devices.                                                       |
 | `routes`         | The routing table of a network instance (VRF) across many devices: IPv4, and IPv6 where the platform reads it. |
 | `bgp_sessions`   | Each device's BGP sessions: the peer and local addresses and AS numbers, the state, the last error, the address families, and the prefixes received. |
+| `ospf_neighbors` | Each device's OSPF neighbors: the interface and area, the neighbor's router ID and address, and the adjacency's state. |
+| `ospf_interfaces`| The interfaces each device runs OSPF on: area, network type, cost, passive or not, hello and dead intervals, MTU, and the DR and BDR. |
 | `topology`       | The network as one graph at layer 2 or layer 3, merged from every device's tables, with the evidence for each link. |
 | `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
@@ -185,8 +187,8 @@ sweep_networks:
 
 | Platform        | Transport           | Status                                                                 |
 |-----------------|---------------------|------------------------------------------------------------------------|
-| `nokia_srlinux` | JSON-RPC over HTTPS | All tools verified against SR Linux 25.10.5 in the lab. The tests replay responses recorded there. `bgp_sessions` isn't implemented yet. |
-| `juniper_junos` | NETCONF over SSH    | Every tool but `ping` and `ping_sweep`, verified against Junos 23.4R2 on a QFX5120 and two EX4400s. The tests replay replies recorded there, renamed. |
+| `nokia_srlinux` | JSON-RPC over HTTPS | All tools verified against SR Linux 25.10.5 in the lab. The tests replay responses recorded there. `bgp_sessions` isn't implemented yet; the OSPF tools are, against the WAN lab. |
+| `juniper_junos` | NETCONF over SSH    | Every tool but `ping`, `ping_sweep`, and the OSPF tools, verified against Junos 23.4R2 on a QFX5120 and two EX4400s. The tests replay replies recorded there, renamed. |
 
 Platform names match containerlab node kinds where there is one. `juniper_junos` is for Junos on hardware, which has none.
 

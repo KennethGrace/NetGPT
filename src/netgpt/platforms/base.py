@@ -25,6 +25,8 @@ from netgpt.primitives import (
     InterfaceCounters,
     LldpNeighbor,
     MacEntry,
+    OspfInterface,
+    OspfNeighbor,
     PingResult,
     Route,
 )
@@ -113,6 +115,14 @@ class Platform(ABC):
     async def bgp_sessions(self) -> list[BgpSession]:
         """Return the device's BGP sessions, in every network instance."""
         raise self._unsupported("BGP sessions")
+
+    async def ospf_interfaces(self) -> list[OspfInterface]:
+        """Return the interfaces the device runs OSPF on, in every network instance."""
+        raise self._unsupported("OSPF")
+
+    async def ospf_neighbors(self) -> list[OspfNeighbor]:
+        """Return the device's OSPF neighbors, in every network instance."""
+        raise self._unsupported("OSPF")
 
     async def ping(self, destination: str, count: int, network_instance: str) -> PingResult:
         """Send ICMP echo requests from the device to a destination."""

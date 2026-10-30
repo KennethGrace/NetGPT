@@ -24,6 +24,8 @@ from netgpt.primitives import (
     LldpNeighbor,
     MacEntry,
     NextHop,
+    OspfInterface,
+    OspfNeighbor,
     PingResult,
     Route,
 )
@@ -47,6 +49,15 @@ COUNTER_PATHS = [
     "/interface[name=*]/ethernet/port-speed",
     "/interface[name=*]/statistics",
 ]
+# Every OSPF instance's interfaces, with their neighbors, and its router ID. Narrow paths, so the link-state
+# database stays on the device.
+OSPF_PATHS = [
+    "/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]",
+    "/network-instance[name=*]/protocols/ospf/instance[name=*]/router-id",
+]
+# SR Linux's OSPF names no router with 0.0.0.0, for example the DR of a point-to-point link.
+NO_ROUTER = "0.0.0.0"
+
 PORT_SPEED = re.compile(r"^(\d+)([MGT])$")
 SPEED_UNITS = {"M": 10**6, "G": 10**9, "T": 10**12}
 
@@ -92,6 +103,11 @@ def next_hop(hop: dict[str, Any], protocol: str) -> NextHop:
         return NextHop(action=action)
     address = None if protocol == "local" else hop.get("ip-address")
     return NextHop(address=address, interface=hop.get("subinterface"))
+
+
+def router_or_none(value: Any) -> str | None:
+    """Read a router ID, where 0.0.0.0 means none."""
+    return None if value in (None, NO_ROUTER) else str(value)
 
 
 def port_speed(value: Any) -> int | None:
@@ -320,6 +336,65 @@ class SRLinuxPlatform(Platform):
                 raise
             output = str(error)
         return parse_ping_output(self.device.name, str(address), output)
+
+    async def _ospf(self) -> list[tuple[str, str | None, str, dict[str, Any]]]:
+        """Every interface OSPF runs on, as (network instance, router ID, area, the interface's state)."""
+        interfaces, router_ids = await self._get_states(OSPF_PATHS)
+        ids = {
+            (instance["name"], ospf["name"]): ospf.get("router-id")
+            for instance in as_list(router_ids.get("network-instance"))
+            for ospf in as_list(instance.get("protocols", {}).get("ospf", {}).get("instance"))
+        }
+        return [
+            (instance["name"], ids.get((instance["name"], ospf["name"])), area["area-id"], interface)
+            for instance in as_list(interfaces.get("network-instance"))
+            for ospf in as_list(instance.get("protocols", {}).get("ospf", {}).get("instance"))
+            for area in as_list(ospf.get("area"))
+            for interface in as_list(area.get("interface"))
+        ]
+
+    async def ospf_interfaces(self) -> list[OspfInterface]:
+        return [
+            OspfInterface(
+                device=self.device.name,
+                network_instance=network_instance,
+                router_id=router_id,
+                area=area,
+                interface=interface["interface-name"],
+                address=interface.get("local-ip-address"),
+                network_type=interface.get("interface-type"),
+                state=interface.get("oper-state"),
+                passive=bool(interface.get("passive", False)),
+                cost=interface.get("metric"),
+                hello_interval=interface.get("hello-interval"),
+                dead_interval=interface.get("dead-interval"),
+                mtu=interface.get("mtu"),
+                neighbors=interface.get("neighbor-count"),
+                designated_router=router_or_none(interface.get("dr-id")),
+                backup_designated_router=router_or_none(interface.get("bdr-id")),
+            )
+            for network_instance, router_id, area, interface in await self._ospf()
+        ]
+
+    async def ospf_neighbors(self) -> list[OspfNeighbor]:
+        # up-time is in hundredths of a second.
+        return [
+            OspfNeighbor(
+                device=self.device.name,
+                network_instance=network_instance,
+                area=area,
+                interface=interface["interface-name"],
+                router_id=neighbor["router-id"],
+                address=neighbor.get("address"),
+                state=str(neighbor.get("adjacency-state", "unknown")).split(":")[-1],
+                priority=neighbor.get("priority"),
+                dead_seconds=neighbor.get("dead-time"),
+                uptime_seconds=neighbor["up-time"] // 100 if isinstance(neighbor.get("up-time"), int) else None,
+                state_changes=neighbor.get("state-changes"),
+            )
+            for network_instance, _, area, interface in await self._ospf()
+            for neighbor in as_list(interface.get("neighbor"))
+        ]
 
     async def routes(self, network_instance: str) -> list[Route]:
         # A path without wildcards comes back rooted at the route-table container itself.

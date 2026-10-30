@@ -44,6 +44,8 @@ from netgpt.primitives import (
     InterfaceTraffic,
     LldpNeighbor,
     MacEntry,
+    OspfInterface,
+    OspfNeighbor,
     PingResult,
     Route,
 )
@@ -57,8 +59,8 @@ logger = logging.getLogger("netgpt")
 INSTRUCTIONS = """\
 NetGPT gives read-only access to the network devices in its inventory.
 Call list_devices first: every other tool takes device names from that list and cannot reach anything else.
-lldp_neighbors, interfaces, arp_table, mac_table, routes, and bgp_sessions return typed records from
-every device in one call, with per-device errors alongside the results. Ask for every device you need in one call, rather
+lldp_neighbors, interfaces, arp_table, mac_table, routes, bgp_sessions, ospf_interfaces, and ospf_neighbors
+return typed records from every device in one call, with per-device errors alongside the results. Ask for every device you need in one call, rather
 than one device at a time. topology merges them into one graph: at layer 2
 (the default) the cables, switches, and the port each host is plugged into; at layer 3 the routers and
 the networks between them. forwarding_path follows the routing tables hop by hop to show where packets
@@ -352,6 +354,29 @@ def build_server(
         """
         items, errors = await collect(devices, lambda platform: platform.bgp_sessions())
         return Collection[BgpSession](items=items, errors=errors)
+
+    @server.tool(annotations=READ_ONLY)
+    async def ospf_neighbors(devices: DeviceNames = None) -> Collection[OspfNeighbor]:
+        """
+        Return every device's OSPF neighbors: the interface and area each is heard on, its router ID and
+        address, and the adjacency's state. Only a full adjacency exchanges routes. A neighbor that should be
+        there and isn't sends no hellos this router accepts: compare both ends with ospf_interfaces.
+        One call covers every device; name devices only to leave the others out.
+        """
+        items, errors = await collect(devices, lambda platform: platform.ospf_neighbors())
+        return Collection[OspfNeighbor](items=items, errors=errors)
+
+    @server.tool(annotations=READ_ONLY)
+    async def ospf_interfaces(devices: DeviceNames = None) -> Collection[OspfInterface]:
+        """
+        Return the interfaces each device runs OSPF on: the area, network type, cost, whether it is passive,
+        hello and dead intervals, MTU, the DR and BDR of a broadcast network, and how many neighbors it hears.
+        Two routers on a link become neighbors only when their areas, network types, and timers match and
+        neither end is passive; mismatched MTUs stop them in exstart. Each end's cost is its own direction's.
+        One call covers every device; name devices only to leave the others out.
+        """
+        items, errors = await collect(devices, lambda platform: platform.ospf_interfaces())
+        return Collection[OspfInterface](items=items, errors=errors)
 
     if statistics is not None:
 

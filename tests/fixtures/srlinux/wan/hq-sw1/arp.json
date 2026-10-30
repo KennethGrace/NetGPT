@@ -1,0 +1,34 @@
+{
+ "result": [
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "172.20.21.1",
+           "link-layer-address": "EE:87:68:D6:42:B0",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-30T04:03:10.894Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

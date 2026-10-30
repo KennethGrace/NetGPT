@@ -1,0 +1,258 @@
+{
+ "result": [
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "subinterface": [
+      {
+       "index": 0,
+       "type": "srl_nokia-interfaces:routed"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/3",
+     "subinterface": [
+      {
+       "index": 0,
+       "type": "srl_nokia-interfaces:routed"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/10",
+     "subinterface": [
+      {
+       "index": 0,
+       "type": "srl_nokia-interfaces:routed"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/20",
+     "subinterface": [
+      {
+       "index": 0,
+       "type": "srl_nokia-interfaces:routed"
+      }
+     ]
+    },
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0
+      }
+     ]
+    },
+    {
+     "name": "system0",
+     "subinterface": [
+      {
+       "index": 0
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/3",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/10",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/20",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    },
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    },
+    {
+     "name": "system0",
+     "subinterface": [
+      {
+       "index": 0,
+       "oper-state": "up"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "address": [
+         {
+          "ip-prefix": "10.1.0.0/31"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/3",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "address": [
+         {
+          "ip-prefix": "10.10.0.0/31"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/10",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "address": [
+         {
+          "ip-prefix": "10.10.10.1/24"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/20",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "address": [
+         {
+          "ip-prefix": "10.1.0.2/31"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "address": [
+         {
+          "ip-prefix": "172.20.21.11/24"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "system0",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "address": [
+         {
+          "ip-prefix": "10.0.0.1/32"
+         }
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "srl_nokia-network-instance:network-instance": [
+    {
+     "name": "default",
+     "type": "srl_nokia-network-instance:default"
+    },
+    {
+     "name": "mgmt",
+     "type": "srl_nokia-network-instance:ip-vrf"
+    }
+   ]
+  },
+  {
+   "srl_nokia-network-instance:network-instance": [
+    {
+     "name": "default",
+     "interface": [
+      {
+       "name": "ethernet-1/1.0"
+      },
+      {
+       "name": "ethernet-1/10.0"
+      },
+      {
+       "name": "ethernet-1/20.0"
+      },
+      {
+       "name": "ethernet-1/3.0"
+      },
+      {
+       "name": "system0.0"
+      }
+     ]
+    },
+    {
+     "name": "mgmt",
+     "interface": [
+      {
+       "name": "mgmt0.0"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

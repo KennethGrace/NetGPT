@@ -98,6 +98,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - One `get` can fetch several narrow paths, which is cheaper than whole subtrees.
   - Management lives in network instance `mgmt`.
   - Asking for routes in an instance a device lacks returns an empty list, not an error.
+  - OSPF: a neighbor's `up-time` is in hundredths of a second, and 0.0.0.0 names no router (the DR of a point-to-point link). A wildcard `get` on a device without OSPF returns `{}`.
   - Each ping is a CLI session; about 16 at once is the most a sweep gains from.
   - The lab's nodes are 7220 IXR-D2L, whose 25G ports accept `port-speed` 1G, 10G, or 25G. Ports come in groups that share a speed mode: a port left at 25G goes down, "unsupported-speed", when another in its group is set to 10G or 1G, and `commit validate` doesn't catch it. Setting 25G explicitly fails validation even alone, so leave it unset.
 - **Junos details** (learned on real QFX5120 and EX4400 switches, Junos 23.4R2):
@@ -150,7 +151,8 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Mixing vendors on one cable will need port names normalized (`Gi1/0/45` and `GigabitEthernet1/0/45`), so both ends match.
 - **OSPF track** (branch `feature/ospf`):
   - Phase 1 is done: the WAN lab. Every adjacency is Full, and the branch's traffic to Ops goes through HQ (cost 22) while its own 1G link to Ops sits idle.
-  - Phase 2: OSPF in the tools: neighbors (state, area, uptime) and OSPF interfaces (cost, type, passive, timers), read from SR Linux, with fixtures from the WAN lab. Routes already carry `ospfv2`, metric, and preference.
+  - Phase 2 is done: `ospf_neighbors` and `ospf_interfaces`, read from SR Linux in one `get` of narrow paths (the link-state database stays on the device), with fixtures recorded from the WAN lab (`tests/fixtures/srlinux/wan/`). Routes already carried `ospfv2`, metric, and preference.
+  - The WAN lab's adjacencies reset now and then: hq-core's three went down and back at different times in its first 10 minutes, then held. hq-core carries every cross-site flow and counts the most input errors, so lost bursts of hellos are the guess.
   - Phase 3: an OSPF view for `topology` and the map: routers by area and site, adjacencies with their state and each direction's cost, and a cable LLDP sees with no adjacency flagged.
   - Phase 4: Junos OSPF.
   - Phase 5: WAN faults for the gremlin: a cost that moves traffic, an area mismatch, an MTU mismatch stuck in ExStart, a passive interface, mismatched hello timers.
@@ -187,6 +189,6 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 3: the map inside MCP clients (MCP Apps).
 - **Known gaps:**
   - `topology` and the forwarding walk are IPv4 only. Junos's interfaces and routes include IPv6; SR Linux's don't yet.
-  - `bgp_sessions` is Junos only so far, and `ping` isn't on Junos yet.
+  - `bgp_sessions` is Junos only so far, the OSPF tools SR Linux only, and `ping` isn't on Junos yet.
   - A path and its return path are separate views.
   - A sweep from the NetGPT host can't tell "unreachable" from "empty".

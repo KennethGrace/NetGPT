@@ -209,6 +209,56 @@ class BgpSession(BaseModel):
     active_prefixes: int | None = Field(None, description="How many of the received prefixes are the best route, and in use.")
 
 
+class OspfInterface(BaseModel):
+    """
+    An interface a router runs OSPF on: the area it is in, and the settings both
+    ends of a link must agree on before they become neighbors.
+    """
+
+    device: str
+    network_instance: str
+    router_id: str | None = Field(None, description="This router's OSPF router ID.")
+    area: str = Field(description="The area, for example 0.0.0.0. Both ends of a link must be in the same one.")
+    interface: str
+    address: str | None = None
+    network_type: str | None = Field(None, description="point-to-point or broadcast. Both ends of a link must agree.")
+    state: str | None = Field(
+        None,
+        description="Its OSPF state: point-to-point, designated-router, backup-designated-router, dr-other, waiting, or down.",
+    )
+    passive: bool = Field(False, description="Passive: OSPF advertises the network but sends no hellos and forms no adjacency on it.")
+    cost: int | None = Field(None, description="This end's cost to send out of the interface. Each direction of a link has its own.")
+    hello_interval: int | None = Field(None, description="Seconds between hellos. Both ends of a link must agree, as on the dead interval.")
+    dead_interval: int | None = None
+    mtu: int | None = Field(None, description="The MTU OSPF advertises. When the two ends differ, their adjacency sticks in exstart.")
+    neighbors: int | None = Field(None, description="How many neighbors it hears.")
+    designated_router: str | None = Field(None, description="On a broadcast network, the router ID of the designated router.")
+    backup_designated_router: str | None = None
+
+
+class OspfNeighbor(BaseModel):
+    """An OSPF neighbor, as one router sees it on one of its interfaces."""
+
+    device: str
+    network_instance: str
+    area: str
+    interface: str = Field(description="This router's interface that hears the neighbor.")
+    router_id: str = Field(description="The neighbor's router ID.")
+    address: str | None = Field(None, description="The neighbor's address on the link.")
+    state: str = Field(
+        description=(
+            "full: the adjacency is complete, and routes are exchanged. 2-way: normal between two routers that are "
+            "neither DR nor BDR on a broadcast network, but no adjacency anywhere else. init: this router hears the "
+            "neighbor, but the neighbor doesn't hear it. exstart or exchange that doesn't move on: usually the two ends' "
+            "MTUs differ. down: its hellos stopped."
+        )
+    )
+    priority: int | None = None
+    dead_seconds: int | None = Field(None, description="Seconds left before it is declared down, unless it says hello again.")
+    uptime_seconds: int | None = Field(None, description="How long the adjacency has been up.")
+    state_changes: int | None = Field(None, description="How many times its state has changed. A count that keeps climbing is a flap.")
+
+
 class PingResult(BaseModel):
     """The outcome of ICMP echo requests from a source to one destination."""
 
