@@ -259,6 +259,19 @@ class OspfInterface(BaseModel):
     backup_designated_router: str | None = None
 
 
+class OspfInterfaces(Collection[OspfInterface]):
+    """Every OSPF interface the devices reported, and what keeps routers that share a network from being neighbors."""
+
+    mismatches: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For each network two of these routers share: each setting their ends disagree on, which keeps them from "
+            "becoming neighbors, with how the other OSPF interfaces that aren't passive are set; and an end that is "
+            "passive. Empty when every pair agrees."
+        ),
+    )
+
+
 class OspfNeighbor(BaseModel):
     """An OSPF neighbor, as one router sees it on one of its interfaces."""
 

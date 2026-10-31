@@ -44,14 +44,14 @@ from netgpt.primitives import (
     InterfaceTraffic,
     LldpNeighbor,
     MacEntry,
-    OspfInterface,
+    OspfInterfaces,
     OspfNeighbor,
     PingResult,
     Route,
 )
 from netgpt.forwarding import ForwardingPath, TraceError, trace_path
 from netgpt.statistics import DEFAULT_INTERVAL, DEFAULT_WINDOW, MAX_CHART_PORTS, Chart, ChartError, Metric, Poller, describe_chart
-from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_ospf, build_topology, port_of
+from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_ospf, build_topology, ospf_mismatches, port_of
 from netgpt.views import View, ViewError, describe, make_view
 
 logger = logging.getLogger("netgpt")
@@ -378,19 +378,26 @@ def build_server(
         return Collection[OspfNeighbor](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
-    async def ospf_interfaces(devices: DeviceNames = None) -> Collection[OspfInterface]:
+    async def ospf_interfaces(devices: DeviceNames = None) -> OspfInterfaces:
         """
         Return the interfaces each device runs OSPF on: the area and its type (normal, stub, or nssa), network
         type, cost, whether it is passive, its authentication (none, or the algorithm, such as md5, and the
         keychain), hello and dead intervals, MTU, the DR and BDR of a broadcast network, and how many neighbors
         it hears. Two routers on a link become neighbors only when their areas, area types, network types,
         authentication, and timers match and neither end is passive; mismatched MTUs stop them in exstart.
+        mismatches names, for each network two of the devices share, the settings their ends disagree on, and
+        how the other OSPF interfaces are set, which says which end is set unlike the rest.
         Authentication keys are never read, so two ends with the same algorithm can still disagree on the key.
         Each end's cost is its own direction's.
         One call covers every device; name devices only to leave the others out.
         """
-        items, errors = await collect(devices, lambda platform: platform.ospf_interfaces())
-        return Collection[OspfInterface](items=items, errors=errors)
+        (items, ospf_errors), (found, interface_errors) = await asyncio.gather(
+            collect(devices, lambda platform: platform.ospf_interfaces()),
+            collect(devices, optional(lambda platform: platform.interfaces())),
+        )
+        # A device that can't be reached fails both the same way; report it once.
+        errors = list({(error.device, error.error): error for error in ospf_errors + interface_errors}.values())
+        return OspfInterfaces(items=items, errors=errors, mismatches=ospf_mismatches(found, items))
 
     if statistics is not None:
 

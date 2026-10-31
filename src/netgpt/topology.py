@@ -508,20 +508,131 @@ def _ospf_says(interface: OspfInterface) -> str:
     return f"{interface.device} {interface.interface} runs OSPF: {', '.join(settings)}."
 
 
-def _ospf_problems(ends: list[OspfInterface], states: dict[str, str | None]) -> list[str]:
+# The settings in OSPF_AGREEMENT that each interface has of its own, by their names there. Areas differ by design,
+# and an area's type is one setting per router, so how the other interfaces are set says nothing about either.
+OSPF_INTERFACE_SETTINGS = {
+    "network types": "network type", "hello intervals": "hello interval", "dead intervals": "dead interval", "MTUs": "MTU",
+    "authentication types": "authentication type",
+}
+
+
+def _end(interface: OspfInterface) -> str:
+    return f"{interface.device} {interface.interface}"
+
+
+def _how_the_others_are_set(setting: str, field: str, ends: list[OspfInterface], others: list[OspfInterface]) -> str | None:
     """
-    What keeps two OSPF interfaces on one network from a full adjacency: the settings
-    they disagree on, a passive end, and how far the adjacency got from each side.
+    How the other OSPF interfaces that send hellos have one setting two ends disagree
+    on, so the end set unlike the rest is a fact the reader has, not a guess. Which
+    end is wrong stays the reader's to decide.
     """
-    problems = []
+    counts: dict[object, int] = defaultdict(int)
+    for other in others:
+        if getattr(other, field) is not None:
+            counts[getattr(other, field)] += 1
+    if not counts:
+        return None
+    total = sum(counts.values())
+    if len(counts) > 1:
+        tally = sorted(counts.items(), key=lambda item: -item[1])
+        # The setting's name once, with the most common value: "5 have authentication type none and 3 have md5".
+        parts = [f"{count} {'has' if count == 1 else 'have'} {setting + ' ' if index == 0 else ''}{value}"
+                 for index, (value, count) in enumerate(tally)]
+        return f"Of the other {total} OSPF interfaces that aren't passive, {', '.join(parts[:-1])} and {parts[-1]}."
+    [(value, _)] = counts.items()
+    others_have = (
+        f"The other OSPF interface that isn't passive has {setting} {value}" if total == 1
+        else f"The other {total} OSPF interfaces that aren't passive all have {setting} {value}"
+    )
+    alike = [end for end in ends if getattr(end, field) == value]
+    if not alike:
+        return f"{others_have}, unlike either end."
+    unlike = next(end for end in ends if end is not alike[0])
+    return f"{others_have}, as {_end(alike[0])} does; {_end(unlike)} is the only one with {getattr(unlike, field)}."
+
+
+def ospf_disagreements(ends: list[OspfInterface], others: list[OspfInterface]) -> list[str]:
+    """
+    What two OSPF interfaces on one network disagree on, from their settings alone:
+    each setting that differs, with how the other OSPF interfaces that send hellos
+    (others) have it when it is an interface's own, and an end that is passive.
+    """
+    lines = []
     first, second = ends
     for name, field in OSPF_AGREEMENT:
         mine, theirs = getattr(first, field), getattr(second, field)
         if mine is not None and theirs is not None and mine != theirs:
-            problems.append(
-                f"The {name} differ: {mine} at {first.device} {first.interface}, {theirs} at {second.device} {second.interface}."
-            )
-    problems += [f"{end.device} {end.interface} is passive, so it sends no hellos." for end in ends if end.passive]
+            lines.append(f"The {name} differ: {mine} at {_end(first)}, {theirs} at {_end(second)}.")
+            if name in OSPF_INTERFACE_SETTINGS:
+                rest = _how_the_others_are_set(OSPF_INTERFACE_SETTINGS[name], field, ends, others)
+                lines += [rest] if rest else []
+    lines += [f"{_end(end)} is passive, so it sends no hellos." for end in ends if end.passive]
+    return lines
+
+
+def _others(ends: list[OspfInterface], interfaces: list[OspfInterface]) -> list[OspfInterface]:
+    """The interfaces, in the ends' network instance, that send hellos and aren't either end."""
+    taken = {(end.device, end.interface) for end in ends}
+    return [
+        interface for interface in interfaces
+        if not interface.passive and interface.network_instance == ends[0].network_instance
+        and (interface.device, interface.interface) not in taken
+    ]
+
+
+def _addresses(interfaces: Iterable[Interface]) -> dict[tuple[str, str], list[ipaddress.IPv4Interface]]:
+    """Each interface's IPv4 addresses, with their prefix lengths, by device and interface name."""
+    found: dict[tuple[str, str], list[ipaddress.IPv4Interface]] = defaultdict(list)
+    for interface in interfaces:
+        for address in interface.addresses:
+            try:
+                found[(interface.device, interface.name)].append(ipaddress.IPv4Interface(address))
+            except ValueError:
+                continue
+    return found
+
+
+def _ospf_networks(
+    ospf_interfaces: Iterable[OspfInterface], prefixes: dict[tuple[str, str], list[ipaddress.IPv4Interface]]
+) -> dict[ipaddress.IPv4Network, list[OspfInterface]]:
+    """
+    The OSPF interfaces on each network, in address order, found from their devices'
+    own addresses (prefixes, from _addresses). An interface's /32 is on no network.
+    """
+    members: dict[ipaddress.IPv4Network, list[OspfInterface]] = defaultdict(list)
+    for interface in ospf_interfaces:
+        found = prefixes.get((interface.device, interface.interface), [])
+        exact = [prefix for prefix in found if str(prefix.ip) == interface.address]
+        chosen = (exact or found)[:1]
+        if chosen and chosen[0].network.prefixlen < chosen[0].network.max_prefixlen:
+            members[chosen[0].network].append(interface)
+    return dict(sorted(members.items(), key=lambda item: (item[0].network_address, item[0].prefixlen)))
+
+
+def ospf_mismatches(interfaces: Iterable[Interface], ospf_interfaces: Iterable[OspfInterface]) -> list[str]:
+    """
+    What keeps routers that share a network from becoming neighbors, from their
+    settings alone: for each network with two routers' OSPF interfaces on it, in each
+    network instance, what the two ends disagree on (ospf_disagreements), after the network.
+    """
+    ospf_interfaces = list(ospf_interfaces)
+    prefixes = _addresses(interfaces)
+    mismatches = []
+    for instance in sorted({interface.network_instance for interface in ospf_interfaces}):
+        mine = [interface for interface in ospf_interfaces if interface.network_instance == instance]
+        for network, ends in _ospf_networks(mine, prefixes).items():
+            if len(ends) == 2 and ends[0].device != ends[1].device:
+                where = f"{network}" if instance == "default" else f"{network} in {instance}"
+                mismatches += [f"{where}: {line}" for line in ospf_disagreements(ends, _others(ends, mine))]
+    return mismatches
+
+
+def _ospf_problems(ends: list[OspfInterface], states: dict[str, str | None], others: list[OspfInterface]) -> list[str]:
+    """
+    What keeps two OSPF interfaces on one network from a full adjacency: the settings
+    they disagree on (ospf_disagreements), and how far the adjacency got from each side.
+    """
+    problems = ospf_disagreements(ends, others)
     if all(state == "full" for state in states.values()):
         return problems
     # Two routers alone on a network always elect a DR, so between them even 2-way is stuck.
@@ -573,24 +684,13 @@ def build_ospf(
         graph.node(error.device, kind="device", error=error.error, role=device.role if device else None,
                    platform=device.platform if device else None)
 
-    # Which network each interface is on, from the device's own addresses.
-    prefixes: dict[tuple[str, str], list[ipaddress.IPv4Interface]] = defaultdict(list)
+    interfaces = list(interfaces)
+    prefixes = _addresses(interfaces)
     on_network: dict[ipaddress.IPv4Network, list[tuple[str, str, ipaddress.IPv4Interface]]] = defaultdict(list)
     for interface in interfaces:
-        for address in interface.addresses:
-            try:
-                prefix = ipaddress.IPv4Interface(address)
-            except ValueError:
-                continue
-            prefixes[(interface.device, interface.name)].append(prefix)
-            if interface.network_instance == network_instance and interface.mode == "routed":
+        if interface.network_instance == network_instance and interface.mode == "routed":
+            for prefix in prefixes.get((interface.device, interface.name), []):
                 on_network[prefix.network].append((interface.device, interface.name, prefix))
-
-    def network_of(interface: OspfInterface) -> ipaddress.IPv4Network | None:
-        found = prefixes.get((interface.device, interface.interface), [])
-        exact = [prefix for prefix in found if str(prefix.ip) == interface.address]
-        chosen = (exact or found)[:1]
-        return chosen[0].network if chosen else None
 
     def state_of(device: str, interface: str, other: str) -> str | None:
         """How far device's adjacency with other got on interface, or None if it doesn't hear it."""
@@ -600,13 +700,8 @@ def build_ospf(
                 return neighbor.state
         return None
 
-    members: dict[ipaddress.IPv4Network, list[OspfInterface]] = defaultdict(list)
-    for interface in mine:
-        network = network_of(interface)
-        if network is not None and network.prefixlen < network.max_prefixlen:
-            members[network].append(interface)
     paired: set[tuple[str, str]] = set()
-    for network, ends in sorted(members.items(), key=lambda item: (item[0].network_address, item[0].prefixlen)):
+    for network, ends in _ospf_networks(mine, prefixes).items():
         routers = {end.device for end in ends}
         evidence = [_ospf_says(end) for end in ends]
         if len(ends) == 2 and len(routers) == 2:
@@ -622,7 +717,7 @@ def build_ospf(
                                         for end, other in (ends, ends[::-1]) if states[end.device]]:
                 if line not in link.evidence:
                     link.evidence.append(line)
-            link.problems = _ospf_problems(ends, states)
+            link.problems = _ospf_problems(ends, states, _others(ends, mine))
             link.one_sided = sum(state is not None for state in states.values()) == 1
             paired |= {(end.device, end.interface) for end in ends}
             continue

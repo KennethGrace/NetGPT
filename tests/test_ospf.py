@@ -13,7 +13,7 @@ import pytest
 from netgpt.inventory import Credentials, Device
 from netgpt.platforms.srlinux import OSPF_PATHS, SRLinuxPlatform, strip_module_prefixes
 from netgpt.primitives import DeviceError, DeviceInfo, Interface, OspfInterface, OspfNeighbor
-from netgpt.topology import build_ospf
+from netgpt.topology import build_ospf, ospf_mismatches
 
 from fakes import FIXTURES, recorded_wan, replay
 
@@ -133,11 +133,11 @@ ROUTER_IDS = {"r1": "10.0.0.1", "r2": "10.0.0.2"}
 ROUTERS = [DeviceInfo(name=name, platform="nokia_srlinux", host=name) for name in ROUTER_IDS]
 
 
-def ospf_interface(device: str, address: str, **settings: object) -> OspfInterface:
-    """An OSPF interface on ethernet-1/1.0, point-to-point in area 0 unless settings say otherwise."""
+def ospf_interface(device: str, address: str, interface: str = "ethernet-1/1.0", **settings: object) -> OspfInterface:
+    """An OSPF interface, point-to-point in area 0 unless settings say otherwise."""
     fields = dict(area="0.0.0.0", network_type="point-to-point", cost=10, hello_interval=10, dead_interval=40, mtu=1500)
     fields.update(settings)
-    return OspfInterface(device=device, network_instance="default", router_id=ROUTER_IDS[device], interface="ethernet-1/1.0",
+    return OspfInterface(device=device, network_instance="default", router_id=ROUTER_IDS[device], interface=interface,
                          address=address, **fields)
 
 
@@ -216,6 +216,61 @@ def test_authentication_at_one_end_only_is_drawn_by_its_algorithm_and_keychain()
     [link] = graph.links
     assert link.problems[0] == "The authentication types differ: md5 at r1 ethernet-1/1.0, none at r2 ethernet-1/1.0."
     assert any(line.endswith("md5 authentication, keychain ospf-dc.") for line in link.evidence)
+
+
+def test_the_end_set_unlike_every_other_ospf_interface_is_named_as_the_only_one() -> None:
+    ospf = [
+        ospf_interface("r1", "10.1.0.0", authentication="md5", keychain="ospf-wan"),
+        ospf_interface("r2", "10.1.0.1", authentication="none"),
+        ospf_interface("r1", "10.2.0.0", "ethernet-1/2.0", authentication="none"),
+        ospf_interface("r2", "10.3.0.0", "ethernet-1/2.0", authentication="none"),
+        # A passive interface sends no hellos, so how it authenticates them doesn't count.
+        ospf_interface("r2", "10.4.0.1", "ethernet-1/3.0", authentication="md5", passive=True),
+    ]
+    [link] = build_ospf(ROUTERS, LINK, ospf, [], []).links
+    assert link.problems[:2] == [
+        "The authentication types differ: md5 at r1 ethernet-1/1.0, none at r2 ethernet-1/1.0.",
+        "The other 2 OSPF interfaces that aren't passive all have authentication type none, as r2 ethernet-1/1.0 does; "
+        "r1 ethernet-1/1.0 is the only one with md5.",
+    ]
+
+
+def test_when_the_other_interfaces_are_set_both_ways_each_way_is_counted() -> None:
+    ospf = [ospf_interface("r1", "10.1.0.0"), ospf_interface("r2", "10.1.0.1", hello_interval=5)]
+    ospf += [ospf_interface("r1", "10.2.0.0", f"ethernet-1/{port}.0") for port in (2, 3, 4)]
+    ospf += [ospf_interface("r2", "10.3.0.0", "ethernet-1/2.0", hello_interval=5)]
+    [link] = build_ospf(ROUTERS, LINK, ospf, [], []).links
+    assert link.problems[:2] == [
+        "The hello intervals differ: 10 at r1 ethernet-1/1.0, 5 at r2 ethernet-1/1.0.",
+        "Of the other 4 OSPF interfaces that aren't passive, 3 have hello interval 10 and 1 has 5.",
+    ]
+
+
+def test_how_the_other_interfaces_are_set_says_nothing_of_areas_which_differ_by_design() -> None:
+    ospf = [ospf_interface("r1", "10.1.0.0"), ospf_interface("r2", "10.1.0.1", area="0.0.0.1")]
+    ospf += [ospf_interface("r1", "10.2.0.0", "ethernet-1/2.0")]
+    [link] = build_ospf(ROUTERS, LINK, ospf, [], []).links
+    assert [problem for problem in link.problems if "other" in problem] == []
+
+
+def test_ospf_interfaces_names_each_mismatch_after_its_network() -> None:
+    ospf = [
+        ospf_interface("r1", "10.1.0.0", passive=True),
+        ospf_interface("r2", "10.1.0.1", mtu=9000),
+        ospf_interface("r2", "10.3.0.0", "ethernet-1/2.0"),
+    ]
+    assert ospf_mismatches(LINK, ospf) == [
+        "10.1.0.0/31: The MTUs differ: 1500 at r1 ethernet-1/1.0, 9000 at r2 ethernet-1/1.0.",
+        "10.1.0.0/31: The other OSPF interface that isn't passive has MTU 1500, as r1 ethernet-1/1.0 does; "
+        "r2 ethernet-1/1.0 is the only one with 9000.",
+        "10.1.0.0/31: r1 ethernet-1/1.0 is passive, so it sends no hellos.",
+    ]
+
+
+@pytest.mark.anyio
+async def test_every_pair_of_ospf_interfaces_in_the_wan_lab_agrees() -> None:
+    wan = await recorded_wan()
+    assert ospf_mismatches(wan.interfaces, wan.ospf_interfaces) == []
 
 
 def test_a_neighbor_heard_by_one_end_only_is_a_one_sided_link() -> None:
