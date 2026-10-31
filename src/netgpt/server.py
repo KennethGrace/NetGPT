@@ -614,12 +614,14 @@ def main() -> None:
     # stdout carries the MCP protocol, so logs must go to stderr.
     logging.basicConfig(level=args.log_level, stream=sys.stderr)
     inventory = Inventory.load(Path(args.inventory))
-    try:
-        store = open_store(args.store)
-        # Find out now if the store can't be used, rather than when the first client connects.
-        asyncio.run(check_store(store))
-    except StoreError as error:
-        parser.error(str(error))
-    statistics = Poller(inventory, interval=args.poll_interval, store=store) if args.poll_interval > 0 else None
+    statistics = None
+    if args.poll_interval > 0:
+        try:
+            store = open_store(args.store)
+            # Find out now if the store can't be used, rather than when the first client connects.
+            asyncio.run(check_store(store))
+        except StoreError as error:
+            parser.error(str(error))
+        statistics = Poller(inventory, interval=args.poll_interval, store=store)
     server = build_server(inventory, statistics=statistics)
     server.run("stdio")

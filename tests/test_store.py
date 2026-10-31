@@ -156,6 +156,41 @@ async def test_samples_in_timescaledb_survive_a_restart(timescale: MakeStore) ->
     assert [sample.counters.in_octets for sample in await after.samples("leaf1", "ethernet-1/1", since=0)] == [1, 2]
 
 
+@pytest.mark.anyio
+async def test_a_timescaledb_store_keeps_working_after_the_database_drops_its_connections(timescale: MakeStore) -> None:
+    import psycopg
+
+    store = await timescale(3600)
+    await store.add(0, [counters("leaf1", "ethernet-1/1", 1)])
+    # As a database restart would: end every connection the store holds. The tests' database is theirs alone.
+    async with await psycopg.AsyncConnection.connect(TEST_STORE, autocommit=True) as connection:
+        await connection.execute(
+            "SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND usename = current_user AND pid <> pg_backend_pid()"
+        )
+    await store.add(30, [counters("leaf1", "ethernet-1/1", 2)])
+    assert [sample.counters.in_octets for sample in await store.samples("leaf1", "ethernet-1/1", since=0)] == [1, 2]
+
+
+@pytest.mark.anyio
+async def test_two_timescaledb_stores_opening_at_once_set_up_one_database(timescale: MakeStore) -> None:
+    import asyncio
+
+    import psycopg
+
+    from netgpt.store import TimescaleStore
+
+    stores = await asyncio.gather(*(timescale(3600) for _ in range(4)))
+    store = stores[0]
+    assert isinstance(store, TimescaleStore)
+    async with await psycopg.AsyncConnection.connect(store.url) as connection:
+        found = await connection.execute(
+            "SELECT count(*) FROM timescaledb_information.jobs "
+            "WHERE hypertable_name = 'interface_samples' AND hypertable_schema = current_schema()"
+        )
+        assert await found.fetchall() == [(1,)]  # One retention policy, however many stores set it.
+
+
 def test_a_store_url_with_a_password_in_it_is_refused_without_saying_the_password() -> None:
     pytest.importorskip("psycopg")
     from netgpt.store import TimescaleStore

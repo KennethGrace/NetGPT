@@ -149,7 +149,9 @@ class TimescaleStore(Store):
                 await self._create(connection)
         except Error as error:
             raise StoreError(f"Can't use the store at {self.url}: {error}") from None
-        pool = AsyncConnectionPool(self.url, min_size=1, max_size=4, open=False)
+        # Each connection is checked as it is handed out, so one the server dropped (a restart) is replaced
+        # rather than failing a poll.
+        pool = AsyncConnectionPool(self.url, min_size=1, max_size=4, open=False, check=AsyncConnectionPool.check_connection)
         try:
             await pool.open(wait=True, timeout=10)
         except PoolTimeout as error:
@@ -160,6 +162,9 @@ class TimescaleStore(Store):
     async def _create(self, connection: Any) -> None:
         """Make the tables if they aren't there, and drop raw samples older than the window."""
         columns = ", ".join(f"{name} numeric(20)" + (" NOT NULL" if name != "carrier_transitions" else "") for name in COUNTERS)
+        # Two NetGPTs starting at once would both make the tables, and IF NOT EXISTS doesn't stop two at the same
+        # moment. This is one transaction, and the lock is held until it commits.
+        await connection.execute("SELECT pg_advisory_xact_lock(hashtext('netgpt.store'))")
         # Counters are unsigned 64-bit, past bigint's reach, so they are numeric.
         await connection.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
         await connection.execute(
