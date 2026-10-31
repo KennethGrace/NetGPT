@@ -7,12 +7,14 @@ between polls, so the rates are known exactly.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 import pytest
 
 from netgpt.inventory import Inventory
 from netgpt.primitives import InterfaceCounters
-from netgpt.statistics import ChartError, Poller, Sample, rate, speed_name, summarize
+from netgpt.statistics import ChartError, Poller, rate, speed_name, summarize
+from netgpt.store import MemoryStore, Sample, StoreError
 
 from fakes import FakePlatform
 
@@ -46,7 +48,7 @@ def reading(in_octets: int, in_errors: int = 0, transitions: int = 0) -> Interfa
 
 
 def poller(inventory: Inventory, clock: Clock, window: float = 3600.0) -> Poller:
-    return Poller(inventory, platforms={"fake": FakePlatform}, interval=30, window=window, clock=clock)
+    return Poller(inventory, platforms={"fake": FakePlatform}, interval=30, store=MemoryStore(window), clock=clock)
 
 
 @pytest.mark.anyio
@@ -56,7 +58,7 @@ async def test_rates_come_from_the_difference_between_two_polls(inventory: Inven
     await polls.poll()
     clock.now += 30
     await polls.poll()
-    items, _ = polls.traffic(["leaf1"], minutes=15)
+    items, _ = await polls.traffic(["leaf1"], minutes=15)
     [port] = items
     assert (port.interface, port.speed, port.minutes) == ("ethernet-1/1", "1G", 0.5)
     assert (port.in_mbps, port.out_mbps, port.in_percent, port.out_percent) == (10.0, 1.0, 1.0, 0.1)
@@ -70,16 +72,37 @@ async def test_a_device_that_fails_or_cannot_be_polled_says_why_and_the_rest_sti
     clock = Clock()
     polls = poller(inventory, clock)
     await polls.poll()
-    _, errors = polls.traffic(None, minutes=15)
+    _, errors = await polls.traffic(None, minutes=15)
     # One poll is not enough for a rate.
     assert {error.device for error in errors} == {"leaf1", "leaf2", "broken", "mystery"}
     assert "No rates yet" in next(error.error for error in errors if error.device == "leaf1")
     clock.now += 30
     await polls.poll()
-    items, errors = polls.traffic(None, minutes=15)
+    items, errors = await polls.traffic(None, minutes=15)
     assert [item.device for item in items] == ["leaf1", "leaf2"]
     reasons = {error.device: error.error for error in errors}
     assert "connection refused" in reasons["broken"] and "supported platforms: fake" in reasons["mystery"]
+
+
+class FullStore(MemoryStore):
+    """A store that can't keep anything."""
+
+    async def add(self, at: float, readings: Sequence[InterfaceCounters]) -> None:
+        raise StoreError("could not extend file: No space left on device")
+
+
+@pytest.mark.anyio
+async def test_counters_the_store_cannot_keep_are_reported_for_each_device_and_polling_goes_on(
+    inventory: Inventory, counter_reads: dict[str, int]
+) -> None:
+    polls = Poller(inventory, platforms={"fake": FakePlatform}, interval=30, store=FullStore(), clock=Clock())
+    await polls.poll()
+    await polls.poll()
+    assert counter_reads["leaf1"] == 2
+    _, errors = await polls.traffic(["leaf1"], minutes=15)
+    assert [error.error for error in errors] == [
+        "leaf1 answered, but its counters couldn't be kept: could not extend file: No space left on device"
+    ]
 
 
 def test_a_counter_that_goes_backwards_was_reset_and_that_interval_is_not_measured() -> None:
@@ -110,10 +133,10 @@ async def test_figures_go_back_no_further_than_the_window(inventory: Inventory, 
     for at in (0, 30, 60, 90):
         clock.now = at
         await polls.poll()
-    items, _ = polls.traffic(["leaf1"], minutes=60)
+    items, _ = await polls.traffic(["leaf1"], minutes=60)
     assert items[0].minutes == 1.0
     # The poll at 0 seconds is more than a window older than the last, and is forgotten.
-    assert [sample.at for sample in polls._samples[("leaf1", "ethernet-1/1")]] == [30, 60, 90]
+    assert [sample.at for sample in await polls.store.samples("leaf1", "ethernet-1/1", since=0)] == [30, 60, 90]
 
 
 @pytest.mark.anyio
@@ -141,14 +164,14 @@ async def test_a_chart_draws_each_port_both_ways_in_the_metric_asked_for(invento
         await polls.poll()
         clock.now += 30
     clock.now -= 30
-    traffic = polls.chart("Leaves", ["leaf1", "leaf2:ethernet-1/1"], "traffic", 15)
+    traffic = await polls.chart("Leaves", ["leaf1", "leaf2:ethernet-1/1"], "traffic", 15)
     assert traffic.ports == ["leaf1:ethernet-1/1", "leaf2:ethernet-1/1"] and traffic.unit == "Mbit/s"
     assert [(line.port, line.direction, line.points) for line in traffic.lines[:2]] == [
         ("leaf1:ethernet-1/1", "in", [(1030, 10.0), (1060, 10.0)]),
         ("leaf1:ethernet-1/1", "out", [(1030, 1.0), (1060, 1.0)]),
     ]
-    assert [value for _, value in polls.chart("t", ["leaf1"], "percent", 15).lines[0].points] == [1.0, 1.0]
-    assert [value for _, value in polls.chart("t", ["leaf1"], "errors", 15).lines[0].points] == [2.0, 2.0]
+    assert [value for _, value in (await polls.chart("t", ["leaf1"], "percent", 15)).lines[0].points] == [1.0, 1.0]
+    assert [value for _, value in (await polls.chart("t", ["leaf1"], "errors", 15)).lines[0].points] == [2.0, 2.0]
 
 
 @pytest.mark.anyio
@@ -156,7 +179,7 @@ async def test_a_chart_of_names_nobody_polls_or_too_many_ports_is_refused(invent
     polls = poller(inventory, Clock())
     await polls.poll()
     with pytest.raises(ChartError, match="Name a device, or one of its ports: leaf1:ethernet-1/1, leaf2:ethernet-1/1."):
-        polls.chart("t", ["leaf1:ethernet-1/9"], "traffic", 15)
-    polls._samples.update({("leaf1", f"ethernet-1/{port}"): polls._samples[("leaf1", "ethernet-1/1")] for port in range(2, 8)})
+        await polls.chart("t", ["leaf1:ethernet-1/9"], "traffic", 15)
+    await polls.store.add(1000, [reading(0).model_copy(update={"interface": f"ethernet-1/{port}"}) for port in range(2, 8)])
     with pytest.raises(ChartError, match="That is 7 ports; a chart has room for 6"):
-        polls.chart("t", ["leaf1"], "traffic", 15)
+        await polls.chart("t", ["leaf1"], "traffic", 15)

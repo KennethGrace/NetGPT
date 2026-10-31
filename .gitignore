@@ -45,3 +45,6 @@ lab/.gremlin.json
 lab/wan/.gremlin.json
 lab/.scoreboard.jsonl
 lab/.transcripts/
+
+# Where this machine keeps its development database
+dev/.env

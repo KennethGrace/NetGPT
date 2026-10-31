@@ -50,7 +50,8 @@ from netgpt.primitives import (
     Route,
 )
 from netgpt.forwarding import ForwardingPath, TraceError, trace_path
-from netgpt.statistics import DEFAULT_INTERVAL, DEFAULT_WINDOW, MAX_CHART_PORTS, Chart, ChartError, Metric, Poller, describe_chart
+from netgpt.statistics import DEFAULT_INTERVAL, MAX_CHART_PORTS, REACH, Chart, ChartError, Metric, Poller, describe_chart
+from netgpt.store import STORE_HELP, StoreError, check_store, open_store
 from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_ospf, build_topology, ospf_mismatches, port_of
 from netgpt.views import View, ViewError, describe, make_view
 
@@ -128,7 +129,7 @@ DeviceNames = Annotated[
 
 
 Minutes = Annotated[
-    float, Field(description=f"How far back to look, in minutes. NetGPT keeps the last {DEFAULT_WINDOW / 60:g} minutes.")
+    float, Field(description=f"How far back to look, in minutes. NetGPT looks back as far as {REACH / 60:g} minutes.")
 ]
 
 
@@ -411,8 +412,11 @@ def build_server(
                 "covers every device; name devices only to leave the others out."
             ),
         )
-        def interface_traffic(devices: DeviceNames = None, minutes: Minutes = 15) -> Collection[InterfaceTraffic]:
-            items, errors = statistics.traffic(devices, minutes)
+        async def interface_traffic(devices: DeviceNames = None, minutes: Minutes = 15) -> Collection[InterfaceTraffic]:
+            try:
+                items, errors = await statistics.traffic(devices, minutes)
+            except StoreError as error:
+                raise ToolError(str(error)) from error
             return Collection[InterfaceTraffic](items=items, errors=errors)
 
     @server.tool(annotations=READ_ONLY)
@@ -507,8 +511,8 @@ def build_server(
             title: str, ports: ChartPorts, metric: Metric = "traffic", minutes: Minutes = 15
         ) -> Annotated[CallToolResult, Chart]:
             try:
-                drawn = statistics.chart(title, [await link_port(name) for name in ports], metric, minutes)
-            except ChartError as error:
+                drawn = await statistics.chart(title, [await link_port(name) for name in ports], metric, minutes)
+            except (ChartError, StoreError) as error:
                 raise ToolError(str(error)) from error
             # The model reads a summary; the page draws the chart from the structured content.
             return CallToolResult(
@@ -599,6 +603,7 @@ def main() -> None:
         help="Seconds between polls of every device's interface counters, which interface_traffic reads. "
         "0 turns polling, and the tool, off (default: %(default)g).",
     )
+    parser.add_argument("--store", metavar="memory|URL", help=STORE_HELP)
     parser.add_argument("--log-level", default="INFO", help="Logging level, written to stderr.")
     args = parser.parse_args()
     if args.inventory is None:
@@ -609,6 +614,14 @@ def main() -> None:
     # stdout carries the MCP protocol, so logs must go to stderr.
     logging.basicConfig(level=args.log_level, stream=sys.stderr)
     inventory = Inventory.load(Path(args.inventory))
-    statistics = Poller(inventory, interval=args.poll_interval) if args.poll_interval > 0 else None
+    statistics = None
+    if args.poll_interval > 0:
+        try:
+            store = open_store(args.store)
+            # Find out now if the store can't be used, rather than when the first client connects.
+            asyncio.run(check_store(store))
+        except StoreError as error:
+            parser.error(str(error))
+        statistics = Poller(inventory, interval=args.poll_interval, store=store)
     server = build_server(inventory, statistics=statistics)
     server.run("stdio")

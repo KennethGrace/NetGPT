@@ -1,0 +1,27 @@
+# TimescaleDB (PostgreSQL) for NetGPT's statistics, for `--store postgresql://netgpt@127.0.0.1:5432/netgpt`.
+#
+#   systemctl --user start podman.socket     # podman compose drives podman through its API socket
+#   podman compose -f dev/compose.yml up -d
+#
+# The server's password is POSTGRES_PASSWORD in ~/.config/netgpt/timescale.env (chmod 600), and NetGPT reads
+# the same one from ~/.pgpass (chmod 600), so neither is in this file or on a command line. It listens on
+# localhost only. Its data goes in a named volume, or in a directory named by NETGPT_TIMESCALE_DATA (in
+# dev/.env, which is gitignored), owned by the container's postgres user: `podman unshare chown 70:70 DIR`.
+name: netgpt-dev
+services:
+  timescale:
+    image: docker.io/timescale/timescaledb:2.31.0-pg17
+    restart: unless-stopped
+    env_file: ${HOME}/.config/netgpt/timescale.env
+    environment:
+      POSTGRES_USER: netgpt
+      POSTGRES_DB: netgpt
+      # timescaledb-tune sizes the server from these at its first start, rather than from the whole host.
+      TS_TUNE_MEMORY: 4GB
+      TS_TUNE_NUM_CPUS: "4"
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ${NETGPT_TIMESCALE_DATA:-timescale}:/var/lib/postgresql/data:Z
+volumes:
+  timescale: {}
