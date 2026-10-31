@@ -2,7 +2,8 @@
 
 // Charts of ports' rates over time, drawn in the conversation when the model calls
 // chart. Each chart asks the server for itself again whenever the poller has had
-// time for new samples, so it stays live while it is on the page.
+// time for new samples, so it stays live while it is on the page. A chart of a long
+// window comes from rollups (chart.step seconds a point), and says so in its caption.
 //
 // Each port takes the next of six colors in a fixed order (--series-1 to -6 in
 // app.css), so a port keeps its color as the chart updates. In is a solid line and
@@ -17,6 +18,8 @@ const netchart = (() => {
   const HEIGHT = 200;
   const MARGIN = { top: 12, right: 14, bottom: 24, left: 46 };
   const SLOTS = 6;
+  const HOUR = 3600;
+  const DAY = 24 * HOUR;
   // Charts on the page, each with the data it last drew and when it last asked for more.
   const live = new Set();
 
@@ -54,13 +57,42 @@ const netchart = (() => {
     return new Date(seconds * 1000).toLocaleTimeString([], options);
   }
 
+  // A moment, told as precisely as a chart over a span needs: the day too, once the span is longer than one.
+  function moment(seconds, span, withSeconds) {
+    if (span <= DAY) return clock(seconds, withSeconds);
+    const day = new Date(seconds * 1000).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+    return `${day} ${clock(seconds, false)}`;
+  }
+
   function timeTicks(start, end) {
     const span = end - start;
-    const steps = [10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
-    const step = steps.find((candidate) => span / candidate <= 5) || 3600;
+    const steps = [10, 15, 30, 60, 120, 300, 600, 900, 1800, HOUR, 2 * HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR,
+      DAY, 2 * DAY, 7 * DAY, 14 * DAY, 30 * DAY, 91 * DAY, 182 * DAY];
+    const step = steps.find((candidate) => span / candidate <= 5) || steps[steps.length - 1];
+    // Ticks fall on the viewer's clock, so hours and midnights are theirs and not UTC's.
+    const offset = -new Date(end * 1000).getTimezoneOffset() * 60;
     const ticks = [];
-    for (let tick = Math.ceil(start / step) * step; tick <= end; tick += step) ticks.push(tick);
-    return { ticks, withSeconds: step < 60 };
+    for (let tick = Math.ceil((start + offset) / step) * step - offset; tick <= end; tick += step) ticks.push(tick);
+    return { ticks, step };
+  }
+
+  function tickLabel(seconds, step, span) {
+    const date = new Date(seconds * 1000);
+    if (step >= DAY) return date.toLocaleDateString([], { month: "short", day: "numeric" });
+    const time = clock(seconds, step < 60);
+    return span > DAY ? `${date.toLocaleDateString([], { weekday: "short" })} ${time}` : time;
+  }
+
+  // What each point covers, when the chart comes from rollups: "5-minute", "1-hour".
+  function stepName(seconds) {
+    if (seconds % DAY === 0) return `${seconds / DAY}-day`;
+    if (seconds % HOUR === 0) return `${seconds / HOUR}-hour`;
+    return `${seconds / 60}-minute`;
+  }
+
+  // How far apart points are: a poll, or a rollup's step.
+  function every(chart) {
+    return chart.step || chart.interval;
   }
 
   // ---- Drawing
@@ -92,9 +124,10 @@ const netchart = (() => {
     }
     const end = Math.max(...points.map(([time]) => time));
     const start = Math.max(Math.min(...points.map(([time]) => time)), end - chart.minutes * 60);
-    const span = Math.max(end - start, chart.interval);
+    const span = Math.max(end - start, every(chart));
     const peak = Math.max(...points.map(([, value]) => value));
-    const step = peak > 0 ? niceStep(peak, 4) : 1;
+    // Errors are counted, so their axis counts in whole numbers.
+    const step = peak > 0 ? Math.max(niceStep(peak, 4), chart.metric === "errors" ? 1 : 0) : 1;
     const top = peak > 0 ? Math.ceil(peak / step) * step : 1;
     const x = (time) => inner.right - ((end - time) / span) * (inner.right - inner.left);
     const y = (value) => inner.bottom - (value / top) * (inner.bottom - inner.top);
@@ -106,10 +139,10 @@ const netchart = (() => {
       label.textContent = number(tick);
       grid.append(label);
     }
-    const { ticks, withSeconds } = timeTicks(end - span, end);
+    const { ticks, step: tickStep } = timeTicks(end - span, end);
     for (const tick of ticks) {
       const label = shape("text", "tick x", { x: String(x(tick)), y: String(height - 6) });
-      label.textContent = clock(tick, withSeconds);
+      label.textContent = tickLabel(tick, tickStep, span);
       grid.append(label);
     }
     svg.append(grid);
@@ -144,7 +177,7 @@ const netchart = (() => {
       crosshair.setAttribute("x1", String(x(nearest)));
       crosshair.setAttribute("x2", String(x(nearest)));
       crosshair.setAttribute("visibility", "visible");
-      showReadout(readout, chart, nearest, withSeconds || chart.interval < 60);
+      showReadout(readout, chart, nearest, span, tickStep < 60 || every(chart) < 60);
       const left = (x(nearest) / width) * box.width;
       readout.classList.toggle("flip", left > box.width / 2);
       readout.style.left = `${plot.offsetLeft + left}px`;
@@ -156,11 +189,11 @@ const netchart = (() => {
     plot.replaceChildren(svg);
   }
 
-  function showReadout(readout, chart, time, withSeconds) {
-    const rows = [element("div", "when", clock(time, withSeconds))];
+  function showReadout(readout, chart, time, span, withSeconds) {
+    const rows = [element("div", "when", moment(time, span, withSeconds))];
     for (const line of chart.lines) {
       // A device's poll lands a moment before or after another's; within half an interval is the same poll.
-      const near = line.points.find(([at]) => Math.abs(at - time) <= chart.interval / 2);
+      const near = line.points.find(([at]) => Math.abs(at - time) <= every(chart) / 2);
       if (!near) continue;
       const row = element("div", "row");
       row.append(lineKey(chart, line), element("strong", "", number(near[1])), element("span", "", ` ${line.port} ${line.direction}`));
@@ -214,7 +247,8 @@ const netchart = (() => {
     figure.querySelector(".chart-data").replaceWith(data);
     const caption = figure.querySelector(".chart-caption");
     caption.classList.toggle("stale", Boolean(note));
-    caption.textContent = note || `Updated ${clock(Date.now() / 1000, true)}, every ${chart.interval} s`;
+    const averages = chart.step && chart.metric !== "errors" ? ` · ${stepName(chart.step)} averages` : "";
+    caption.textContent = note || `Updated ${clock(Date.now() / 1000, true)}, every ${chart.interval} s${averages}`;
     draw(entry);
   }
 
