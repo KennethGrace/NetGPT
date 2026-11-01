@@ -28,6 +28,7 @@ from mcp import Client
 from mcp_types import CallToolResult, Tool
 from prompt_toolkit import PromptSession
 
+from netgpt.engine import Engine
 from netgpt.inventory import Inventory
 from netgpt.server import build_server
 from netgpt.statistics import DEFAULT_INTERVAL, Poller
@@ -390,7 +391,7 @@ async def run(args: argparse.Namespace) -> int:
         statistics = Poller(inventory, interval=args.poll_interval, store=store)
     # Only the web page can show the map, so only it gets the tool that draws one.
     async with (
-        Client(build_server(inventory, display=args.web is not None, statistics=statistics)) as client,
+        Client(build_server(Engine(inventory, statistics=statistics), display=args.web is not None)) as client,
         httpx.AsyncClient(base_url=args.ollama, timeout=timeout) as http,
     ):
         try:

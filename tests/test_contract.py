@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from netgpt import contract
 from netgpt.chat import Chat
+from netgpt.engine import Engine
 from netgpt.forwarding import trace_path
 from netgpt.inventory import Credentials, Device, Inventory
 from netgpt.platforms.junos import JunosPlatform
@@ -101,7 +102,8 @@ def test_every_property_is_required_because_every_one_is_sent() -> None:
 @pytest.mark.anyio
 async def test_every_record_a_tool_answers_with_is_in_the_contract(inventory: Inventory) -> None:
     poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30)
-    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True, statistics=poller)) as client:
+    engine = Engine(inventory, platforms={"fake": FakePlatform}, statistics=poller)
+    async with Client(build_server(engine, display=True)) as client:
         tools = (await client.list_tools()).tools
     assert {tool.name for tool in tools} == set(CALLS)
     defs = set(published()["$defs"])
@@ -120,7 +122,8 @@ async def test_what_every_tool_sends_matches_the_schema(inventory: Inventory, co
     for _ in range(3):
         await poller.poll()
         now[0] += 30
-    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True, statistics=poller)) as client:
+    engine = Engine(inventory, platforms={"fake": FakePlatform}, statistics=poller)
+    async with Client(build_server(engine, display=True)) as client:
         for tool, (arguments, record, shape) in CALLS.items():
             result = await client.call_tool(tool, arguments)
             assert not result.is_error, f"{tool}: {result.content[0].text}"
@@ -134,7 +137,7 @@ async def test_the_traffic_and_charts_the_page_reads_match_the_schema(inventory:
     for _ in range(3):
         await poller.poll()
         now[0] += 30
-    server = build_server(inventory, platforms={"fake": FakePlatform}, display=True, statistics=poller)
+    server = build_server(Engine(inventory, platforms={"fake": FakePlatform}, statistics=poller), display=True)
     async with Client(server) as client, ScriptedOllama().client() as http:
         chat = Chat(client, http, "scripted", {}, think=True)
         await chat.start()

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from mcp import Client
 
+from netgpt.engine import Engine
 from netgpt.inventory import Inventory
 from netgpt.server import build_server
 
@@ -57,4 +58,4 @@ def counter_reads() -> dict[str, int]:
 
 @pytest.fixture
 def client(inventory: Inventory, commands_run: list[str]) -> Client:
-    return Client(build_server(inventory, platforms={"fake": FakePlatform}))
+    return Client(build_server(Engine(inventory, platforms={"fake": FakePlatform})))

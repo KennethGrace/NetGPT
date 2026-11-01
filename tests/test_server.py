@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from mcp import Client
 
+from netgpt.engine import Engine
 from netgpt.inventory import Inventory, InventoryError
 from netgpt.platforms import PlatformError
 from netgpt.primitives import PingResult
@@ -100,7 +101,7 @@ async def test_a_polling_server_offers_interface_traffic_and_answers_from_its_sa
 ) -> None:
     now = [1000.0]
     poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30, clock=lambda: now[0])
-    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, statistics=poller)) as client:
+    async with Client(build_server(Engine(inventory, platforms={"fake": FakePlatform}, statistics=poller))) as client:
         assert "polls every 30 seconds" in (client.instructions or "")
         # Polls of our own, 30 seconds apart, rather than waiting for the server's.
         await poller.poll()
@@ -120,14 +121,16 @@ async def test_only_a_page_that_can_draw_and_a_server_that_polls_offer_chart(inv
         return Poller(inventory, platforms={"fake": FakePlatform}, interval=30)
 
     for display, statistics, offered in [(True, poller(), True), (True, None, False), (False, poller(), False)]:
-        async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=display, statistics=statistics)) as client:
+        engine = Engine(inventory, platforms={"fake": FakePlatform}, statistics=statistics)
+        async with Client(build_server(engine, display=display)) as client:
             assert ("chart" in {tool.name for tool in (await client.list_tools()).tools}) is offered
 
 
 @pytest.mark.anyio
 async def test_a_chart_of_a_link_is_of_the_port_lldp_says_is_on_it(inventory: Inventory, counter_reads: dict[str, int]) -> None:
     poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30)
-    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True, statistics=poller)) as client:
+    engine = Engine(inventory, platforms={"fake": FakePlatform}, statistics=poller)
+    async with Client(build_server(engine, display=True)) as client:
         # The fake platform cables ethernet-1/49 to spine1, but has counters only for ethernet-1/1.
         result = await client.call_tool("chart", {"title": "Uplink", "ports": ["spine1--leaf1"]})
     assert result.is_error and "No polled port is called 'leaf1:ethernet-1/49'" in result.content[0].text
@@ -223,7 +226,7 @@ async def test_topology_merges_every_device_and_reports_the_failures(client: Cli
 
 @pytest.mark.anyio
 async def test_display_is_only_offered_to_a_client_that_can_draw(inventory: Inventory) -> None:
-    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True)) as client:
+    async with Client(build_server(Engine(inventory, platforms={"fake": FakePlatform}), display=True)) as client:
         assert "display" in {tool.name for tool in (await client.list_tools()).tools}
         assert "map of the network" in (client.instructions or "")
         result = await client.call_tool("display", {"title": "leaf1's host", "focus": "198.51.100.11"})
@@ -254,7 +257,7 @@ async def test_forwarding_path_follows_routes_until_the_packet_leaves_the_invent
 
 @pytest.mark.anyio
 async def test_display_traces_a_path_and_marks_where_it_is_lost(inventory: Inventory) -> None:
-    async with Client(build_server(inventory, platforms={"fake": FakePlatform}, display=True)) as client:
+    async with Client(build_server(Engine(inventory, platforms={"fake": FakePlatform}), display=True)) as client:
         result = await client.call_tool(
             "display", {"title": "Out of leaf1", "path": {"source": "198.51.100.11", "destination": "203.0.113.5"}}
         )
