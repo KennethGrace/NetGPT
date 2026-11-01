@@ -202,3 +202,14 @@ async def test_the_mcp_tools_read_live_while_the_api_shares(
     await api.get("/topology")
     # Once for the API, which shared it with its second request, and twice for the model.
     assert table_reads.count(("leaf1", "lldp_neighbors")) == 3
+
+
+@pytest.mark.anyio
+async def test_an_engine_that_doesn_t_poll_serves_no_traffic_or_charts(inventory: Inventory) -> None:
+    app = build_api(Engine(inventory, platforms={"fake": FakePlatform}), TOKEN)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://netgpt.test", headers=BEARER) as api:
+        for path in ("/traffic", "/chart"):
+            response = await api.get(path)
+            assert response.status_code == 404
+            assert response.json()["error"].endswith("The routes are devices, topology, path, view, tables/{table}, schema.")
+        assert (await api.get("/devices")).status_code == 200

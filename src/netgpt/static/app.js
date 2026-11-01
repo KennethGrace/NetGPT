@@ -7,8 +7,10 @@
 // Model output can echo device data, so it only ever reaches the page as text:
 // through textContent, or through renderMarkdown, which escapes before it formats.
 //
-// When the model calls display, its tool event carries a view, which the map
-// (map.js) draws. Each view leaves a chip in the conversation that brings it back.
+// Until the model draws something, the map shows the whole network, read from the
+// engine's API (/api/v1/view) like any other frontend's. When the model calls
+// display, its tool event carries a view, which the map (map.js) draws. Each view
+// leaves a chip in the conversation that brings it back.
 // When it calls chart, the event carries a chart, drawn in the conversation (chart.js).
 //
 // A wide screen shows the map beside the conversation. A narrow one has no room for
@@ -36,6 +38,8 @@ let turn = null; // the reply being built, until its answer or error arrives
 let timer = null;
 let shown = ""; // the view on the map, as JSON, so a reload doesn't redraw it
 let latest = null; // the newest view replayed on load: [view, chip]
+let network = null; // the request for the whole network, until it is drawn or overtaken
+let showingNetwork = false; // the map shows the whole network, not a view from the model
 let left = { scroll: 0, atEnd: true }; // where the conversation was when the map took the screen
 
 function node(tag, className, text) {
@@ -265,6 +269,7 @@ function showView(view, chip) {
   const key = JSON.stringify(view);
   if (key !== shown) netmap.show(view);
   shown = key;
+  showingNetwork = false;
   for (const other of conversation.querySelectorAll(".view-chip.active")) other.classList.remove("active");
   chip.classList.add("active");
   document.body.classList.remove("map-hidden");
@@ -272,9 +277,30 @@ function showView(view, chip) {
   labelToggle();
 }
 
+async function showNetwork() {
+  // Before the model draws anything, the whole network. A view from the model that lands first wins.
+  const asked = (network = {});
+  let view;
+  try {
+    const response = await fetch("api/v1/view");
+    if (!response.ok) return; // The map stays empty until the model draws on it.
+    view = await response.json();
+  } catch {
+    return;
+  }
+  if (network !== asked || shown) return;
+  netmap.show(view);
+  shown = JSON.stringify(view);
+  showingNetwork = true;
+  mapToggle.hidden = false;
+  labelToggle();
+}
+
 function clearMap() {
   netmap.clear();
   shown = "";
+  network = null;
+  showingNetwork = false;
   setScreen(false);
   mapToggle.hidden = true;
   mapToggle.classList.remove("fresh");
@@ -437,7 +463,10 @@ async function load() {
   for (const event of data.events) handle(event, false);
   if (!data.events.length) showIntro();
   if (latest) showView(...latest);
-  else clearMap();
+  else if (!showingNetwork) {
+    clearMap();
+    showNetwork();
+  }
   window.scrollTo(0, document.body.scrollHeight);
   if (data.busy) {
     // Another page is waiting on an answer; show it when it lands.
@@ -472,6 +501,7 @@ reset.addEventListener("click", async () => {
     conversation.replaceChildren();
     turn = null;
     clearMap();
+    showNetwork();
     showIntro();
     question.focus();
   } else {

@@ -92,7 +92,7 @@ const netmap = (() => {
   let camera = null; // the viewBox, eased toward the drawing as it moves
   let dragging = null;
   let tapped = null; // the last node clicked without a drag, and when, to tell a double click
-  let traffic = null; // the latest rates by device:port, from /api/traffic
+  let traffic = null; // the latest rates by device:port, from /api/v1/traffic
   let trafficShown = loadChoice();
   let polling = true; // until the server says NetGPT doesn't poll
   let pollEvery = 30; // seconds between polls, as the server says
@@ -648,7 +648,7 @@ const netmap = (() => {
     trafficAsked = Date.now();
     let body;
     try {
-      const response = await fetch("api/traffic");
+      const response = await fetch("api/v1/traffic");
       if (response.status === 404) {
         // NetGPT isn't polling: there is no traffic to show, now or later.
         polling = false;
