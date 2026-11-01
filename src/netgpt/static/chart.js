@@ -256,11 +256,9 @@ const netchart = (() => {
     const { chart } = entry;
     entry.asked = Date.now();
     try {
-      const response = await fetch("api/chart", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: chart.title, ports: chart.ports, metric: chart.metric, minutes: chart.minutes }),
-      });
+      const query = new URLSearchParams({ title: chart.title, metric: chart.metric, minutes: chart.minutes });
+      for (const port of chart.ports) query.append("port", port);
+      const response = await fetch(`api/v1/chart?${query}`);
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         fill(entry, `Not updating: ${body.error || `HTTP ${response.status}`}`);

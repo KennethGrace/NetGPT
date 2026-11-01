@@ -12,15 +12,15 @@ one request at a time anyway. A question's progress (thinking, text, tool calls)
 streams to the page as newline-delimited JSON events. The answer keeps going if
 the page goes away, and a reload replays the conversation from its history.
 
-When the model calls display, its tool event carries the view, and the page draws
-it on the map (map.js, laid out by the vendored d3-force library). When it calls
-chart, the event carries the chart, which the page draws in the conversation
-(chart.js) and refreshes from /api/chart each time the poller has new samples.
-While NetGPT polls, the map also asks /api/traffic for every port's latest rates
-and recent errors, and draws them on the links.
-
 The engine's API (netgpt.api) is mounted at /api/v1, and takes the page's cookie,
-so a signed-in browser can read it too.
+so the page reads the network from it like any other frontend. Before the model
+draws anything, the map shows the whole network from /api/v1/view. When the model
+calls display, its tool event carries the view, and the page draws it on the map
+(map.js, laid out by the vendored d3-force library). When it calls chart, the event
+carries the chart, which the page draws in the conversation (chart.js) and
+refreshes from /api/v1/chart each time the poller has new samples. While NetGPT
+polls, the map also asks /api/v1/traffic for every port's latest rates and recent
+errors, and draws them on the links.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ from importlib.resources import files
 from typing import Any
 
 import uvicorn
-from pydantic import BaseModel, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -42,8 +41,6 @@ from starlette.routing import Mount, Route
 from netgpt.api import COOKIE, build_api
 from netgpt.chat import Chat, ChatError, ChatObserver
 from netgpt.engine import Engine
-from netgpt.statistics import MAX_CHART_PORTS, ChartError, Metric, Traffic
-from netgpt.store import StoreError
 
 DISPLAY_TOOL = "display"
 CHART_TOOL = "chart"
@@ -56,8 +53,6 @@ ASSETS = {
     "app.css": "text/css",
 }
 COOKIE_MAX_AGE = 30 * 24 * 3600
-# The map marks the ports that counted errors this many minutes back.
-MAP_MINUTES = 5.0
 MAX_QUESTION_CHARS = 8000
 
 SECURITY_HEADERS = {
@@ -77,15 +72,6 @@ SIGN_IN_PAGE = """<!doctype html>
 
 Event = dict[str, Any]
 Endpoint = Callable[[Request], Awaitable[Response]]
-
-
-class ChartRequest(BaseModel):
-    """A chart the page already has, asked for again with the latest samples."""
-
-    title: str = Field(max_length=200)
-    ports: list[str] = Field(min_length=1, max_length=MAX_CHART_PORTS)
-    metric: Metric
-    minutes: float = Field(gt=0)
 
 
 class StreamObserver(ChatObserver):
@@ -147,9 +133,8 @@ def conversation_events(messages: list[dict[str, Any]]) -> list[Event]:
 def build_app(chat: Chat, token: str, engine: Engine) -> Starlette:
     """
     Build the web app serving one conversation, for browsers holding the token, with
-    the engine's API beside it at /api/v1. Charts need the engine to poll.
+    the engine's API beside it at /api/v1, which the page reads the network from.
     """
-    statistics = engine.statistics
     static = files("netgpt") / "static"
     assets = {name: (static / name).read_text(encoding="utf-8") for name in ASSETS}
     expected = token.encode()
@@ -224,30 +209,6 @@ def build_app(chat: Chat, token: str, engine: Engine) -> Starlette:
         task.add_done_callback(running.discard)
         return StreamingResponse(stream(events), media_type="application/x-ndjson", headers=SECURITY_HEADERS)
 
-    async def chart(request: Request) -> Response:
-        if statistics is None:
-            return JSONResponse({"error": "NetGPT isn't polling."}, status_code=404, headers=SECURITY_HEADERS)
-        try:
-            asked = ChartRequest.model_validate(await request.json())
-            drawn = await statistics.chart(asked.title, asked.ports, asked.metric, asked.minutes)
-        except (ValueError, ValidationError) as error:
-            # ChartError is a ValueError, and names the ports that are polled.
-            message = str(error) if isinstance(error, ChartError) else "Send JSON with a title, ports, metric, and minutes."
-            return JSONResponse({"error": message}, status_code=400, headers=SECURITY_HEADERS)
-        except StoreError as error:
-            return JSONResponse({"error": str(error)}, status_code=503, headers=SECURITY_HEADERS)
-        return JSONResponse(drawn.model_dump(mode="json"), headers=SECURITY_HEADERS)
-
-    async def traffic(request: Request) -> Response:
-        if statistics is None:
-            return JSONResponse({"error": "NetGPT isn't polling."}, status_code=404, headers=SECURITY_HEADERS)
-        try:
-            items, _ = await statistics.traffic(None, MAP_MINUTES)
-        except StoreError as error:
-            return JSONResponse({"error": str(error)}, status_code=503, headers=SECURITY_HEADERS)
-        traffic = Traffic(interval=statistics.interval, minutes=MAP_MINUTES, ports=items)
-        return JSONResponse(traffic.model_dump(mode="json"), headers=SECURITY_HEADERS)
-
     async def reset(request: Request) -> Response:
         if busy.locked():
             message = "Still answering; wait for the answer before starting over."
@@ -262,8 +223,6 @@ def build_app(chat: Chat, token: str, engine: Engine) -> Starlette:
             Route("/api/conversation", requires_sign_in(conversation)),
             Route("/api/ask", requires_sign_in(ask), methods=["POST"]),
             Route("/api/reset", requires_sign_in(reset), methods=["POST"]),
-            Route("/api/chart", requires_sign_in(chart), methods=["POST"]),
-            Route("/api/traffic", requires_sign_in(traffic)),
             Mount("/api/v1", app=build_api(engine, token)),
         ]
     )

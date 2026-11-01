@@ -63,8 +63,9 @@ async def test_nothing_is_served_without_the_token(browser: Browser) -> None:
     page = await browser(ScriptedOllama(says("Never asked.")), signed_in=False)
     wrong = await page.get("/", params={"token": "guess"})
     assert wrong.status_code == 401 and "set-cookie" not in wrong.headers
-    paths = ["/", "/app.js", "/map.js", "/chart.js", "/d3-force.js", "/app.css", "/api/conversation", "/api/traffic"]
-    for method, path in [("GET", path) for path in paths] + [("POST", "/api/ask"), ("POST", "/api/reset"), ("POST", "/api/chart")]:
+    paths = ["/", "/app.js", "/map.js", "/chart.js", "/d3-force.js", "/app.css", "/api/conversation"]
+    paths += ["/api/v1/view", "/api/v1/devices"]
+    for method, path in [("GET", path) for path in paths] + [("POST", "/api/ask"), ("POST", "/api/reset")]:
         response = await page.request(method, path, json={"question": "hi"} if method == "POST" else None)
         assert response.status_code == 401, path
 
@@ -170,8 +171,8 @@ async def test_a_chart_reaches_the_page_survives_a_reload_and_refreshes_with_new
     # The page asks for the same chart again, and gets the poll that came since.
     now[0] += 30
     await poller.poll()
-    asked = {key: chart[key] for key in ("title", "ports", "metric", "minutes")}
-    fresh = (await page.post("/api/chart", json=asked)).json()
+    asked = {"title": chart["title"], "port": chart["ports"], "metric": chart["metric"], "minutes": chart["minutes"]}
+    fresh = (await page.get("/api/v1/chart", params=asked)).json()
     assert [len(line["points"]) for line in fresh["lines"]] == [2, 2]
 
 
@@ -182,18 +183,18 @@ async def test_a_chart_of_ports_nobody_polls_is_refused_with_the_ones_that_are(
     poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30)
     page = await browser(ScriptedOllama(), statistics=poller)
     await poller.poll()
-    refused = await page.post("/api/chart", json={"title": "x", "ports": ["leaf9:ethernet-1/1"], "metric": "traffic", "minutes": 15})
+    refused = await page.get("/api/v1/chart", params={"port": "leaf9:ethernet-1/1"})
     assert refused.status_code == 400 and "leaf1:ethernet-1/1, leaf2:ethernet-1/1" in refused.json()["error"]
-    garbled = await page.post("/api/chart", json={"ports": "leaf1"})
-    assert garbled.status_code == 400 and "title, ports, metric, and minutes" in garbled.json()["error"]
+    garbled = await page.get("/api/v1/chart", params={"ports": "leaf1"})
+    assert garbled.status_code == 400 and "ports isn't a parameter here; the route takes port" in garbled.json()["error"]
 
 
 @pytest.mark.anyio
 async def test_without_a_poller_there_are_no_charts_and_no_traffic_on_the_map(browser: Browser) -> None:
     page = await browser(ScriptedOllama())
-    response = await page.post("/api/chart", json={"title": "x", "ports": ["leaf1"], "metric": "traffic", "minutes": 15})
-    assert response.status_code == 404
-    assert (await page.get("/api/traffic")).status_code == 404
+    # The map takes the 404 to mean NetGPT isn't polling, and hides its traffic.
+    assert (await page.get("/api/v1/chart", params={"port": "leaf1"})).status_code == 404
+    assert (await page.get("/api/v1/traffic")).status_code == 404
 
 
 @pytest.mark.anyio
@@ -203,11 +204,11 @@ async def test_the_map_gets_every_polled_port_s_latest_rates_and_recent_errors(
     now = [1000.0]
     poller = Poller(inventory, platforms={"fake": FakePlatform}, interval=30, clock=lambda: now[0])
     page = await browser(ScriptedOllama(), statistics=poller)
-    assert (await page.get("/api/traffic")).json()["ports"] == []
+    assert (await page.get("/api/v1/traffic")).json()["ports"] == []
     for _ in range(3):
         await poller.poll()
         now[0] += 30
-    traffic = (await page.get("/api/traffic")).json()
+    traffic = (await page.get("/api/v1/traffic")).json()
     assert (traffic["interval"], traffic["minutes"]) == (30, 5)
     ports = {(port["device"], port["interface"]): port for port in traffic["ports"]}
     assert set(ports) == {("leaf1", "ethernet-1/1"), ("leaf2", "ethernet-1/1")}

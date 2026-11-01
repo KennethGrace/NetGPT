@@ -13,9 +13,10 @@ Every request needs the token: as a bearer token (Authorization: Bearer ...) fro
 program, or the page's cookie from the browser. There is no CORS: a frontend's
 browser app reaches the API through its own backend, which holds the token. A
 request the engine won't answer gets a Refusal that says why, in the tools' words:
-400 for the request, 401 without the token, 404 for a route that isn't one, and
-503 when the store fails. v1 is the API's own version: new records and fields stay
-in it, and renaming or removing one would make a v2.
+400 for the request, 401 without the token, 404 for a route that isn't one (traffic
+and chart are routes only while the engine polls), and 503 when the store fails. v1
+is the API's own version: new records and fields stay in it, and renaming or
+removing one would make a v2.
 """
 
 from __future__ import annotations
@@ -226,16 +227,12 @@ def build_api(engine: Engine, token: str, shared: SharedReads | None = None) -> 
         parse(Query, request)
         return schema
 
-    routes = [
-        route("/devices", devices),
-        route("/topology", topology),
-        route("/path", path),
-        route("/view", view),
-        route("/tables/{table}", table),
-        route("/traffic", traffic),
-        route("/chart", chart),
-        route("/schema", contract_schema),
-    ]
+    routes = [route("/devices", devices), route("/topology", topology), route("/path", path), route("/view", view)]
+    routes.append(route("/tables/{table}", table))
+    # Traffic and charts are the poller's, so an engine that doesn't poll has none, as its MCP server has no tools for them.
+    if engine.statistics is not None:
+        routes += [route("/traffic", traffic), route("/chart", chart)]
+    routes.append(route("/schema", contract_schema))
     paths = ", ".join(route.path.lstrip("/") for route in routes)
 
     async def not_a_route(request: Request, error: Exception) -> Response:

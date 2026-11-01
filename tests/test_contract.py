@@ -120,8 +120,8 @@ async def test_the_traffic_and_charts_the_page_reads_match_the_schema(inventory:
         app = build_app(chat, TOKEN, engine)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://netgpt.test") as page:
             await page.get("/", params={"token": TOKEN})
-            traffic = (await page.get("/api/traffic")).json()
-            chart = (await page.post("/api/chart", json={"title": "x", "ports": ["leaf1"], "metric": "traffic", "minutes": 15})).json()
+            traffic = (await page.get("/api/v1/traffic")).json()
+            chart = (await page.get("/api/v1/chart", params={"port": "leaf1"})).json()
     assert traffic["ports"] and chart["lines"]
     check("Traffic", traffic)
     check("Chart", chart)
