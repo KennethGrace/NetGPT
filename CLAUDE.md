@@ -253,6 +253,14 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 1: `netgpt-mcp` over HTTP, behind a token.
   - Phase 2: one login for the page and the endpoint.
   - Phase 3: the map inside MCP clients (MCP Apps).
+- **Contract track** (NetGPT as a project across repositories: this one holds the engine, its faces, and the labs, and owns the schemas the others read):
+  - Repositories split along a contract that holds still, and the parts that change together stay together.
+    - **xspace** (a WebXR walk through the network: React, three.js, react-three-fiber) is a repository of its own, and stays one: another stack, another runtime, and it has never changed alongside NetGPT. Its protobuf stubs are mostly empty, so there is no contract between them yet.
+    - **The page stays here.** Of the 9 commits that changed `static/` from the rewrite to v0.4.0, 7 changed the tools or the engine too: one computation, given to the model as text and to the page as the view. It moves out only when it needs a build step, something other than NetGPT's server has to serve it, or it talks to more than one backend.
+    - **Fine-tuning** (the model lever) gets a repository when it starts: another toolchain, and it reads the game's transcripts as data, not code. The game stays here, since each round is marked with NetGPT's commit.
+  - Phase 1: the contract. JSON Schema for every record NetGPT sends outside itself (views, charts, traffic, and the primitives the tools return), written from the pydantic models, checked in, versioned with the package, and kept equal to the code by a test.
+  - Phase 2: a read API: views and traffic without a conversation, behind the page's token. The page's map reads it too.
+  - Phase 3: xspace draws the lab from that API, with types generated from the schema in place of its protobuf stubs.
 - **Known gaps:**
   - `topology` and the forwarding walk are IPv4 only. Junos's interfaces and routes include IPv6; SR Linux's don't yet.
   - `bgp_sessions` is Junos only so far, the OSPF tools SR Linux only, and `ping` isn't on Junos yet.
