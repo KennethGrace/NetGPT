@@ -1,7 +1,10 @@
 """
-The api module is the engine's face for programs: GET routes under /api/v1/ that
+The api module is the engine's face for programs: routes under /api/v1/ that
 answer with the contract's records (netgpt.contract), for a frontend in another
-repository, or for the page's own map.
+repository, or for the page's own map. Reads answer GET. Commands (show, ping, and
+ping_sweep) answer POST with a JSON body, and run every time, through the same
+guard and limits as the tools: an engineer at any frontend can do what the model
+can.
 
 Each route reads through the engine, and devices' answers are shared: one is
 reused for up to max_age seconds, requests that arrive together wait for one read,
@@ -14,9 +17,11 @@ program, or the page's cookie from the browser. There is no CORS: a frontend's
 browser app reaches the API through its own backend, which holds the token. A
 request the engine won't answer gets a Refusal that says why, in the tools' words:
 400 for the request, 401 without the token, 404 for a route that isn't one (traffic
-and chart are routes only while the engine polls), and 503 when the store fails. v1
-is the API's own version: new records and fields stay in it, and renaming or
-removing one would make a v2.
+and chart are routes only while the engine polls), 405 for the wrong method, 501
+for a command the device's platform can't run yet, 502 when the device fails it,
+and 503 when the store fails. A command's body must be JSON, so a form on another
+site can't send one. v1 is the API's own version: new records and fields stay in
+it, and renaming or removing one would make a v2.
 """
 
 from __future__ import annotations
@@ -37,7 +42,9 @@ from netgpt.engine import Engine, RequestError, SharedReads, Table
 from netgpt.forwarding import TraceError
 from netgpt.guard import GuardError
 from netgpt.inventory import InventoryError
-from netgpt.primitives import Collection, DeviceInfo
+from netgpt.platforms import PlatformError
+from netgpt.platforms.base import UnsupportedError
+from netgpt.primitives import Collection, DeviceInfo, PingResult
 from netgpt.statistics import MAX_CHART_PORTS, ChartError, Metric, Traffic
 from netgpt.store import StoreError
 from netgpt.topology import Layer, PlaneChoice
@@ -52,6 +59,8 @@ HEADERS = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"
 
 # What the engine refuses, by the status that says so. Anything else is a bug, and fails loudly.
 REFUSED = (RequestError, InventoryError, GuardError, TraceError, ViewError, ChartError)
+UNSUPPORTED = (UnsupportedError,)
+FAILED = (PlatformError,)
 UNAVAILABLE = (StoreError,)
 
 
@@ -62,7 +71,7 @@ class Refusal(BaseModel):
 
 
 class Query(BaseModel):
-    """A route's query parameters. A parameter the route doesn't take is refused, so a misspelled one isn't ignored."""
+    """A route's query parameters, or a command's body. One it doesn't take is refused, so a misspelled one isn't ignored."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -113,6 +122,26 @@ class ChartQuery(Query):
     title: str | None = None
 
 
+class ShowBody(Query):
+    device: str
+    command: str
+
+
+class PingBody(Query):
+    device: str
+    destination: str
+    count: int = Field(3, ge=1)
+    network_instance: str = "default"
+
+
+class SweepBody(Query):
+    network: str
+    device: str | None = None
+    network_instance: str = "default"
+    count: int | None = Field(None, ge=1)
+    timeout: float = Field(1.0, gt=0)
+
+
 # The tables, by the name of the tool that reads each.
 TABLES: dict[str, Table] = {
     "lldp_neighbors": "lldp_neighbors", "interfaces": "interfaces", "mac_table": "mac_table", "arp_table": "arp_table",
@@ -126,7 +155,25 @@ def parse(model: type[Query], request: Request) -> Any:
     """A route's query parameters, as its model takes them: a list parameter is given once for each value."""
     lists = {name for name, field in model.model_fields.items() if get_origin(field.annotation) is list}
     params = request.query_params
-    given = {key: params.getlist(key) if key in lists else params[key] for key in params}
+    return validated(model, {key: params.getlist(key) if key in lists else params[key] for key in params})
+
+
+async def parse_body(model: type[Query], request: Request) -> Any:
+    """A command's JSON body, as its model takes it."""
+    takes = ", ".join(model.model_fields)
+    if request.headers.get("content-type", "").partition(";")[0].strip().lower() != "application/json":
+        raise RequestError(f"Send the command as JSON (Content-Type: application/json), with {takes}.")
+    try:
+        given = await request.json()
+    except ValueError:
+        raise RequestError(f"The body isn't JSON. Send an object with {takes}.") from None
+    if not isinstance(given, dict):
+        raise RequestError(f"Send an object with {takes}.")
+    return validated(model, given)
+
+
+def validated(model: type[Query], given: dict[str, Any]) -> Any:
+    """What a route was given, as its model takes it, or a RequestError that says what it takes."""
     try:
         return model.model_validate(given)
     except ValidationError as error:
@@ -167,23 +214,43 @@ def build_api(engine: Engine, token: str, shared: SharedReads | None = None) -> 
     expected = token.encode()
     schema = written()
 
+    async def respond(request: Request, handler: Handler, asking: Engine) -> Response:
+        """The handler's record, or the refusal that says why there isn't one."""
+        if not holds_token(request, expected):
+            return refusal("Send the token: Authorization: Bearer <token>.", 401)
+        try:
+            found = await handler(request, asking)
+        except REFUSED as error:
+            return refusal(str(error), 400)
+        except UNSUPPORTED as error:
+            return refusal(str(error), 501)
+        except FAILED as error:
+            return refusal(str(error), 502)
+        except UNAVAILABLE as error:
+            return refusal(str(error), 503)
+        body = found.model_dump(mode="json") if isinstance(found, BaseModel) else found
+        return JSONResponse(body, headers=HEADERS)
+
     def route(path: str, handler: Handler) -> Route:
+        """A read: GET, through shared answers unless the request asks for no-cache."""
+
         async def answer(request: Request) -> Response:
-            if not holds_token(request, expected):
-                return refusal("Send the token: Authorization: Bearer <token>.", 401)
             live = "no-cache" in request.headers.get("cache-control", "").lower()
             asking = engine if live else engine.reading(shared)
-            try:
-                found = await handler(request, asking)
-            except REFUSED as error:
-                return refusal(str(error), 400)
-            except UNAVAILABLE as error:
-                return refusal(str(error), 503)
-            body = found.model_dump(mode="json") if isinstance(found, BaseModel) else found
-            age = 0 if asking.oldest is None else max(0, math.floor(shared.clock() - asking.oldest))
-            return JSONResponse(body, headers=HEADERS | {"Age": str(age)})
+            response = await respond(request, handler, asking)
+            if response.status_code == 200:
+                response.headers["Age"] = str(0 if asking.oldest is None else max(0, math.floor(shared.clock() - asking.oldest)))
+            return response
 
         return Route(path, answer)
+
+    def command(path: str, handler: Handler) -> Route:
+        """A command: POST, run every time by the engine itself, never from a shared answer."""
+
+        async def answer(request: Request) -> Response:
+            return await respond(request, handler, engine)
+
+        return Route(path, answer, methods=["POST"])
 
     async def devices(request: Request, engine: Engine) -> BaseModel:
         parse(Query, request)
@@ -227,17 +294,33 @@ def build_api(engine: Engine, token: str, shared: SharedReads | None = None) -> 
         parse(Query, request)
         return schema
 
+    async def show(request: Request, engine: Engine) -> BaseModel:
+        asked = await parse_body(ShowBody, request)
+        return await engine.show(asked.device, asked.command)
+
+    async def ping(request: Request, engine: Engine) -> BaseModel:
+        asked = await parse_body(PingBody, request)
+        return await engine.ping(asked.device, asked.destination, asked.count, asked.network_instance)
+
+    async def ping_sweep(request: Request, engine: Engine) -> BaseModel:
+        asked = await parse_body(SweepBody, request)
+        found = await engine.ping_sweep(asked.network, asked.device, asked.network_instance, asked.count, asked.timeout)
+        return Collection[PingResult](items=found)
+
     routes = [route("/devices", devices), route("/topology", topology), route("/path", path), route("/view", view)]
     routes.append(route("/tables/{table}", table))
     # Traffic and charts are the poller's, so an engine that doesn't poll has none, as its MCP server has no tools for them.
     if engine.statistics is not None:
         routes += [route("/traffic", traffic), route("/chart", chart)]
     routes.append(route("/schema", contract_schema))
-    paths = ", ".join(route.path.lstrip("/") for route in routes)
+    commands = [command("/show", show), command("/ping", ping), command("/ping_sweep", ping_sweep)]
+    reads = ", ".join(route.path.lstrip("/") for route in routes)
+    runs = ", ".join(route.path.lstrip("/") for route in commands)
 
     async def not_a_route(request: Request, error: Exception) -> Response:
         if isinstance(error, HTTPException) and error.status_code == 405:
-            return refusal(f"{request.method} isn't served here: every route answers GET.", 405)
-        return refusal(f"There's no route {request.url.path}. The routes are {paths}.", 404)
+            answers = "POST" if "POST" in (error.headers or {}).get("Allow", "") else "GET"
+            return refusal(f"{request.method} isn't served at {request.url.path}: it answers {answers}.", 405)
+        return refusal(f"There's no route {request.url.path}. The reads (GET) are {reads}; the commands (POST) are {runs}.", 404)
 
-    return Starlette(routes=routes, exception_handlers={404: not_a_route, 405: not_a_route})
+    return Starlette(routes=routes + commands, exception_handlers={404: not_a_route, 405: not_a_route})

@@ -1,7 +1,8 @@
 """
 Tests for the engine's API: every route answers with a record the contract names,
 only for the token, refuses in the tools' words, and shares devices' answers for a
-poll interval while the MCP tools read live. The API runs in-process through httpx's
+poll interval while the MCP tools read live. Commands run every time, through the
+tools' guard and limits. The API runs in-process through httpx's
 ASGI transport, on the fake platform.
 """
 
@@ -18,6 +19,8 @@ from mcp import Client
 from netgpt.api import TABLES, build_api
 from netgpt.engine import Engine, SharedReads
 from netgpt.inventory import Inventory
+from netgpt.platforms.base import UnsupportedError
+from netgpt.primitives import PingResult
 from netgpt.server import build_server
 from netgpt.statistics import Poller
 
@@ -36,6 +39,13 @@ ROUTES: dict[str, tuple[dict[str, Any], str, str]] = {
     "/traffic": ({}, "Traffic", "one"),
     "/chart": ({"port": "leaf1"}, "Chart", "one"),
 }
+# Each command, with a body it runs on the fake platform, and the record it answers with.
+COMMANDS: dict[str, tuple[dict[str, Any], str, str]] = {
+    "/show": ({"device": "leaf1", "command": "show version"}, "CommandOutput", "one"),
+    "/ping": ({"device": "leaf1", "destination": "192.0.2.1"}, "PingResult", "one"),
+    "/ping_sweep": ({"network": "192.0.2.0/29", "device": "leaf1"}, "PingResult", "collection"),
+}
+READS = "The reads (GET) are devices, topology, path, view, tables/{table}, traffic, chart, schema"
 # Each table, by its route, and the record its rows are.
 TABLE_RECORDS = {
     "lldp_neighbors": "LldpNeighbor", "interfaces": "Interface", "mac_table": "MacEntry", "arp_table": "ArpEntry",
@@ -97,9 +107,13 @@ def api(opener: Open) -> httpx.AsyncClient:
 @pytest.mark.anyio
 async def test_every_route_answers_with_a_record_the_contract_names(api: httpx.AsyncClient, opener: Open, engine: Engine) -> None:
     served = {route.path for route in build_api(engine, TOKEN).routes}
-    assert served == set(ROUTES) | {"/tables/{table}", "/schema"}
+    assert served == set(ROUTES) | set(COMMANDS) | {"/tables/{table}", "/schema"}
     for path, (params, record, shape) in ROUTES.items():
         response = await api.get(path, params=params)
+        assert response.status_code == 200, f"{path}: {response.text}"
+        check(record, response.json(), shape)
+    for path, (body, record, shape) in COMMANDS.items():
+        response = await api.post(path, json=body)
         assert response.status_code == 200, f"{path}: {response.text}"
         check(record, response.json(), shape)
     assert set(TABLES) == set(TABLE_RECORDS) | {"ospf_interfaces"}
@@ -135,14 +149,15 @@ async def test_a_refusal_says_what_the_api_would_answer(api: httpx.AsyncClient) 
         ("/path", {"source": "nowhere", "destination": "203.0.113.5"}, 400, "'nowhere'"),
         ("/path", {"source": "198.51.100.11"}, 400, "destination: Field required."),
         ("/chart", {"port": "leaf9:ethernet-1/1"}, 400, "leaf1:ethernet-1/1"),
-        ("/nowhere", {}, 404, "The routes are devices, topology, path, view, tables/{table}, traffic, chart, schema."),
+        ("/nowhere", {}, 404, f"{READS}; the commands (POST) are show, ping, ping_sweep."),
+        ("/show", {}, 405, "it answers POST"),
     ]
     for path, params, status, says in refusals:
         response = await api.get(path, params=params)
         assert (response.status_code, says in response.json()["error"]) == (status, True), (path, params, response.text)
         check("Refusal", response.json())
     posted = await api.post("/devices")
-    assert posted.status_code == 405 and "GET" in posted.json()["error"]
+    assert posted.status_code == 405 and "it answers GET" in posted.json()["error"]
 
 
 @pytest.mark.anyio
@@ -211,5 +226,62 @@ async def test_an_engine_that_doesn_t_poll_serves_no_traffic_or_charts(inventory
         for path in ("/traffic", "/chart"):
             response = await api.get(path)
             assert response.status_code == 404
-            assert response.json()["error"].endswith("The routes are devices, topology, path, view, tables/{table}, schema.")
+            assert "The reads (GET) are devices, topology, path, view, tables/{table}, schema;" in response.json()["error"]
         assert (await api.get("/devices")).status_code == 200
+
+
+@pytest.mark.anyio
+async def test_a_command_runs_every_time_it_is_sent(api: httpx.AsyncClient, commands_run: list[str]) -> None:
+    for _ in range(2):
+        shown = await api.post("/show", json={"device": "leaf1", "command": "show version"})
+        assert shown.json()["output"] == "leaf1: ran show version"
+    # Never from a shared answer: a command is something an engineer does, now.
+    assert commands_run == ["show version", "show version"]
+
+
+@pytest.mark.anyio
+async def test_a_command_is_refused_before_it_reaches_a_device(api: httpx.AsyncClient, commands_run: list[str]) -> None:
+    FakePlatform.pings = []
+    refusals = [
+        ("/show", {"device": "leaf1", "command": "info > /tmp/exfil"}, ">"),
+        ("/show", {"device": "leaf9", "command": "show version"}, "leaf9"),
+        ("/show", {"device": "leaf1"}, "command: Field required."),
+        ("/show", {"device": "leaf1", "command": "show version", "commands": "x"}, "the route takes device, command."),
+        ("/ping_sweep", {"network": "10.20.48.0/24", "device": "leaf1"}, "outside the inventory's sweep networks"),
+        ("/ping_sweep", {"network": "198.18.0.0/21"}, "the limit is 1024"),
+        ("/ping_sweep", {"network": "not a network"}, "Expected 4 octets in 'not a network'"),
+        ("/ping", {"device": "leaf1", "destination": "192.0.2.1", "count": 0}, "count: Input should be greater than or equal to 1"),
+    ]
+    for path, body, says in refusals:
+        response = await api.post(path, json=body)
+        assert (response.status_code, says in response.json()["error"]) == (400, True), (path, body, response.text)
+        check("Refusal", response.json())
+    form = await api.post("/show", data={"device": "leaf1", "command": "show version"})
+    assert form.status_code == 400 and "Content-Type: application/json" in form.json()["error"]
+    garbled = await api.post("/show", content=b"{not json", headers={"Content-Type": "application/json"})
+    assert garbled.status_code == 400 and "isn't JSON" in garbled.json()["error"]
+    assert (commands_run, FakePlatform.pings) == ([], [])
+
+
+@pytest.mark.anyio
+async def test_a_device_that_fails_a_command_is_a_bad_gateway_and_one_that_can_t_run_it_is_not_implemented(
+    opener: Open, inventory: Inventory
+) -> None:
+    api = opener(headers=BEARER)
+    failed = await api.post("/ping", json={"device": "broken", "destination": "192.0.2.1"})
+    assert failed.status_code == 502 and "connection refused" in failed.json()["error"]
+
+    class Unpinging(FakePlatform):
+        async def ping(self, destination: str, count: int, network_instance: str) -> PingResult:
+            raise UnsupportedError("This platform can't ping yet.")
+
+    app = build_api(Engine(inventory, platforms={"fake": Unpinging}), TOKEN)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://netgpt.test", headers=BEARER) as other:
+        unsupported = await other.post("/ping", json={"device": "leaf1", "destination": "192.0.2.1"})
+    assert unsupported.status_code == 501 and "can't ping yet" in unsupported.json()["error"]
+
+
+@pytest.mark.anyio
+async def test_a_command_needs_the_token_too(opener: Open, commands_run: list[str]) -> None:
+    response = await opener().post("/show", json={"device": "leaf1", "command": "show version"})
+    assert response.status_code == 401 and commands_run == []

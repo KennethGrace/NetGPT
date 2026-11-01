@@ -65,7 +65,8 @@ async def test_nothing_is_served_without_the_token(browser: Browser) -> None:
     assert wrong.status_code == 401 and "set-cookie" not in wrong.headers
     paths = ["/", "/app.js", "/map.js", "/chart.js", "/d3-force.js", "/app.css", "/api/conversation"]
     paths += ["/api/v1/view", "/api/v1/devices"]
-    for method, path in [("GET", path) for path in paths] + [("POST", "/api/ask"), ("POST", "/api/reset")]:
+    posts = [("POST", "/api/ask"), ("POST", "/api/reset"), ("POST", "/api/v1/show")]
+    for method, path in [("GET", path) for path in paths] + posts:
         response = await page.request(method, path, json={"question": "hi"} if method == "POST" else None)
         assert response.status_code == 401, path
 
