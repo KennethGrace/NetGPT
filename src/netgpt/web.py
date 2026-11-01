@@ -37,7 +37,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Route
 
 from netgpt.chat import Chat, ChatError, ChatObserver
-from netgpt.statistics import MAX_CHART_PORTS, ChartError, Metric, Poller
+from netgpt.statistics import MAX_CHART_PORTS, ChartError, Metric, Poller, Traffic
 from netgpt.store import StoreError
 
 COOKIE = "netgpt_token"
@@ -237,8 +237,8 @@ def build_app(chat: Chat, token: str, statistics: Poller | None = None) -> Starl
             items, _ = await statistics.traffic(None, MAP_MINUTES)
         except StoreError as error:
             return JSONResponse({"error": str(error)}, status_code=503, headers=SECURITY_HEADERS)
-        ports = [item.model_dump(mode="json") for item in items]
-        return JSONResponse({"interval": statistics.interval, "minutes": MAP_MINUTES, "ports": ports}, headers=SECURITY_HEADERS)
+        traffic = Traffic(interval=statistics.interval, minutes=MAP_MINUTES, ports=items)
+        return JSONResponse(traffic.model_dump(mode="json"), headers=SECURITY_HEADERS)
 
     async def reset(request: Request) -> Response:
         if busy.locked():

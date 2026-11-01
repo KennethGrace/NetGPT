@@ -80,6 +80,14 @@ class Chart(BaseModel):
     lines: list[ChartLine]
 
 
+class Traffic(BaseModel):
+    """Every polled port's latest traffic and recent errors, which the page's map asks for again every poll."""
+
+    interval: float = Field(description="Seconds between polls: how often there is something new.")
+    minutes: float = Field(description="How far back the errors, discards, flaps, and averages go.")
+    ports: list[InterfaceTraffic]
+
+
 def speed_name(bps: int | None) -> str | None:
     """Write a port speed the way vendors do: 25G, 100M."""
     if not bps:

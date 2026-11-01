@@ -54,6 +54,25 @@ def replay(fixtures: dict[str, str]) -> tuple[httpx.MockTransport, list[str]]:
     return httpx.MockTransport(handler), requests
 
 
+JUNOS_FIXTURES = Path(__file__).parent / "fixtures" / "junos"
+
+
+class NetconfReplay:
+    """A NETCONF session that answers each RPC with the reply recorded for it on a Junos device, and keeps what was asked."""
+
+    def __init__(self, device: str) -> None:
+        self.folder = JUNOS_FIXTURES / device
+        self.replies: dict[str, str] = json.loads((self.folder / "replies.json").read_text())
+        self.asked: list[str] = []
+
+    async def rpc(self, body: str) -> str:
+        self.asked.append(body)
+        return (self.folder / self.replies[body]).read_text()
+
+    async def close(self) -> None:
+        pass
+
+
 # The containerlab lab, and the responses recorded from each of its devices (by the
 # path each query asks for).
 LAB = [
