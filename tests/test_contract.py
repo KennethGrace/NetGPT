@@ -7,10 +7,8 @@ and charts, views of the recorded labs, and the recorded Juniper switches' table
 
 from __future__ import annotations
 
-import json
 import re
 from collections import defaultdict
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -31,8 +29,8 @@ from netgpt.views import make_view
 from netgpt.web import build_app
 
 from fakes import FakePlatform, NetconfReplay, ScriptedOllama, recorded_lab, recorded_wan
+from schemas import SCHEMA, check, published
 
-SCHEMA = Path(__file__).parents[1] / "schema" / "netgpt.schema.json"
 TOKEN = "correct-horse-battery-staple"
 
 # Each tool, called so that it answers on the fake platform, and the record it answers with: one record, a list of
@@ -56,28 +54,6 @@ CALLS: dict[str, tuple[dict[str, Any], str, str]] = {
     "ping": ({"device": "leaf1", "destination": "192.0.2.1"}, "PingResult", "one"),
     "ping_sweep": ({"network": "192.0.2.0/29", "device": "leaf1"}, "PingResult", "list"),
 }
-
-
-def published() -> dict[str, Any]:
-    return json.loads(SCHEMA.read_text())
-
-
-def check(record: str, value: object, shape: str = "one") -> None:
-    """Fail unless the value is the record (or a list or collection of them) as the published schema has it."""
-    defs = published()["$defs"]
-    assert record in defs, f"{record} is not in the contract"
-    one = {"$ref": f"#/$defs/{record}"}
-    expected = {
-        "one": one,
-        "list": {"type": "object", "properties": {"result": {"type": "array", "items": one}}, "required": ["result"]},
-        "collection": {
-            "type": "object",
-            "properties": {"items": {"type": "array", "items": one}, "errors": {"type": "array", "items": {"$ref": "#/$defs/DeviceError"}}},
-            "required": ["items", "errors"],
-        },
-    }[shape]
-    errors = sorted(Draft202012Validator({**expected, "$defs": defs}).iter_errors(value), key=str)
-    assert not errors, f"{record} doesn't match the schema: " + "; ".join(f"{list(error.absolute_path)}: {error.message}" for error in errors[:5])
 
 
 def test_the_schema_in_the_repository_is_the_one_the_code_writes() -> None:
@@ -137,11 +113,11 @@ async def test_the_traffic_and_charts_the_page_reads_match_the_schema(inventory:
     for _ in range(3):
         await poller.poll()
         now[0] += 30
-    server = build_server(Engine(inventory, platforms={"fake": FakePlatform}, statistics=poller), display=True)
-    async with Client(server) as client, ScriptedOllama().client() as http:
+    engine = Engine(inventory, platforms={"fake": FakePlatform}, statistics=poller)
+    async with Client(build_server(engine, display=True)) as client, ScriptedOllama().client() as http:
         chat = Chat(client, http, "scripted", {}, think=True)
         await chat.start()
-        app = build_app(chat, TOKEN, poller)
+        app = build_app(chat, TOKEN, engine)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://netgpt.test") as page:
             await page.get("/", params={"token": TOKEN})
             traffic = (await page.get("/api/traffic")).json()
