@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NetGPT</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233b82f6' stroke-width='2.5'%3E%3Ccircle cx='16' cy='6' r='3.5'/%3E%3Ccircle cx='6' cy='25' r='3.5'/%3E%3Ccircle cx='26' cy='25' r='3.5'/%3E%3Cpath d='M14 9 8 22M18 9l6 13M9.5 25h13'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="stylesheet" href="app.css">
+  <script src="d3-force.js" defer></script>
+  <script src="map.js" defer></script>
+  <script src="chart.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div id="top">
+    <header>
+      <h1>NetGPT</h1>
+      <span id="model" class="badge"></span>
+      <button id="map-toggle" type="button" aria-pressed="true" title="Show or hide the map" hidden>Map</button>
+      <button id="reset" type="button">New conversation</button>
+    </header>
+    <aside id="map" aria-label="Network map" hidden>
+      <div class="map-head">
+        <h2 id="map-title"></h2>
+        <button id="map-traffic" type="button" aria-pressed="true" title="Show or hide each link's traffic" hidden>Traffic</button>
+      </div>
+      <svg id="map-graph" role="img" aria-labelledby="map-title"></svg>
+      <div id="map-inspector"></div>
+    </aside>
+  </div>
+  <main id="conversation" aria-live="polite"></main>
+  <form id="composer">
+    <div id="status" role="status"></div>
+    <div class="row">
+      <textarea id="question" rows="1" placeholder="Ask about the network…" autofocus></textarea>
+      <button id="send" type="submit">Ask</button>
+    </div>
+  </form>
+</body>
+</html>

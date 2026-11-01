@@ -1,0 +1,119 @@
+<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="19">
+<route-information xmlns="http://xml.juniper.net/junos/23.4R0/junos-routing">
+<!-- keepalive -->
+<route-table>
+<table-name>inet6.0</table-name>
+<destination-count>7</destination-count>
+<total-route-count>7</total-route-count>
+<active-route-count>7</active-route-count>
+<holddown-route-count>0</holddown-route-count>
+<hidden-route-count>0</hidden-route-count>
+<rt junos:style="brief">
+<rt-destination junos:emit="emit">fd00::5c47:fd4c:bd1d:7b62:91c4/128</rt-destination>
+<rt-entry>
+<active-tag>*</active-tag>
+<current-active/>
+<last-active/>
+<protocol-name>Direct</protocol-name>
+<preference>0</preference>
+<age junos:seconds="18481405">30w3d 21:43:25</age>
+<nh>
+<selected-next-hop/>
+<via>lo0.0</via>
+</nh>
+</rt-entry>
+</rt>
+<rt junos:style="brief">
+<rt-destination junos:emit="emit">fd00::5c47:fe75:9a4f:b81d:7a3f/128</rt-destination>
+<rt-entry>
+<active-tag>*</active-tag>
+<current-active/>
+<last-active/>
+<protocol-name>IS-IS</protocol-name>
+<preference>18</preference>
+<age junos:seconds="18481300">30w3d 21:41:40</age>
+<metric>10</metric>
+<nh>
+<selected-next-hop/>
+<to>fe80::d2ff:c5ff:fe3a:8bbb</to>
+<via>xe-0/0/1.0</via>
+</nh>
+</rt-entry>
+</rt>
+<rt junos:style="brief">
+<rt-destination junos:emit="emit">fd00::5c47:ffc4:2fb9:48e0:fbf2/128</rt-destination>
+<rt-entry>
+<active-tag>*</active-tag>
+<current-active/>
+<last-active/>
+<protocol-name>IS-IS</protocol-name>
+<preference>18</preference>
+<age junos:seconds="18481326">30w3d 21:42:06</age>
+<metric>10</metric>
+<nh>
+<selected-next-hop/>
+<to>fe80::d281:c5ff:fe26:f4bb</to>
+<via>xe-0/0/0.0</via>
+</nh>
+</rt-entry>
+</rt>
+<rt junos:style="brief">
+<rt-destination junos:emit="emit">fe80::3e08:cd0f:fc5a:bb80/128</rt-destination>
+<rt-entry>
+<active-tag>*</active-tag>
+<current-active/>
+<last-active/>
+<protocol-name>Direct</protocol-name>
+<preference>0</preference>
+<age junos:seconds="18481405">30w3d 21:43:25</age>
+<nh>
+<selected-next-hop/>
+<via>lo0.0</via>
+</nh>
+</rt-entry>
+</rt>
+<rt junos:style="brief">
+<rt-destination junos:emit="emit">fe80::3e08:cdff:fe5a:bb84/128</rt-destination>
+<rt-entry>
+<active-tag>*</active-tag>
+<current-active/>
+<last-active/>
+<protocol-name>Local</protocol-name>
+<preference>0</preference>
+<age junos:seconds="18481329">30w3d 21:42:09</age>
+<nh-type>Local</nh-type>
+<nh>
+<nh-local-interface>xe-0/0/0.0</nh-local-interface>
+</nh>
+</rt-entry>
+</rt>
+<rt junos:style="brief">
+<rt-destination junos:emit="emit">fe80::3e08:cdff:fe5a:bb85/128</rt-destination>
+<rt-entry>
+<active-tag>*</active-tag>
+<current-active/>
+<last-active/>
+<protocol-name>Local</protocol-name>
+<preference>0</preference>
+<age junos:seconds="18481326">30w3d 21:42:06</age>
+<nh-type>Local</nh-type>
+<nh>
+<nh-local-interface>xe-0/0/1.0</nh-local-interface>
+</nh>
+</rt-entry>
+</rt>
+<rt junos:style="brief">
+<rt-destination>ff02::2/128</rt-destination>
+<rt-entry>
+<active-tag>*</active-tag>
+<current-active/>
+<last-active/>
+<protocol-name>INET6</protocol-name>
+<preference>0</preference>
+<age junos:seconds="18481405">30w3d 21:43:25</age>
+<nh-type>MultiRecv</nh-type>
+</rt-entry>
+</rt>
+</route-table>
+</route-information>
+</rpc-reply>

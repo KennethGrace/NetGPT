@@ -7,14 +7,10 @@
 
 # Development Environment
 venv
-node_modules
 
 # Python bytecode (compiled)
 *.pyc
 __pycache__/
-
-# React builds
-dist/
 
 # Development secrets
 secret
@@ -28,3 +24,24 @@ certs
 *.pfx
 *.cer
 *.crt
+
+# Python packaging and tests
+*.egg-info/
+dist/
+.pytest_cache/
+
+# containerlab lab directories (generated on deploy, contain node TLS keys)
+lab/clab-*/
+lab/*/clab-*/
+
+# Local lab images and other files that stay on this machine
+.local/
+
+# What the lab gremlin broke, until it is repaired, and the scores and transcripts of its game
+lab/.gremlin.json
+lab/wan/.gremlin.json
+lab/.scoreboard.jsonl
+lab/.transcripts/
+
+# Where this machine keeps its development database
+dev/.env

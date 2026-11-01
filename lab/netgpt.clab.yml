@@ -1,0 +1,96 @@
+# NetGPT development lab: a small routed spine-leaf fabric of Nokia SR Linux
+# nodes, with a Linux host behind leaf1 and a layer-2 access switch behind leaf2.
+#
+#                   spine1
+#                  /      \
+#     host1 ── leaf1      leaf2
+#                           │
+#                        switch1        layer 2 only: one bridged LAN
+#                         /   \
+#                     host2   host3
+#
+# Fabric links are /31s in 192.168.0.0/24; host subnets are 192.168.11.0/24 and
+# 192.168.12.0/24; routing is static. switch1 routes nothing: it bridges leaf2's
+# 192.168.12.0/24 out to host2 and host3. Management addresses are fixed so the
+# inventory (inventory.yml) doesn't change between deploys.
+#
+# The hosts keep traffic flowing, so interface counters have something to count:
+# host1 sends to host2, and host3 to host1, with iperf3 at a rate that changes every
+# minute (traffic.sh). Their links get containerlab's 9500-byte MTU, but SR Linux
+# routes 1500-byte IP packets, so the hosts are set to 1500. Otherwise a TCP
+# connection stalls on its first full-size segment, and the leaf counts it as an
+# input error each time it is sent again.
+#
+# Use Docker. SR Linux 25.10.5 crashes at boot under podman (sr_app_mgr asserts in
+# its datapath launcher), and containerlab no longer tests the podman runtime.
+#
+#   sudo containerlab deploy -t lab/netgpt.clab.yml
+#   sudo containerlab deploy -t lab/netgpt.clab.yml --reconfigure   # after changing this file
+#   sudo containerlab destroy -t lab/netgpt.clab.yml
+name: netgpt
+
+mgmt:
+  network: netgpt-mgmt
+  ipv4-subnet: 172.20.20.0/24
+
+topology:
+  kinds:
+    nokia_srlinux:
+      image: ghcr.io/nokia/srlinux:25.10.5
+    linux:
+      image: ghcr.io/srl-labs/network-multitool:latest
+
+  nodes:
+    spine1:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.20.11
+      startup-config: configs/spine1.cli
+    leaf1:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.20.21
+      startup-config: configs/leaf1.cli
+    leaf2:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.20.22
+      startup-config: configs/leaf2.cli
+    switch1:
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.20.20.41
+      startup-config: configs/switch1.cli
+    host1:
+      kind: linux
+      mgmt-ipv4: 172.20.20.31
+      binds:
+        - traffic.sh:/traffic.sh:ro
+      exec:
+        - ip link set dev eth1 mtu 1500
+        - ip addr add 192.168.11.2/24 dev eth1
+        - ip route add 192.168.0.0/16 via 192.168.11.1
+        - iperf3 -s -D
+        - sh -c "nohup sh /traffic.sh 192.168.12.2 > /dev/null 2>&1 &"
+    host2:
+      kind: linux
+      mgmt-ipv4: 172.20.20.32
+      exec:
+        - ip link set dev eth1 mtu 1500
+        - ip addr add 192.168.12.2/24 dev eth1
+        - ip route add 192.168.0.0/16 via 192.168.12.1
+        - iperf3 -s -D
+    host3:
+      kind: linux
+      mgmt-ipv4: 172.20.20.33
+      binds:
+        - traffic.sh:/traffic.sh:ro
+      exec:
+        - ip link set dev eth1 mtu 1500
+        - ip addr add 192.168.12.3/24 dev eth1
+        - ip route add 192.168.0.0/16 via 192.168.12.1
+        - sh -c "nohup sh /traffic.sh 192.168.11.2 > /dev/null 2>&1 &"
+
+  links:
+    - endpoints: ["leaf1:e1-49", "spine1:e1-1"]
+    - endpoints: ["leaf2:e1-49", "spine1:e1-2"]
+    - endpoints: ["host1:eth1", "leaf1:e1-1"]
+    - endpoints: ["leaf2:e1-1", "switch1:e1-1"]
+    - endpoints: ["host2:eth1", "switch1:e1-2"]
+    - endpoints: ["host3:eth1", "switch1:e1-3"]

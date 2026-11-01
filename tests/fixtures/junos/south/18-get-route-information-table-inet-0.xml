@@ -1,0 +1,5 @@
+<nc:rpc-reply xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="20">
+<route-information xmlns="http://xml.juniper.net/junos/23.4R0/junos-routing">
+<!-- keepalive -->
+</route-information>
+</nc:rpc-reply>

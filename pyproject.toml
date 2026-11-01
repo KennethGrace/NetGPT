@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "netgpt"
+version = "0.4.0"
+description = "Read-only network engineering tools for language models, served over MCP."
+readme = "README.md"
+license = { file = "LICENSE.md" }
+authors = [{ name = "Kenneth J. Grace", email = "kennethjeffersongrace@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=2.3,<3",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "icmplib>=3.0.4",
+    "asyncssh>=2.14",
+    "prompt_toolkit>=3.0",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+# The TimescaleDB (PostgreSQL) store for statistics: --store postgresql://...
+store = ["psycopg[binary,pool]>=3.2"]
+
+[project.scripts]
+netgpt-mcp = "netgpt.server:main"
+netgpt-chat = "netgpt.chat:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/netgpt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

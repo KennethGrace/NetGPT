@@ -1,0 +1,28 @@
+# Inventory for the containerlab lab in netgpt.clab.yml.
+#
+# Passwords never go in this file. The lab profile reads SR Linux's public default
+# password from a file outside the repository (chmod 600):
+#
+#   mkdir -p ~/.config/netgpt && printf 'NokiaSrl1!' > ~/.config/netgpt/srlinux-lab.password
+#   chmod 600 ~/.config/netgpt/srlinux-lab.password
+
+credentials:
+  srlinux-lab:
+    username: admin
+    password_file: ~/.config/netgpt/srlinux-lab.password
+
+# containerlab signs each node's API certificate with a per-lab CA.
+devices:
+  - {name: spine1, host: 172.20.20.11, platform: nokia_srlinux, credentials: srlinux-lab, role: spine, tls_ca: clab-netgpt/.tls/ca/ca.pem}
+  - {name: leaf1,  host: 172.20.20.21, platform: nokia_srlinux, credentials: srlinux-lab, role: leaf,  tls_ca: clab-netgpt/.tls/ca/ca.pem}
+  - {name: leaf2,  host: 172.20.20.22, platform: nokia_srlinux, credentials: srlinux-lab, role: leaf,  tls_ca: clab-netgpt/.tls/ca/ca.pem}
+  - {name: switch1, host: 172.20.20.41, platform: nokia_srlinux, credentials: srlinux-lab, role: access, tls_ca: clab-netgpt/.tls/ca/ca.pem}
+
+# The networks ping_sweep may sweep. The NetGPT host reaches only the management
+# network; the fabric and host networks are swept from a device (ping_sweep with
+# device: leaf2), which also fills the ARP and MAC tables the topology reads.
+sweep_networks:
+  - 172.20.20.0/24
+  - 192.168.0.0/24
+  - 192.168.11.0/24
+  - 192.168.12.0/24

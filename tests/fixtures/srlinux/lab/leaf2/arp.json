@@ -1,0 +1,92 @@
+{
+ "result": [
+  {
+   "srl_nokia-interfaces:interface": [
+    {
+     "name": "ethernet-1/1",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "192.168.12.2",
+           "link-layer-address": "AA:C1:AB:7D:97:F1",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-27T22:23:19.231Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          },
+          {
+           "ipv4-address": "192.168.12.3",
+           "link-layer-address": "AA:C1:AB:FE:3F:C0",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-27T22:23:20.801Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/49",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "192.168.0.2",
+           "link-layer-address": "1A:83:05:FF:00:02",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-27T22:17:21.377Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "mgmt0",
+     "subinterface": [
+      {
+       "index": 0,
+       "ipv4": {
+        "srl_nokia-interfaces-nbr:arp": {
+         "neighbor": [
+          {
+           "ipv4-address": "172.20.20.1",
+           "link-layer-address": "4E:A1:A0:FD:D3:8E",
+           "origin": "dynamic",
+           "expiration-time": "2026-10-27T22:24:38.594Z",
+           "group-based-policy-tag": 0,
+           "datapath-programming": {
+            "status": "success"
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

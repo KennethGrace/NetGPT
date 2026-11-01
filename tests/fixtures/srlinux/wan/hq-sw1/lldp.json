@@ -1,0 +1,195 @@
+{
+ "result": [
+  {
+   "admin-state": "enable",
+   "hello-timer": "30",
+   "hold-multiplier": 4,
+   "system-name": "hq-sw1",
+   "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef hq-sw1 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+   "chassis-id": "1A:99:05:FF:00:00",
+   "chassis-id-type": "MAC_ADDRESS",
+   "statistics": {
+    "frame-in": "145",
+    "frame-out": "98",
+    "frame-error-in": "0",
+    "frame-discard": "0",
+    "tlv-discard": "0",
+    "tlv-unknown": "0",
+    "tlv-accepted": "1038",
+    "entries-aged-out": "0"
+   },
+   "interface": [
+    {
+     "name": "ethernet-1/1",
+     "admin-state": "enable",
+     "oper-state": "up",
+     "statistics": {
+      "frame-in": "23",
+      "frame-out": "24",
+      "frame-error-in": "0",
+      "frame-discard": "0",
+      "tlv-discard": "0",
+      "tlv-unknown": "0",
+      "frame-error-out": "0"
+     },
+     "neighbor": [
+      {
+       "id": "1A:F7:02:FF:00:00",
+       "first-message": "2026-10-29T23:52:28.295Z",
+       "last-update": "2026-10-30T00:02:58.299Z",
+       "system-name": "hq-core",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef hq-core 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:F7:02:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "ethernet-1/10",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "HQ campus LAN",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "ethernet-1/2",
+     "admin-state": "enable",
+     "oper-state": "up",
+     "statistics": {
+      "frame-in": "0",
+      "frame-out": "23",
+      "frame-error-in": "0",
+      "frame-discard": "0",
+      "tlv-discard": "0",
+      "tlv-unknown": "0",
+      "frame-error-out": "0"
+     }
+    },
+    {
+     "name": "ethernet-1/3",
+     "admin-state": "enable",
+     "oper-state": "up",
+     "statistics": {
+      "frame-in": "0",
+      "frame-out": "23",
+      "frame-error-in": "0",
+      "frame-discard": "0",
+      "tlv-discard": "0",
+      "tlv-unknown": "0",
+      "frame-error-out": "0"
+     }
+    },
+    {
+     "name": "mgmt0",
+     "admin-state": "enable",
+     "oper-state": "up",
+     "statistics": {
+      "frame-in": "122",
+      "frame-out": "28",
+      "frame-error-in": "0",
+      "frame-discard": "0",
+      "tlv-discard": "0",
+      "tlv-unknown": "0",
+      "frame-error-out": "0"
+     },
+     "neighbor": [
+      {
+       "id": "1A:01:03:FF:00:00",
+       "first-message": "2026-10-29T23:52:27.601Z",
+       "last-update": "2026-10-30T00:02:57.392Z",
+       "system-name": "hq-dc",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef hq-dc 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:01:03:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "mgmt0",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      },
+      {
+       "id": "1A:41:01:FF:00:00",
+       "first-message": "2026-10-29T23:52:28.124Z",
+       "last-update": "2026-10-30T00:02:58.139Z",
+       "system-name": "branch",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef branch 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:41:01:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "mgmt0",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      },
+      {
+       "id": "1A:97:09:FF:00:00",
+       "first-message": "2026-10-29T23:52:27.604Z",
+       "last-update": "2026-10-30T00:02:57.370Z",
+       "system-name": "ops-dc",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef ops-dc 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:97:09:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "mgmt0",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      },
+      {
+       "id": "1A:ED:08:FF:00:00",
+       "first-message": "2026-10-29T23:52:27.599Z",
+       "last-update": "2026-10-30T00:02:56.856Z",
+       "system-name": "ops-core",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef ops-core 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:ED:08:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "mgmt0",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      },
+      {
+       "id": "1A:F7:02:FF:00:00",
+       "first-message": "2026-10-29T23:52:28.293Z",
+       "last-update": "2026-10-30T00:02:58.299Z",
+       "system-name": "hq-core",
+       "system-description": "SRLinux-v25.10.5-111-g6fbddec84ef hq-core 5.14.0-570.55.1.el9_6.x86_64 #1 SMP PREEMPT_DYNAMIC Tue Oct 14 01:03:55 EDT 2025",
+       "chassis-id": "1A:F7:02:FF:00:00",
+       "chassis-id-type": "MAC_ADDRESS",
+       "port-id": "mgmt0",
+       "port-id-type": "INTERFACE_NAME",
+       "port-description": "",
+       "capability": [
+        {
+         "name": "srl_nokia-lldp-types:ROUTER",
+         "enabled": true
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "id": 1,
+ "jsonrpc": "2.0"
+}

@@ -1,0 +1,106 @@
+<nc:rpc-reply xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0" xmlns:junos="http://xml.juniper.net/junos/23.4R2-S4.11/junos" message-id="3">
+<lldp-neighbors-information junos:style="detail">
+<lldp-neighbor-information>
+<lldp-index>2</lldp-index>
+<lldp-ttl>120</lldp-ttl>
+<lldp-timemark>Wed Oct 28 20:22:32 2026</lldp-timemark>
+<lldp-age>1</lldp-age>
+<lldp-local-interface>me0</lldp-local-interface>
+<lldp-local-parent-interface-name>-</lldp-local-parent-interface-name>
+<lldp-local-port-id>33</lldp-local-port-id>
+<lldp-local-port-ageout-count>0</lldp-local-port-ageout-count>
+<lldp-remote-chassis-id-subtype>Mac address</lldp-remote-chassis-id-subtype>
+<lldp-remote-chassis-id>58:8d:09:d5:74:00</lldp-remote-chassis-id>
+<lldp-remote-port-id-subtype>Interface name</lldp-remote-port-id-subtype>
+<lldp-remote-port-id>Gi0/37</lldp-remote-port-id>
+<lldp-remote-port-description>oob uplink</lldp-remote-port-description>
+<lldp-remote-system-name>oob-switch1</lldp-remote-system-name>
+<lldp-system-description>
+<lldp-remote-system-description>Cisco IOS Software
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2017 by Cisco Systems, Inc.
+Compiled Mon 18-Sep-17 11:41 by prod_rel_team</lldp-remote-system-description>
+</lldp-system-description>
+<lldp-remote-system-capabilities-supported>Bridge Router </lldp-remote-system-capabilities-supported>
+<lldp-remote-system-capabilities-enabled>Bridge Router </lldp-remote-system-capabilities-enabled>
+<lldp-remote-management-address-type>IPv4(1)</lldp-remote-management-address-type>
+<lldp-remote-management-address>198.51.100.9</lldp-remote-management-address>
+<lldp-remote-management-address-port-id>0</lldp-remote-management-address-port-id>
+<lldp-remote-management-address-interface-subtype>SysPortNum(3)</lldp-remote-management-address-interface-subtype>
+<lldp-remote-management-addr-oid></lldp-remote-management-addr-oid>
+<lldp-med-remote-system-class>Network Connectivity</lldp-med-remote-system-class>
+<lldp-remote-inventory-hardware-revision>cisco-switch (PowerPC405):A0</lldp-remote-inventory-hardware-revision>
+<lldp-remote-inventory-software-revision>15.2(4)E5</lldp-remote-inventory-software-revision>
+<lldp-remote-inventory-manufacturer-name>Cisco Systems, Inc.</lldp-remote-inventory-manufacturer-name>
+<lldp-remote-inventory-model-name>cisco-switch</lldp-remote-inventory-model-name>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype-med-capabilities>1</lldp-remote-subtype-med-capabilities>
+<lldp-remote-subtype-med-cap-status>LLDP-Med capable, Network policy capable, Location ID capable, MDI-PSE capable, MDI-PD not capable, Inventory capable (0x2f)</lldp-remote-subtype-med-cap-status>
+<lldp-remote-subtype-med-class-type>Network Connectivity (4)</lldp-remote-subtype-med-class-type>
+<lldp-remote-index>1</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype>(5)</lldp-remote-subtype>
+<lldp-remote-value>57532D4333353630582D3438502028506F7765725043343035293A4130</lldp-remote-value>
+<lldp-remote-index>2</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype>(7)</lldp-remote-subtype>
+<lldp-remote-value>31352E322834294535</lldp-remote-value>
+<lldp-remote-index>3</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype>(9)</lldp-remote-subtype>
+<lldp-remote-value>436973636F2053797374656D732C20496E632E</lldp-remote-value>
+<lldp-remote-index>4</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype>(10)</lldp-remote-subtype>
+<lldp-remote-value>57532D4333353630582D343850</lldp-remote-value>
+<lldp-remote-index>5</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype-policy-type>2</lldp-remote-subtype-policy-type>
+<lldp-remote-subtype-nw-app-type>Voice</lldp-remote-subtype-nw-app-type>
+<lldp-remote-subtype-nw-policy-info>Policy reserved, Untagged, VID (0), L2 Priority (0), DSCP Priority (0)</lldp-remote-subtype-nw-policy-info>
+<lldp-remote-index>6</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype-policy-type>2</lldp-remote-subtype-policy-type>
+<lldp-remote-subtype-nw-app-type>Voice signaling</lldp-remote-subtype-nw-app-type>
+<lldp-remote-subtype-nw-policy-info>Policy reserved, Untagged, VID (0), L2 Priority (0), DSCP Priority (0)</lldp-remote-subtype-nw-policy-info>
+<lldp-remote-index>7</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-tia>0012bb</lldp-remote-oui-tia>
+<lldp-remote-subtype-ext-power-vi-mdi>4</lldp-remote-subtype-ext-power-vi-mdi>
+<lldp-remote-subtype-med-power-type>PSE device</lldp-remote-subtype-med-power-type>
+<lldp-remote-subtype-med-power-source>PSE - primary power source</lldp-remote-subtype-med-power-source>
+<lldp-remote-subtype-med-power-priority>Low</lldp-remote-subtype-med-power-priority>
+<lldp-remote-subtype-med-power-value>0</lldp-remote-subtype-med-power-value>
+<lldp-remote-index>8</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-802-1>0080c2</lldp-remote-oui-802-1>
+<lldp-remote-subtype-port-vid>1</lldp-remote-subtype-port-vid>
+<lldp-remote-subtype-vlan-id>2552</lldp-remote-subtype-vlan-id>
+<lldp-remote-index>9</lldp-remote-index>
+</lldp-org-specific-tlv>
+<lldp-org-specific-tlv>
+<lldp-remote-oui-802-3>00120f</lldp-remote-oui-802-3>
+<lldp-remote-subtype-mac>1</lldp-remote-subtype-mac>
+<lldp-remote-subtype-mac-autonegotiation>supported, enabled (0x3)</lldp-remote-subtype-mac-autonegotiation>
+<lldp-remote-subtype-mac-pmd>6c01</lldp-remote-subtype-mac-pmd>
+<lldp-remote-subtype-mac-mau>30</lldp-remote-subtype-mac-mau>
+<lldp-remote-index>10</lldp-remote-index>
+</lldp-org-specific-tlv>
+</lldp-neighbor-information>
+</lldp-neighbors-information>
+</nc:rpc-reply>

@@ -1,0 +1,412 @@
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --fg: #1c1d1f;
+  --muted: #6b6f76;
+  --border: #e2e2de;
+  --accent: #2f6fde;
+  --accent-fg: #ffffff;
+  --user-bg: #e8effc;
+  --code-bg: #f0f0ec;
+  --warn: #a15c00;
+  --warn-bg: #fdf3e3;
+  --error: #b42318;
+  --error-bg: #fdecea;
+  --edge: #9aa0a8;
+  --lit-bg: #e8effc;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --load-1: #52c8b4;
+  --load-2: #31a593;
+  --load-3: #1d8374;
+  --load-4: #126357;
+  --load-5: #07453c;
+  --area-1: #1a9e6e;
+  --area-2: #8a63d2;
+  --area-3: #d4669a;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131416;
+    --surface: #1b1d20;
+    --fg: #e6e6e3;
+    --muted: #9a9ea6;
+    --border: #2c2f34;
+    --accent: #5b8ff0;
+    --accent-fg: #0b0c0d;
+    --user-bg: #1f2a3d;
+    --code-bg: #24272b;
+    --warn: #f0b35a;
+    --warn-bg: #2e2516;
+    --error: #f2877d;
+    --error-bg: #34191a;
+    --edge: #5d636b;
+    --lit-bg: #1f2a3d;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --load-1: #0c665a;
+    --load-2: #118a7a;
+    --load-3: #27af9b;
+    --load-4: #5dd2bd;
+    --load-5: #9feddd;
+    --area-1: #3cc293;
+    --area-2: #a98bec;
+    --area-3: #ec8cb6;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+header, main, #composer {
+  max-width: 860px;
+  margin: 0 auto;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+#top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+h1 { font-size: 18px; margin: 0; letter-spacing: 0.02em; }
+
+.badge {
+  font-size: 13px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button {
+  font: inherit;
+  font-size: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+#reset, #map-toggle:not([hidden]) { margin-left: auto; white-space: nowrap; }
+#map-toggle:not([hidden]) + #reset { margin-left: 0; }
+#map-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+/* On a narrow screen: a dot on the button when the other screen has something new, pulsing while the answer comes. */
+#map-toggle.fresh::after, body.map-full #map-toggle.busy::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 1px;
+}
+body.map-full #map-toggle.busy::after { animation: pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { #map-toggle.busy::after { animation: none; } }
+
+main { padding-top: 16px; padding-bottom: 160px; }
+
+.intro { color: var(--muted); margin-top: 12vh; text-align: center; }
+.intro h2 { color: var(--fg); font-size: 20px; margin-bottom: 4px; }
+.examples { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+
+.message { margin: 18px 0; overflow-wrap: anywhere; }
+.message.user {
+  margin-left: auto;
+  width: fit-content;
+  max-width: 85%;
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: var(--user-bg);
+  white-space: pre-wrap;
+}
+
+details.thinking, details.tool {
+  margin: 6px 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+details.thinking summary, details.tool summary { cursor: pointer; }
+.thinking-text {
+  white-space: pre-wrap;
+  font-style: italic;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px 12px;
+  border-left: 2px solid var(--border);
+}
+details.tool summary { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+details.tool.failed summary { color: var(--warn); }
+details.tool.failed summary::after { content: "  ✗ failed"; }
+details.tool pre { max-height: 360px; }
+
+.note { color: var(--muted); font-size: 14px; font-style: italic; white-space: pre-wrap; margin: 6px 0; }
+.draft { white-space: pre-wrap; }
+.error { color: var(--error); background: var(--error-bg); border-radius: 8px; padding: 8px 12px; }
+
+.answer > :first-child { margin-top: 4px; }
+.answer h3, .answer h4, .answer h5, .answer h6 { margin: 18px 0 6px; font-size: 16px; }
+.answer ul, .answer ol { padding-left: 24px; }
+.answer hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+.answer table { border-collapse: collapse; display: block; overflow-x: auto; font-size: 14px; }
+.answer th, .answer td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
+
+code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+code { background: var(--code-bg); border-radius: 4px; padding: 1px 4px; }
+pre { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; overflow: auto; }
+pre code { background: none; padding: 0; }
+
+#composer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding-top: 8px;
+  padding-bottom: 16px;
+  background: linear-gradient(transparent, var(--bg) 24px);
+}
+#composer .row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 8px;
+}
+#question {
+  flex: 1;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  max-height: 200px;
+  padding: 4px 6px;
+}
+#send { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+#status { min-height: 22px; font-size: 13px; color: var(--muted); padding: 0 6px 4px; }
+#status.live::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { #status.live::before { animation: none; } }
+
+/* The map: on a wide screen it fills the right of the window. On a narrow one it takes
+   turns with the conversation, filling the screen under the header when it is shown. */
+
+#map {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+#map[hidden], body.map-hidden #map { display: none; }
+
+@media (max-width: 999px) {
+  #map { display: none; }
+  body.map-full #top { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  body.map-full header { width: 100%; }
+  body.map-full #map:not([hidden]) { display: flex; flex: 1; min-height: 0; }
+  body.map-full main, body.map-full #composer { display: none; }
+}
+.map-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px 0; }
+#map h2 { flex: 1; min-width: 0; font-size: 15px; margin: 0; }
+#map-traffic { font-size: 12px; padding: 1px 8px; }
+#map-traffic[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+#map-graph { flex: 1; min-height: 0; width: 100%; touch-action: none; user-select: none; }
+#map-inspector { font-size: 13px; padding: 0 16px 10px; max-height: 35%; overflow-y: auto; }
+#map-inspector h3 { font-size: 14px; margin: 6px 0 2px; overflow-wrap: anywhere; }
+#map-inspector .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+#map-inspector button { font-size: 12px; padding: 1px 8px; }
+#map-inspector p { margin: 2px 0; overflow-wrap: anywhere; }
+#map-inspector .kind, #map-inspector .addresses, #map-inspector .hint { color: var(--muted); }
+#map-inspector .failed { color: var(--error); }
+#map-inspector .remark { color: var(--accent); font-style: italic; }
+#map-inspector .evidence { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
+#map-inspector .warned { color: var(--warn); }
+#map-inspector.charted { max-height: 60%; }
+#map-inspector figure.chart { margin: 6px 0; }
+
+@media (min-width: 1000px) {
+  body.map-open:not(.map-hidden) { padding-right: 52vw; }
+  body.map-open:not(.map-hidden) #composer { right: 52vw; }
+  #map {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 52vw;
+    border-left: 1px solid var(--border);
+  }
+}
+
+#map-graph text { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+#map-graph .link, #map-graph .node { transition: opacity 0.6s; }
+#map-graph .near { opacity: 0.7; }
+#map-graph .context { opacity: 0.25; }
+#map-graph .wire { stroke: var(--edge); stroke-width: 2; }
+/* OSPF areas other than the backbone: before the highlight, so a highlighted link is still blue. */
+#map-graph .link.area-1 .wire { stroke: var(--area-1); stroke-width: 3; }
+#map-graph .link.area-2 .wire { stroke: var(--area-2); stroke-width: 3; }
+#map-graph .link.area-3 .wire { stroke: var(--area-3); stroke-width: 3; }
+#map-graph .kind-subnet.area-1 .body { stroke: var(--area-1); }
+#map-graph .kind-subnet.area-2 .body { stroke: var(--area-2); }
+#map-graph .kind-subnet.area-3 .body { stroke: var(--area-3); }
+#map-graph .hit { stroke: transparent; stroke-width: 14; cursor: pointer; }
+#map-graph .link.lit .wire { stroke: var(--accent); stroke-width: 4; }
+#map-graph .link.one-sided .wire { stroke: var(--warn); stroke-dasharray: 6 4; }
+#map-graph .link.problem .wire { stroke: var(--error); stroke-dasharray: 6 4; stroke-width: 3; }
+#map-graph .link.management .wire { stroke-dasharray: 2 4; }
+#map-graph .link.selected .wire { stroke-width: 5; }
+#map-graph .port { font-size: 10px; fill: var(--muted); text-anchor: middle; dominant-baseline: middle; visibility: hidden; }
+#map-graph .link.focus:not(.management) .port { visibility: visible; }
+#map-graph .port.network.beside { text-anchor: start; }
+#map-graph .note { font-size: 12px; fill: var(--accent); text-anchor: middle; font-style: italic; }
+#map-graph .port .flag { fill: var(--warn); font-weight: 600; }
+#map-graph .link .port.flagged { visibility: visible; }
+#map-graph .rate { font-size: 10px; fill: var(--fg); font-variant-numeric: tabular-nums; visibility: hidden; }
+#map-graph .link.focus .rate { visibility: visible; }
+
+/* Traffic lanes: one per direction, colored by share of port speed from a one-hue ramp,
+   validated as an ordinal ramp against the surface in both modes. */
+.lane { fill: none; stroke: var(--edge); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.lane.u1 { stroke: var(--load-1); }
+.lane.u2 { stroke: var(--load-2); }
+.lane.u3 { stroke: var(--load-3); }
+.lane.u4 { stroke: var(--load-4); }
+.lane.u5 { stroke: var(--load-5); }
+.traffic-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; color: var(--muted); }
+.traffic-legend .item { display: inline-flex; align-items: center; gap: 4px; }
+.traffic-legend .flag { color: var(--warn); font-weight: 600; }
+.area-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; color: var(--muted); }
+.area-legend .item { display: inline-flex; align-items: center; gap: 4px; }
+.area-legend .swatch { display: inline-block; width: 18px; height: 3px; background: var(--edge); }
+.area-legend .swatch.area-1 { background: var(--area-1); }
+.area-legend .swatch.area-2 { background: var(--area-2); }
+.area-legend .swatch.area-3 { background: var(--area-3); }
+
+#map-graph .node { cursor: grab; }
+#map-graph .body { fill: var(--surface); stroke: var(--fg); stroke-width: 2; }
+#map-graph .kind-host .body { fill: var(--muted); stroke: var(--surface); }
+#map-graph .kind-segment .body { stroke: var(--muted); }
+#map-graph .kind-subnet .body { stroke: var(--muted); }
+#map-graph .kind-neighbor .body { stroke-dasharray: 4 3; }
+#map-graph .node.lit .body { stroke: var(--accent); stroke-width: 3; fill: var(--lit-bg); }
+#map-graph .kind-host.lit .body { fill: var(--accent); }
+#map-graph .node.failed .body { stroke: var(--error); stroke-dasharray: 3 3; }
+#map-graph .node.trouble .body { stroke: var(--error); stroke-width: 3; }
+#map-graph .node.trouble .note { fill: var(--error); }
+#map-graph .node.selected .body { stroke-width: 4; }
+#map-graph .glyph { font-size: 13px; font-weight: 600; fill: var(--fg); text-anchor: middle; stroke: none; pointer-events: none; }
+#map-graph .context .glyph { font-size: 9px; }
+#map-graph .label { font-size: 13px; fill: var(--fg); }
+#map-graph .node .note { text-anchor: start; }
+#map-graph .context .label { font-size: 11px; }
+#map-graph .pin { display: none; fill: var(--fg); stroke: var(--surface); stroke-width: 1.5; }
+#map-graph .node.pinned .pin { display: inline; }
+#map-graph .guides line { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+
+.view-chip { display: block; margin: 6px 0; font-size: 13px; color: var(--accent); border-color: var(--accent); }
+.view-chip::before { content: "◇ "; }
+.view-chip.active { background: var(--accent); color: var(--accent-fg); }
+
+/* Charts in the conversation (chart.js). Six series colors, validated in both modes against the surface;
+   three of the light ones are under 3:1, so every chart has its numbers in a table too. */
+
+figure.chart {
+  position: relative;
+  margin: 10px 0;
+  padding: 10px 12px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.chart-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 14px; }
+.chart-unit { color: var(--muted); font-size: 13px; }
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-svg .grid line { stroke: var(--border); stroke-width: 1; shape-rendering: crispEdges; }
+.chart-svg .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-svg .tick.y { text-anchor: end; dominant-baseline: middle; }
+.chart-svg .tick.x { text-anchor: middle; }
+.chart-svg .chart-empty { fill: var(--muted); font-size: 13px; text-anchor: middle; }
+.chart .line { fill: none; stroke: var(--muted); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .line.out { stroke-dasharray: 5 4; }
+.chart .end { stroke: var(--surface); stroke-width: 2; }
+.chart .line.s1 { stroke: var(--series-1); } .chart .end.s1 { fill: var(--series-1); }
+.chart .line.s2 { stroke: var(--series-2); } .chart .end.s2 { fill: var(--series-2); }
+.chart .line.s3 { stroke: var(--series-3); } .chart .end.s3 { fill: var(--series-3); }
+.chart .line.s4 { stroke: var(--series-4); } .chart .end.s4 { fill: var(--series-4); }
+.chart .line.s5 { stroke: var(--series-5); } .chart .end.s5 { fill: var(--series-5); }
+.chart .line.s6 { stroke: var(--series-6); } .chart .end.s6 { fill: var(--series-6); }
+.chart-svg .crosshair { stroke: var(--muted); stroke-width: 1; shape-rendering: crispEdges; }
+.chart-svg .hover-target { fill: transparent; cursor: crosshair; }
+.chart-readout {
+  position: absolute;
+  top: 40px;
+  z-index: 1;
+  transform: translateX(12px);
+  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.chart-readout.flip { transform: translateX(calc(-100% - 12px)); }
+.chart-readout .when { color: var(--muted); }
+.chart-readout .row { display: flex; align-items: center; gap: 6px; }
+.chart-readout strong { font-variant-numeric: tabular-nums; }
+.chart-readout span { color: var(--muted); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.chart-legend .item { display: inline-flex; align-items: center; gap: 6px; }
+.chart-data { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.chart-data summary { cursor: pointer; }
+.chart-data table { border-collapse: collapse; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.chart-data th, .chart-data td { padding: 2px 14px 2px 0; text-align: left; }
+.chart-caption { margin-top: 2px; font-size: 12px; color: var(--muted); }
+.chart-caption.stale { color: var(--warn); }
