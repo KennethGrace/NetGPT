@@ -69,7 +69,12 @@ DESCRIPTION = (
 
 
 class _AsSent(GenerateJsonSchema):
-    """Marks every property required: NetGPT sends each one, set or not, so a reader can count on finding it."""
+    """
+    Marks every property required: NetGPT sends each one, set or not, so a reader can
+    count on finding it. Properties carry no title: pydantic's is the field's name
+    title-cased, and type generators name a type after each one (json-schema-to-typescript
+    made Device1 to Device10, and renamed the Interface record Interface2).
+    """
 
     def field_is_required(
         self, field: core_schema.ModelField | core_schema.DataclassField | core_schema.TypedDictField, total: bool
@@ -77,6 +82,9 @@ class _AsSent(GenerateJsonSchema):
         if self.mode == "serialization":
             return field.get("serialization_exclude_if") is None
         return super().field_is_required(field, total)
+
+    def field_title_should_be_set(self, schema: Any) -> bool:
+        return False
 
 
 def schema() -> dict[str, Any]:
