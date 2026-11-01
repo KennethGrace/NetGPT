@@ -254,7 +254,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Phase 4, events: errors climbing, a link saturated or down, shown on the page and told to the agent.
   - Later: BGP state, and gNMI streaming in place of polling.
 - **Frontends track:**
-  - Phase 1: `netgpt-mcp` over HTTP, behind a token.
+  - Phase 1: MCP over HTTP, behind a token, on `netgpt-engine` once Contract Phase 2 has built it.
   - Phase 2: one login for the page and the endpoint.
   - Phase 3: the map inside MCP clients (MCP Apps).
 - **Contract track** (NetGPT as a project across repositories: this one holds the engine, its faces, and the labs, and owns the schemas the others read):
@@ -264,7 +264,20 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
     - **Fine-tuning** (the model lever) gets a repository when it starts: another toolchain, and it reads the game's transcripts as data, not code. The game stays here, since each round is marked with NetGPT's commit.
   - Phase 1: the contract. JSON Schema for every record NetGPT sends outside itself (views, charts, traffic, and the primitives the tools return), written from the pydantic models, checked in, versioned with the package, and kept equal to the code by a test.
     - Phase 1 is done: `netgpt.contract` and `schema/netgpt.schema.json`, 25 records. `/api/traffic`'s answer became a model (`Traffic`) to be one of them. The schema is pydantic's serialization schema with every property required, since each is sent (null when empty). A multi-device result is described in the schema's description (`items` and `errors`), not as a record of its own, and the page's conversation stream stays the page's own, outside the contract.
-  - Phase 2: a read API: views and traffic without a conversation, behind the page's token. The page's map reads it too.
+  - Phase 2: the engine's API: what the tools know and do, over HTTP, for any frontend, without a model or a conversation.
+    - **Found first:** the engine is closures inside `build_server` (`collect`, `gather_topology`, `at_layer`, `trace`, `link_port`), so MCP is the only way in, and polling runs only while an MCP client is connected. Live reads on the WAN lab take 0.1 to 0.4 s, but each opens a session per device: on Junos, an SSH login per device per query, and an RPC per port for LLDP.
+    - 2a, the engine: `netgpt.engine.Engine` holds the device logic (the tables, topology at each layer, paths, views, traffic, charts, `show` and pings, and the guard and limits on them) and owns the poller. `build_server(engine)` is thin MCP tools over it. Exit: the suite passes, and `server.py` reads no device itself.
+    - 2b, reads: GET routes under `/api/v1/`, each answering with a contract record: `devices`, `topology`, `path`, `view` (focus and highlight chosen by the client, no model), `tables/<table>`, `traffic`, `chart`, and `schema`.
+      - **Shared reads:** a device's answer to a query is reused for up to one poll interval, and requests that arrive together share one read. `Age` says how old an answer is, and `Cache-Control: no-cache` reads live. The MCP tools always read live: a model troubleshooting needs what changed a second ago. NMS 3d's snapshots can stand behind the cache later without changing the API.
+      - **A bearer token, or the page's cookie:** the page's token for now. No CORS: xspace's browser app goes through xspace's own backend, which holds the token.
+      - **A refusal** is 400 with `{"error": ...}` in the tools' words, listing the names that exist. That shape joins the contract.
+      - **`v1` is the API's own major version:** new records and fields stay v1; renaming or removing one is v2.
+      - **Tests in the contract's style:** every route's answer matches the schema, and a route answering with a record the contract doesn't name fails.
+    - 2c, the page reads it: `/api/v1/traffic` and `/api/v1/chart` replace the page's own routes, and the map draws the network from `/api/v1/view` when the page opens, before any question.
+    - 2d, the engine without a model: `netgpt-engine --inventory I --listen HOST:PORT [--store URL]` serves the API with no Ollama behind it. Checked live on the WAN lab.
+    - 2e, commands: `show`, `ping`, and `ping_sweep` as POST routes, run every time and never shared, through the same guard, inventory, and sweep limits as the tools. An engineer at any frontend should be able to do what the model can. They can come any time after 2b.
+    - **Not in Phase 2:** the model's views (what `display` draws) for other frontends. The chat would have to publish them.
+  - After Phase 2: MCP over HTTP (Frontends Phase 1) lands on `netgpt-engine` as `/mcp`, and the chat becomes a client of the engine instead of embedding one, which also ends two pollers on one store.
   - Phase 3: xspace draws the lab from that API, with types generated from the schema in place of its protobuf stubs.
     - No types have been generated from the schema yet; Phase 1 didn't try. Phase 3 starts there: generate TypeScript in xspace (every record is under `$defs`, so `json-schema-to-typescript` needs `--unreachableDefinitions`), and read what comes out before building on it.
 - **Known gaps:**
