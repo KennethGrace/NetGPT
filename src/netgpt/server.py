@@ -1,11 +1,14 @@
 """
-The NetGPT MCP server exposes read-only network tools to language model clients.
+The NetGPT MCP server is the engine's face for language model clients: it offers
+what the engine reads and runs as read-only tools.
 
 Every tool is read-only and reaches only the devices and networks named in the
 inventory. Multi-device tools query devices concurrently and return a
-Collection, so one unreachable device doesn't sink the whole answer. Only
-anticipated failures (bad input, refused commands, device errors) are caught and
-reported. Anything else is a bug and is allowed to fail loudly.
+Collection, so one unreachable device doesn't sink the whole answer. The engine
+(netgpt.engine) does the work; this module says what each tool is for, accepts the
+shapes small models send, and gives the model text to read. Only anticipated
+failures (bad input, refused commands, device errors) are caught and reported.
+Anything else is a bug and is allowed to fail loudly.
 """
 
 from __future__ import annotations
@@ -13,32 +16,29 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import ipaddress
 import logging
 import os
 import sys
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, Any
 
-import icmplib
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, BeforeValidator, Field
 
 from netgpt import __version__
+from netgpt.engine import Engine, RequestError
+from netgpt.forwarding import ForwardingPath, TraceError
 from netgpt.guard import GuardError
 from netgpt.inventory import Inventory, InventoryError
-from netgpt.platforms import PLATFORMS, Platform, PlatformError, platform_for
-from netgpt.platforms import connect as connect_to
-from netgpt.platforms.base import UnsupportedError
+from netgpt.platforms import PlatformError
 from netgpt.primitives import (
     ArpEntry,
     BgpSession,
     Collection,
     CommandOutput,
-    DeviceError,
     DeviceInfo,
     Interface,
     InterfaceTraffic,
@@ -49,13 +49,12 @@ from netgpt.primitives import (
     PingResult,
     Route,
 )
-from netgpt.forwarding import ForwardingPath, TraceError, trace_path
 from netgpt.statistics import (
     DEFAULT_INTERVAL, MAX_CHART_PORTS, Chart, ChartError, Metric, Poller, describe_chart, duration, poll_by_poll,
 )
 from netgpt.store import STORE_HELP, StoreError, check_store, open_store
-from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_ospf, build_topology, ospf_mismatches, port_of
-from netgpt.views import View, ViewError, describe, make_view
+from netgpt.topology import Layer, PlaneChoice, Topology
+from netgpt.views import View, ViewError, describe
 
 logger = logging.getLogger("netgpt")
 
@@ -99,15 +98,18 @@ with a count on any port that counted errors in the last 5 minutes. Selecting a 
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
 
-# Errors we anticipate from a device query. Anything else propagates as a crash.
-EXPECTED_ERRORS = (InventoryError, GuardError, PlatformError)
+# What the engine refuses, and a device's failure, which the model reads as the tool's error. Anything else is a bug,
+# and propagates as a crash.
+ANTICIPATED = (InventoryError, GuardError, PlatformError, RequestError, TraceError, ViewError, ChartError, StoreError)
 
-MAX_SWEEP_ADDRESSES = 1024
-# From a device, each ping is a command on the device: a /24 takes the better part of a minute.
-MAX_DEVICE_SWEEP_ADDRESSES = 256
 
-PrimitiveT = TypeVar("PrimitiveT")
-
+@contextlib.contextmanager
+def answered() -> Iterator[None]:
+    """Turn what the engine anticipates going wrong into the error the model reads."""
+    try:
+        yield
+    except ANTICIPATED as error:
+        raise ToolError(str(error)) from error
 
 
 def as_names(value: object) -> object:
@@ -154,18 +156,14 @@ def as_path_ends(value: object) -> object:
     return value
 
 
-def build_server(
-    inventory: Inventory,
-    platforms: dict[str, type[Platform]] = PLATFORMS,
-    display: bool = False,
-    statistics: Poller | None = None,
-) -> MCPServer:
+def build_server(engine: Engine, display: bool = False) -> MCPServer:
     """
-    Build the MCP server for an inventory. Platforms can be swapped out for testing.
-    display adds the tool that draws the network; only offer it to a client that can
-    show the drawing. With a poller, the server polls interface counters while a
-    client is connected, and offers interface_traffic to read them.
+    Build the MCP server on an engine. display adds the tool that draws the network;
+    only offer it to a client that can show the drawing. If the engine polls, the
+    server keeps it polling while a client is connected, and offers interface_traffic
+    to read the counters.
     """
+    statistics = engine.statistics
     instructions = (
         INSTRUCTIONS
         + (STATISTICS_INSTRUCTIONS.format(interval=statistics.interval, reach=duration(statistics.reach)) if statistics else "")
@@ -175,122 +173,15 @@ def build_server(
 
     @contextlib.asynccontextmanager
     async def polling(_: MCPServer) -> AsyncIterator[dict[str, Any]]:
-        if statistics is None:
-            yield {}
-            return
-        async with statistics.running():
+        async with engine.running():
             yield {}
 
     server = MCPServer(name="netgpt", version=__version__, instructions=instructions, lifespan=polling)
 
-    def platform_class(name: str) -> type[Platform]:
-        return platform_for(inventory, name, platforms)
-
-    def connect(name: str) -> Platform:
-        return connect_to(inventory, name, platforms)
-
-    async def collect(
-        devices: list[str] | None,
-        query: Callable[[Platform], Awaitable[list[PrimitiveT]]],
-    ) -> tuple[list[PrimitiveT], list[DeviceError]]:
-        names = devices or [device.name for device in inventory.devices]
-
-        async def one(name: str) -> tuple[list[PrimitiveT], DeviceError | None]:
-            try:
-                async with connect(name) as platform:
-                    return await query(platform), None
-            except EXPECTED_ERRORS as error:
-                logger.info("Query failed on %s: %s", name, error)
-                return [], DeviceError(device=name, error=str(error))
-
-        items: list[PrimitiveT] = []
-        errors: list[DeviceError] = []
-        for found, error in await asyncio.gather(*(one(name) for name in names)):
-            items.extend(found)
-            if error is not None:
-                errors.append(error)
-        return items, errors
-
-    def is_management(device: str, interface: str) -> bool:
-        pattern = platforms.get(inventory.get(device).platform, Platform).management_interfaces
-        return pattern is not None and pattern.match(port_of(interface)) is not None
-
-    def optional(query: Callable[[Platform], Awaitable[list[PrimitiveT]]]) -> Callable[[Platform], Awaitable[list[PrimitiveT]]]:
-        """A query the topology can do without, on a platform that doesn't support it yet."""
-
-        async def tolerant(platform: Platform) -> list[PrimitiveT]:
-            try:
-                return await query(platform)
-            except UnsupportedError:
-                return []
-
-        return tolerant
-
-    async def gather_topology() -> tuple[Topology, list[Interface]]:
-        """The layer 2 graph, and every device's interfaces, which layer 3 and the path walk need too."""
-        (neighbors, lldp_errors), (bindings, arp_errors), (macs, mac_errors), (found, interface_errors) = await asyncio.gather(
-            collect(None, lambda platform: platform.lldp_neighbors()),
-            collect(None, lambda platform: platform.arp_table()),
-            collect(None, optional(lambda platform: platform.mac_table())),
-            collect(None, optional(lambda platform: platform.interfaces())),
-        )
-        # A device that can't be reached fails every query the same way; report it once.
-        failures = lldp_errors + arp_errors + mac_errors + interface_errors
-        errors = list({(error.device, error.error): error for error in failures}.values())
-        return build_topology(list_devices(), neighbors, bindings, errors, is_management, macs, found), found
-
-    async def at_layer(topology: Topology, found: list[Interface], layer: Layer, network_instance: str) -> Topology:
-        if layer == "l2":
-            return topology
-        if layer == "l3":
-            return build_l3(list_devices(), topology, found, is_management, network_instance)
-        (ospf, interface_errors), (heard, neighbor_errors) = await asyncio.gather(
-            collect(None, lambda platform: platform.ospf_interfaces()),
-            collect(None, lambda platform: platform.ospf_neighbors()),
-        )
-        failures = topology.errors + interface_errors + neighbor_errors
-        errors = list({(error.device, error.error): error for error in failures}.values())
-        return build_ospf(list_devices(), found, ospf, heard, errors, network_instance)
-
-    async def trace(
-        source: str, destination: str, network_instance: str
-    ) -> tuple[Topology, list[Interface], ForwardingPath]:
-        """Trace a path, returning the topology it was traced on, and the interfaces, as well."""
-        (topology, found), (routes, failures) = await asyncio.gather(
-            gather_topology(), collect(None, lambda platform: platform.routes(network_instance))
-        )
-        tables: dict[str, list[Route]] = {}
-        for route in routes:
-            tables.setdefault(route.device, []).append(route)
-        # A switch with no interface in the network instance has no routing table there to read.
-        answered = {interface.device for interface in found}
-        present = {interface.device for interface in found if interface.network_instance == network_instance}
-        unreadable = {
-            failure.device: failure.error for failure in failures if failure.device in present or failure.device not in answered
-        }
-        return topology, found, trace_path(topology, tables, unreadable, source, destination, network_instance)
-
-    async def link_port(name: str) -> str:
-        """A link named device--device, as the first device's port on it (from LLDP); any other name as it is."""
-        ends = [end.strip() for end in name.split("--")]
-        if len(ends) != 2:
-            return name
-        known = {device.name for device in inventory.devices}
-        if ends[0] not in known:
-            ends.reverse()
-        neighbors, _ = await collect([ends[0]], lambda platform: platform.lldp_neighbors())
-        ports = [neighbor.interface for neighbor in neighbors if neighbor.neighbor == ends[1]]
-        if not ports:
-            raise ChartError(f"LLDP shows no link from {ends[0]} to {ends[1]}. Name a port as device:port instead.")
-        return f"{ends[0]}:{ports[0]}"
-
     @server.tool(annotations=READ_ONLY)
     def list_devices() -> list[DeviceInfo]:
         """List the devices NetGPT can query, with their platform, address, and role."""
-        return [
-            DeviceInfo(name=device.name, platform=device.platform, host=device.host, role=device.role)
-            for device in inventory.devices
-        ]
+        return engine.devices()
 
     @server.tool(annotations=READ_ONLY)
     async def show(device: str, command: str) -> CommandOutput:
@@ -301,13 +192,8 @@ def build_server(
         question, use it instead. Commands that could change the device, write
         files, or chain several commands together are refused, with the reason.
         """
-        try:
-            # Refuse a command before resolving credentials or opening a connection.
-            platform_class(device).policy.check(command)
-            async with connect(device) as platform:
-                return await platform.show(command)
-        except EXPECTED_ERRORS as error:
-            raise ToolError(str(error)) from error
+        with answered():
+            return await engine.show(device, command)
 
     @server.tool(annotations=READ_ONLY)
     async def lldp_neighbors(devices: DeviceNames = None) -> Collection[LldpNeighbor]:
@@ -315,8 +201,7 @@ def build_server(
         Return every device's LLDP adjacencies: which interface is cabled to which remote system and port.
         One call covers every device; name devices only to leave the others out.
         """
-        items, errors = await collect(devices, lambda platform: platform.lldp_neighbors())
-        return Collection[LldpNeighbor](items=items, errors=errors)
+        return await engine.lldp_neighbors(devices)
 
     @server.tool(annotations=READ_ONLY)
     async def interfaces(devices: DeviceNames = None) -> Collection[Interface]:
@@ -326,8 +211,7 @@ def build_server(
         a subinterface in no network instance: nothing passes through it, whether it is up or not.
         One call covers every device; name devices only to leave the others out.
         """
-        items, errors = await collect(devices, lambda platform: platform.interfaces())
-        return Collection[Interface](items=items, errors=errors)
+        return await engine.interfaces(devices)
 
     @server.tool(annotations=READ_ONLY)
     async def mac_table(devices: DeviceNames = None) -> Collection[MacEntry]:
@@ -335,8 +219,7 @@ def build_server(
         Return every device's layer 2 forwarding (MAC table) entries, per network instance.
         One call covers every device; name devices only to leave the others out.
         """
-        items, errors = await collect(devices, lambda platform: platform.mac_table())
-        return Collection[MacEntry](items=items, errors=errors)
+        return await engine.mac_table(devices)
 
     @server.tool(annotations=READ_ONLY)
     async def arp_table(devices: DeviceNames = None) -> Collection[ArpEntry]:
@@ -344,8 +227,7 @@ def build_server(
         Return every device's ARP bindings of IPv4 addresses to MAC addresses.
         One call covers every device; name devices only to leave the others out.
         """
-        items, errors = await collect(devices, lambda platform: platform.arp_table())
-        return Collection[ArpEntry](items=items, errors=errors)
+        return await engine.arp_table(devices)
 
     @server.tool(annotations=READ_ONLY)
     async def routes(devices: DeviceNames = None, network_instance: str = "default") -> Collection[Route]:
@@ -353,8 +235,7 @@ def build_server(
         Return every device's routes in one network instance (VRF): IPv4, and IPv6 where the platform reads it.
         One call covers every device; name devices only to leave the others out.
         """
-        items, errors = await collect(devices, lambda platform: platform.routes(network_instance))
-        return Collection[Route](items=items, errors=errors)
+        return await engine.routes(devices, network_instance)
 
     @server.tool(annotations=READ_ONLY)
     async def bgp_sessions(devices: DeviceNames = None) -> Collection[BgpSession]:
@@ -364,8 +245,7 @@ def build_server(
         how many prefixes it received. Only an Established session exchanges routes; Active means it is
         trying to connect and failing. One call covers every device; name devices only to leave the others out.
         """
-        items, errors = await collect(devices, lambda platform: platform.bgp_sessions())
-        return Collection[BgpSession](items=items, errors=errors)
+        return await engine.bgp_sessions(devices)
 
     @server.tool(annotations=READ_ONLY)
     async def ospf_neighbors(devices: DeviceNames = None) -> Collection[OspfNeighbor]:
@@ -375,8 +255,7 @@ def build_server(
         there and isn't sends no hellos this router accepts: compare both ends with ospf_interfaces.
         One call covers every device; name devices only to leave the others out.
         """
-        items, errors = await collect(devices, lambda platform: platform.ospf_neighbors())
-        return Collection[OspfNeighbor](items=items, errors=errors)
+        return await engine.ospf_neighbors(devices)
 
     @server.tool(annotations=READ_ONLY)
     async def ospf_interfaces(devices: DeviceNames = None) -> OspfInterfaces:
@@ -392,13 +271,7 @@ def build_server(
         Each end's cost is its own direction's.
         One call covers every device; name devices only to leave the others out.
         """
-        (items, ospf_errors), (found, interface_errors) = await asyncio.gather(
-            collect(devices, lambda platform: platform.ospf_interfaces()),
-            collect(devices, optional(lambda platform: platform.interfaces())),
-        )
-        # A device that can't be reached fails both the same way; report it once.
-        errors = list({(error.device, error.error): error for error in ospf_errors + interface_errors}.values())
-        return OspfInterfaces(items=items, errors=errors, mismatches=ospf_mismatches(found, items))
+        return await engine.ospf_interfaces(devices)
 
     if statistics is not None:
 
@@ -414,11 +287,8 @@ def build_server(
             ),
         )
         async def interface_traffic(devices: DeviceNames = None, minutes: Minutes = 15) -> Collection[InterfaceTraffic]:
-            try:
-                items, errors = await statistics.traffic(devices, minutes)
-            except StoreError as error:
-                raise ToolError(str(error)) from error
-            return Collection[InterfaceTraffic](items=items, errors=errors)
+            with answered():
+                return await engine.traffic(devices, minutes)
 
     @server.tool(annotations=READ_ONLY)
     async def topology(plane: PlaneChoice = "data", layer: Layer = "l2", network_instance: str = "default") -> Topology:
@@ -435,7 +305,7 @@ def build_server(
         its problems say what keeps them apart. The data plane is the default; the management network
         rarely matters to a question.
         """
-        return (await at_layer(*await gather_topology(), layer, network_instance)).on_plane(plane)
+        return await engine.topology(plane, layer, network_instance)
 
     @server.tool(annotations=READ_ONLY)
     async def forwarding_path(source: str, destination: str, network_instance: str = "default") -> ForwardingPath:
@@ -447,10 +317,8 @@ def build_server(
         address on a network a device is connected to; the destination is an IPv4 address.
         Nothing is sent on the network: the path is read from the devices' state.
         """
-        try:
-            return (await trace(source, destination, network_instance))[2]
-        except TraceError as error:
-            raise ToolError(str(error)) from error
+        with answered():
+            return await engine.forwarding_path(source, destination, network_instance)
 
     if display:
 
@@ -479,15 +347,9 @@ def build_server(
             by their two nodes (leaf1--spine1) or by one end (leaf1:ethernet-1/49). notes
             attach a few words to a node or link, keyed by its name.
             """
-            try:
-                if path is not None:
-                    topology, found, traced = await trace(path.source, path.destination, network_instance)
-                else:
-                    (topology, found), traced = await gather_topology(), None
-                graph = await at_layer(topology, found, layer, network_instance)
-                view = make_view(graph, title, focus or [], highlight or [], notes or {}, plane, traced)
-            except (TraceError, ViewError) as error:
-                raise ToolError(str(error)) from error
+            ends = (path.source, path.destination) if path is not None else None
+            with answered():
+                view = await engine.view(title, focus, highlight, notes, plane, layer, network_instance, ends)
             # The model reads a summary; the page draws the view from the structured content.
             return CallToolResult(
                 content=[TextContent(type="text", text=describe(view))],
@@ -513,10 +375,8 @@ def build_server(
         async def chart(
             title: str, ports: ChartPorts, metric: Metric = "traffic", minutes: Minutes = 15
         ) -> Annotated[CallToolResult, Chart]:
-            try:
-                drawn = await statistics.chart(title, [await link_port(name) for name in ports], metric, minutes)
-            except (ChartError, StoreError) as error:
-                raise ToolError(str(error)) from error
+            with answered():
+                drawn = await engine.chart(title, ports, metric, minutes)
             # The model reads a summary; the page draws the chart from the structured content.
             return CallToolResult(
                 content=[TextContent(type="text", text=describe_chart(drawn))],
@@ -530,11 +390,8 @@ def build_server(
         (VRFs), and return how many replies came back. Use this to test reachability
         through the network itself.
         """
-        try:
-            async with connect(device) as platform:
-                return await platform.ping(destination, count, network_instance)
-        except EXPECTED_ERRORS as error:
-            raise ToolError(str(error)) from error
+        with answered():
+            return await engine.ping(device, destination, count, network_instance)
 
     @server.tool(annotations=READ_ONLY)
     async def ping_sweep(
@@ -555,37 +412,8 @@ def build_server(
         is echo requests per address: 2 from the NetGPT host and 1 from a device unless
         given. timeout applies to sweeps from the NetGPT host.
         """
-        try:
-            target = ipaddress.IPv4Network(network, strict=False)
-            inventory.check_sweep(target)
-        except (ValueError, InventoryError) as error:
-            raise ToolError(str(error)) from error
-        limit = MAX_SWEEP_ADDRESSES if device is None else MAX_DEVICE_SWEEP_ADDRESSES
-        if target.num_addresses > limit:
-            where = "" if device is None else " from a device"
-            raise ToolError(f"{target} has {target.num_addresses} addresses; the limit{where} is {limit}.")
-        addresses = [str(address) for address in target.hosts()] or [str(target.network_address)]
-        if device is not None:
-            try:
-                async with connect(device) as platform:
-                    results = await platform.ping_sweep(addresses, count or 1, network_instance)
-            except EXPECTED_ERRORS as error:
-                raise ToolError(str(error)) from error
-            return [result for result in results if result.received]
-        hosts = await icmplib.async_multiping(
-            addresses, count=count or 2, timeout=timeout, privileged=False, concurrent_tasks=128
-        )
-        return [
-            PingResult(
-                source="netgpt",
-                destination=host.address,
-                sent=host.packets_sent,
-                received=host.packets_received,
-                rtt_avg_ms=host.avg_rtt,
-            )
-            for host in hosts
-            if host.is_alive
-        ]
+        with answered():
+            return await engine.ping_sweep(network, device, network_instance, count, timeout)
 
     return server
 
@@ -626,5 +454,5 @@ def main() -> None:
         except StoreError as error:
             parser.error(str(error))
         statistics = Poller(inventory, interval=args.poll_interval, store=store)
-    server = build_server(inventory, statistics=statistics)
+    server = build_server(Engine(inventory, statistics=statistics))
     server.run("stdio")

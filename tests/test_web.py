@@ -17,6 +17,7 @@ import pytest
 from mcp import Client
 
 from netgpt.chat import Chat
+from netgpt.engine import Engine
 from netgpt.inventory import Inventory
 from netgpt.server import build_server
 from netgpt.statistics import Poller
@@ -43,7 +44,7 @@ async def browser(inventory: Inventory) -> AsyncIterator[Browser]:
 
         async def open_page(ollama: ScriptedOllama, signed_in: bool = True, statistics: Poller | None = None) -> httpx.AsyncClient:
             # The page can draw, so its server offers display, as netgpt-chat --web does.
-            server = build_server(inventory, platforms={"fake": FakePlatform}, display=True, statistics=statistics)
+            server = build_server(Engine(inventory, platforms={"fake": FakePlatform}, statistics=statistics), display=True)
             client = await stack.enter_async_context(Client(server))
             http = await stack.enter_async_context(ollama.client())
             chat = Chat(client, http, "scripted", {}, think=True)
