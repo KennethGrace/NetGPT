@@ -93,27 +93,37 @@ def counters(
 # A megabit per second, for a minute, in octets.
 MEGABIT_MINUTE = 7_500_000
 
+# The tests' samples are stamped from the start of 2100, a whole number of every step, where TimescaleDB's own jobs
+# never reach. Stamped from 1970, they were older than every window: a retention job that ran during a test dropped
+# them, and a refresh would have moved where reading in real time starts past them.
+START = 4_102_444_800
+
 
 @pytest.mark.anyio
 async def test_samples_start_with_the_last_one_before_the_moment_so_the_first_interval_counts(make_store: MakeStore) -> None:
     store = await make_store(3600)
     for at in (0, 30, 60, 90):
-        await store.add(at, [counters("leaf1", "ethernet-1/1", at * 1000)])
-    assert [sample.at for sample in await store.samples("leaf1", "ethernet-1/1", since=45)] == [30, 60, 90]
-    assert [sample.at for sample in await store.samples("leaf1", "ethernet-1/1", since=60)] == [60, 90]
-    assert [sample.at for sample in await store.samples("leaf1", "ethernet-1/1", since=-10)] == [0, 30, 60, 90]
-    assert [sample.counters.in_octets for sample in await store.samples("leaf1", "ethernet-1/1", since=60)] == [60_000, 90_000]
+        await store.add(START + at, [counters("leaf1", "ethernet-1/1", at * 1000)])
+
+    async def since(moment: float) -> list[float]:
+        return [sample.at - START for sample in await store.samples("leaf1", "ethernet-1/1", since=START + moment)]
+
+    assert await since(45) == [30, 60, 90]
+    assert await since(60) == [60, 90]
+    assert await since(-10) == [0, 30, 60, 90]
+    found = await store.samples("leaf1", "ethernet-1/1", since=START + 60)
+    assert [sample.counters.in_octets for sample in found] == [60_000, 90_000]
 
 
 @pytest.mark.anyio
 async def test_every_port_of_every_device_polled_is_kept_apart(make_store: MakeStore) -> None:
     store = await make_store(3600)
-    await store.add(0, [counters("leaf1", "ethernet-1/1", 1), counters("leaf1", "ethernet-1/2", 2)])
-    await store.add(0, [counters("leaf2", "ethernet-1/1", 3)])
+    await store.add(START, [counters("leaf1", "ethernet-1/1", 1), counters("leaf1", "ethernet-1/2", 2)])
+    await store.add(START, [counters("leaf2", "ethernet-1/1", 3)])
     assert sorted(await store.ports()) == [("leaf1", "ethernet-1/1"), ("leaf1", "ethernet-1/2"), ("leaf2", "ethernet-1/1")]
-    [sample] = await store.samples("leaf2", "ethernet-1/1", since=0)
+    [sample] = await store.samples("leaf2", "ethernet-1/1", since=START)
     assert sample.counters.in_octets == 3
-    assert await store.samples("leaf2", "ethernet-1/9", since=0) == []
+    assert await store.samples("leaf2", "ethernet-1/9", since=START) == []
 
 
 @pytest.mark.anyio
@@ -121,23 +131,23 @@ async def test_counters_come_back_as_the_device_reported_them(make_store: MakeSt
     store = await make_store(3600)
     # An unsigned 64-bit counter near its top, past what a signed one holds, and a port that doesn't count flaps.
     reading = counters("leaf1", "ethernet-1/1", 2**64 - 1, carrier_transitions=None)
-    await store.add(1_730_000_000.25, [reading])
-    [sample] = await store.samples("leaf1", "ethernet-1/1", since=0)
-    assert (sample.at, sample.counters) == (1_730_000_000.25, reading)
+    await store.add(START + 0.25, [reading])
+    [sample] = await store.samples("leaf1", "ethernet-1/1", since=START)
+    assert (sample.at, sample.counters) == (START + 0.25, reading)
 
 
 @pytest.mark.anyio
 async def test_each_interval_between_two_polls_is_kept_as_its_rate(make_store: MakeStore) -> None:
     store = await make_store(3600)
     for at, octets in ((0, 0), (30, 3_750_000), (60, 7_500_000), (90, 7_500_000)):
-        await store.add(at, [counters("leaf1", "ethernet-1/1", octets)])
-    found = await store.rates("leaf1", "ethernet-1/1", since=0)
-    assert [(found.start, found.end, found.in_bps, found.peak_in_bps) for found in found] == [
+        await store.add(START + at, [counters("leaf1", "ethernet-1/1", octets)])
+    found = await store.rates("leaf1", "ethernet-1/1", since=START)
+    assert [(found.start - START, found.end - START, found.in_bps, found.peak_in_bps) for found in found] == [
         (0, 30, 1e6, 1e6), (30, 60, 1e6, 1e6), (60, 90, 0, 0)
     ]
     assert (found[0].seconds, found[0].flaps, found[0].speed_bps) == (30, 0, 10**9)
-    assert [found.end for found in await store.rates("leaf1", "ethernet-1/1", since=60)] == [90]
-    assert await store.rates("leaf1", "ethernet-1/9", since=0) == []
+    assert [found.end - START for found in await store.rates("leaf1", "ethernet-1/1", since=START + 60)] == [90]
+    assert await store.rates("leaf1", "ethernet-1/9", since=START) == []
 
 
 @pytest.mark.anyio
@@ -145,14 +155,13 @@ async def test_an_interval_with_a_reset_or_longer_than_the_longest_is_not_measur
     make_store: MakeStore,
 ) -> None:
     store = await make_store(3600)
-    await store.add(0, [counters("leaf1", "ethernet-1/1", 9_000_000)])
-    await store.add(30, [counters("leaf1", "ethernet-1/1", 1_000)])  # The device restarted.
-    await store.add(60, [counters("leaf1", "ethernet-1/1", 3_751_000)], longest=90)
-    await store.add(300, [counters("leaf1", "ethernet-1/1", 4_000_000)], longest=90)  # Four minutes unpolled.
-    assert [(found.start, found.end, found.in_bps) for found in await store.rates("leaf1", "ethernet-1/1", since=0)] == [
-        (30, 60, 1e6)
-    ]
-    assert len(await store.samples("leaf1", "ethernet-1/1", since=-1)) == 4
+    await store.add(START, [counters("leaf1", "ethernet-1/1", 9_000_000)])
+    await store.add(START + 30, [counters("leaf1", "ethernet-1/1", 1_000)])  # The device restarted.
+    await store.add(START + 60, [counters("leaf1", "ethernet-1/1", 3_751_000)], longest=90)
+    await store.add(START + 300, [counters("leaf1", "ethernet-1/1", 4_000_000)], longest=90)  # Four minutes unpolled.
+    found = await store.rates("leaf1", "ethernet-1/1", since=START)
+    assert [(found.start - START, found.end - START, found.in_bps) for found in found] == [(30, 60, 1e6)]
+    assert len(await store.samples("leaf1", "ethernet-1/1", since=START - 1)) == 4
 
 
 @pytest.mark.anyio
@@ -163,33 +172,38 @@ async def test_rollups_average_the_intervals_that_end_in_each_step_and_keep_the_
     for at in range(0, 660, 60):
         octets += 0 if at == 0 else 7 * MEGABIT_MINUTE if at == 240 else MEGABIT_MINUTE
         errors += at == 420
-        await store.add(at, [counters("leaf1", "ethernet-1/1", octets, in_errors=errors)])
+        await store.add(START + at, [counters("leaf1", "ethernet-1/1", octets, in_errors=errors)])
 
     def told(found: list) -> list[tuple]:
-        return [(found.start, found.end, found.seconds, found.in_bps, found.peak_in_bps, found.in_errors) for found in found]
+        return [
+            (found.start - START, found.end - START, found.seconds, found.in_bps, found.peak_in_bps, found.in_errors)
+            for found in found
+        ]
 
     # The minutes to 60, 120, 180, and 240 end in the first 5 minutes, the next five in the second, and one in the third.
-    assert told(await store.rates("leaf1", "ethernet-1/1", since=0, step=300)) == [
+    assert told(await store.rates("leaf1", "ethernet-1/1", since=START, step=300)) == [
         (0, 240, 240, 2.5e6, 7e6, 0), (240, 540, 300, 1e6, 1e6, 1), (540, 600, 60, 1e6, 1e6, 0)
     ]
     # A step begins at or after the moment: the one under way at 1 second is left out.
-    assert [found.end for found in await store.rates("leaf1", "ethernet-1/1", since=1, step=300)] == [540, 600]
-    [hour] = await store.rates("leaf1", "ethernet-1/1", since=0, step=3600)
-    assert (hour.start, hour.end, hour.seconds, hour.peak_in_bps, hour.in_errors) == (0, 600, 600, 7e6, 1)
+    assert [found.end - START for found in await store.rates("leaf1", "ethernet-1/1", since=START + 1, step=300)] == [540, 600]
+    [hour] = await store.rates("leaf1", "ethernet-1/1", since=START, step=3600)
+    assert (hour.start - START, hour.end - START, hour.seconds, hour.peak_in_bps, hour.in_errors) == (0, 600, 600, 7e6, 1)
     assert (hour.in_bps, hour.flaps, hour.speed_bps) == (pytest.approx(1.6e6), 0, 10**9)
-    ten = await store.rates("leaf1", "ethernet-1/1", since=0, step=600)
-    assert [(found.end, found.seconds, found.in_bps) for found in ten] == [(540, 540, pytest.approx(15e6 / 9)), (600, 60, 1e6)]
+    ten = await store.rates("leaf1", "ethernet-1/1", since=START, step=600)
+    assert [(found.end - START, found.seconds, found.in_bps) for found in ten] == [
+        (540, 540, pytest.approx(15e6 / 9)), (600, 60, 1e6)
+    ]
     with pytest.raises(ValueError, match="whole number of 300 seconds"):
-        await store.rates("leaf1", "ethernet-1/1", since=0, step=90)
+        await store.rates("leaf1", "ethernet-1/1", since=START, step=90)
 
 
 @pytest.mark.anyio
 async def test_a_rollup_counts_flaps_only_if_every_interval_in_it_did(make_store: MakeStore) -> None:
     store = await make_store(3600)
     for at, transitions in ((0, 4), (60, 5), (120, None), (180, 6), (360, 8), (420, 9)):
-        await store.add(at, [counters("leaf1", "ethernet-1/1", 0, carrier_transitions=transitions)])
-    assert [found.flaps for found in await store.rates("leaf1", "ethernet-1/1", since=0)] == [1, None, None, 2, 1]
-    assert [found.flaps for found in await store.rates("leaf1", "ethernet-1/1", since=0, step=300)] == [None, 3]
+        await store.add(START + at, [counters("leaf1", "ethernet-1/1", 0, carrier_transitions=transitions)])
+    assert [found.flaps for found in await store.rates("leaf1", "ethernet-1/1", since=START)] == [1, None, None, 2, 1]
+    assert [found.flaps for found in await store.rates("leaf1", "ethernet-1/1", since=START, step=300)] == [None, 3]
 
 
 def test_a_counter_that_goes_backwards_was_reset_and_that_interval_is_not_measured() -> None:
@@ -252,17 +266,16 @@ async def test_timescaledb_refreshes_each_rollup_no_further_back_than_its_source
 @pytest.mark.anyio
 async def test_samples_in_timescaledb_survive_a_restart(timescale: MakeStore) -> None:
     before = await timescale(3600)
-    await before.add(0, [counters("leaf1", "ethernet-1/1", 1)])
-    await before.add(30, [counters("leaf1", "ethernet-1/1", 2)])
+    await before.add(START, [counters("leaf1", "ethernet-1/1", 1)])
+    await before.add(START + 30, [counters("leaf1", "ethernet-1/1", 2)])
     await before.close()
     after = await timescale(3600)
     assert await after.ports() == [("leaf1", "ethernet-1/1")]
-    assert [sample.counters.in_octets for sample in await after.samples("leaf1", "ethernet-1/1", since=0)] == [1, 2]
+    assert [sample.counters.in_octets for sample in await after.samples("leaf1", "ethernet-1/1", since=START)] == [1, 2]
     # The first interval after the restart starts from the last sample before it.
-    await after.add(60, [counters("leaf1", "ethernet-1/1", 3_750_002)])
-    assert [(found.start, found.end, found.in_bps) for found in await after.rates("leaf1", "ethernet-1/1", since=30)] == [
-        (30, 60, 1e6)
-    ]
+    await after.add(START + 60, [counters("leaf1", "ethernet-1/1", 3_750_002)])
+    found = await after.rates("leaf1", "ethernet-1/1", since=START + 30)
+    assert [(found.start - START, found.end - START, found.in_bps) for found in found] == [(30, 60, 1e6)]
 
 
 @pytest.mark.anyio
@@ -270,15 +283,15 @@ async def test_a_timescaledb_store_keeps_working_after_the_database_drops_its_co
     import psycopg
 
     store = await timescale(3600)
-    await store.add(0, [counters("leaf1", "ethernet-1/1", 1)])
+    await store.add(START, [counters("leaf1", "ethernet-1/1", 1)])
     # As a database restart would: end every connection the store holds. The tests' database is theirs alone.
     async with await psycopg.AsyncConnection.connect(TEST_STORE, autocommit=True) as connection:
         await connection.execute(
             "SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity "
             "WHERE datname = current_database() AND usename = current_user AND pid <> pg_backend_pid()"
         )
-    await store.add(30, [counters("leaf1", "ethernet-1/1", 2)])
-    assert [sample.counters.in_octets for sample in await store.samples("leaf1", "ethernet-1/1", since=0)] == [1, 2]
+    await store.add(START + 30, [counters("leaf1", "ethernet-1/1", 2)])
+    assert [sample.counters.in_octets for sample in await store.samples("leaf1", "ethernet-1/1", since=START)] == [1, 2]
 
 
 @pytest.mark.anyio
