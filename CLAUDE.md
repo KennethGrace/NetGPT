@@ -67,6 +67,7 @@ python lab/game.py --lab wan --anywhere ...       # each fault at a random one o
 ## Rules that hold everywhere
 
 - **Read-only.** Every tool is annotated read-only and nothing writes to a device. `show` passes the guard first. Where a command is built for the device (ping), it is built from validated parts, never from model text.
+- **One engine, one set of limits.** Every face (the MCP tools, the API, the page) goes through `netgpt.engine`, which holds the guard, the inventory, and the sweep limits. A new face translates; it never reaches a device itself.
 - **Inventory only.** Tools reach only inventory devices, and sweeps only the inventory's `sweep_networks`.
 - **Credentials never reach the model.** They are not in tool arguments, results, errors, or logs. The store's password is in `~/.pgpass`, where libpq finds it, and a `--store` URL with a password in it is refused.
 - **Devices supply facts; the model supplies choices.** The model picks what to focus on, highlight, and note. Every name it uses is checked against the graph, and a refusal lists the names that exist.
@@ -287,6 +288,8 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
     - 2d, the engine without a model: `netgpt-engine --inventory I --listen HOST:PORT [--store URL]` serves the API with no Ollama behind it. Checked live on the WAN lab.
       - Done: `netgpt.service` (`build_service`, the lifespan holding `engine.running()`) and the `netgpt-engine` script; `listen_address` moved there from the chat, which imports it. Checked live on the WAN lab: it polled with no client connected (24 ports), shared reads (0.30 s, then 0.01 s), answered 401 without the token, and stopped cleanly on Ctrl-C. uvicorn's access log goes to stdout.
     - 2e, commands: `show`, `ping`, and `ping_sweep` as POST routes, run every time and never shared, through the same guard, inventory, and sweep limits as the tools. An engineer at any frontend should be able to do what the model can. They can come any time after 2b.
+      - Done: `POST /show`, `/ping`, and `/ping_sweep` with JSON bodies (pydantic, extras forbidden; any other content type refused, so a form on another site can't send one), on the live engine every time. The guard, inventory, and limits refuse with 400, a device's failure is 502, and a platform that can't run the command yet is 501. Checked live on the WAN lab through `netgpt-engine`: `show version`, the guard refusing a reboot, branch pinging ops-srv1 (3/3, 2.1 ms), and a sweep from ops-dc.
+    - **Phase 2 is done:** the engine is its own class with two faces (MCP for models, the HTTP API for everything else), the page reads the API like any other frontend, and `netgpt-engine` serves it with no model.
     - **Not in Phase 2:** the model's views (what `display` draws) for other frontends. The chat would have to publish them.
   - After Phase 2: MCP over HTTP (Frontends Phase 1) lands on `netgpt-engine` as `/mcp`, and the chat becomes a client of the engine instead of embedding one, which also ends two pollers on one store.
   - Phase 3: xspace draws the lab from that API, with types generated from the schema in place of its protobuf stubs.

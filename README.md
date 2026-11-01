@@ -39,6 +39,7 @@ The multi-device tools query devices concurrently. A device that fails shows up 
 
 - **Inventory only.** Tools take device names from the inventory. The model cannot point NetGPT at any other host. `ping_sweep` only covers networks listed under `sweep_networks`, up to /22 from the NetGPT host and /24 from a device.
 - **Read-only CLI.** `show` accepts a command only if it starts with an allowed verb, every pipe leads to an allowed filter, and it contains no control characters or chaining syntax. On Cisco IOS this refuses `| redirect`, `| tee`, and `| append`. On SR Linux it refuses `>` redirection. On Junos it refuses `| save` and `| request`. Use a read-only account on the device as well; the policy is the second line of defence, not the first.
+- **Every way in has the same limits.** The tools, the page, and the API's commands all go through one engine, so the guard, the inventory, and the sweep limits are the same for an engineer at a frontend as for a model.
 - **Credentials stay on the server.** The inventory names an environment variable or a `chmod 600` file for each password, or a `chmod 600` SSH private key. Secrets never appear in tool arguments or results. Over SSH, NetGPT checks each device's host key against a `known_hosts` file and refuses to log in to one that doesn't match.
 
 ## Quick start
@@ -240,7 +241,7 @@ export NETGPT_ENGINE_TOKEN=$(python -c 'import secrets; print(secrets.token_urls
 netgpt-engine --inventory lab/wan/inventory.yml --listen 127.0.0.1:8081   # --store postgresql://... to keep the counters
 ```
 
-`netgpt-chat --web` serves the same API beside its page, with the page's token. Every route answers GET with a record from [the schema](#the-schema), and needs the token, sent as `Authorization: Bearer <token>` (`$NETGPT_ENGINE_TOKEN` for `netgpt-engine`, or a random one it prints at startup). The signed-in page's cookie works too. Both poll, so give each its own `--store`: two pollers on one store count errors twice.
+`netgpt-chat --web` serves the same API beside its page, with the page's token. Every route answers with a record from [the schema](#the-schema) (reads answer GET, and commands POST), and needs the token, sent as `Authorization: Bearer <token>` (`$NETGPT_ENGINE_TOKEN` for `netgpt-engine`, or a random one it prints at startup). The signed-in page's cookie works too. Both poll, so give each its own `--store`: two pollers on one store count errors twice.
 
 | Route | Answers with |
 |---|---|
@@ -258,6 +259,21 @@ curl -H "Authorization: Bearer $NETGPT_ENGINE_TOKEN" 'http://127.0.0.1:8081/api/
 ```
 
 Devices' answers are shared: one is reused for up to a poll interval (30 seconds), requests that arrive together wait for one read, and the `Age` header says how old the oldest answer behind a response is. `Cache-Control: no-cache` reads every device again. A frontend redrawing every poll then doesn't log in to every device each time; the model's tools always read live. A request NetGPT won't answer gets `{"error": …}` saying why, with the names it would accept: 400 for the request, 401 without the token, and 404 for a route that isn't one. There is no CORS: a browser app on another origin should reach the API through its own backend, which keeps the token out of the browser.
+
+Commands answer POST, with a JSON body, and run every time they're sent, through the same guard and limits as the model's tools: an engineer at any frontend can do what the model can.
+
+| Route | Body | Answers with |
+|---|---|---|
+| `show` | `device`, `command` | `CommandOutput`: one read-only command's output. The guard refuses anything else, before the device is asked. |
+| `ping` | `device`, `destination`, `count` (3), `network_instance` | `PingResult`. |
+| `ping_sweep` | `network`, `device` (or none, for the NetGPT host), `network_instance`, `count`, `timeout` | The addresses that answered, as `{items, errors}`. Only networks inside the inventory's `sweep_networks`. |
+
+```bash
+curl -H "Authorization: Bearer $NETGPT_ENGINE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"device": "branch", "destination": "10.20.100.10"}' http://127.0.0.1:8081/api/v1/ping
+```
+
+A command the guard or the limits refuse is a 400, a device that fails it a 502, and one whose platform can't run it yet (such as `ping` on Junos) a 501. A command's body has to be JSON, so a form on another site can't send one.
 
 ## Legacy web app (v0.3)
 
