@@ -266,6 +266,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
     - Phase 1 is done: `netgpt.contract` and `schema/netgpt.schema.json`, 25 records. `/api/traffic`'s answer became a model (`Traffic`) to be one of them. The schema is pydantic's serialization schema with every property required, since each is sent (null when empty). A multi-device result is described in the schema's description (`items` and `errors`), not as a record of its own, and the page's conversation stream stays the page's own, outside the contract.
   - Phase 2: a read API: views and traffic without a conversation, behind the page's token. The page's map reads it too.
   - Phase 3: xspace draws the lab from that API, with types generated from the schema in place of its protobuf stubs.
+    - No types have been generated from the schema yet; Phase 1 didn't try. Phase 3 starts there: generate TypeScript in xspace (every record is under `$defs`, so `json-schema-to-typescript` needs `--unreachableDefinitions`), and read what comes out before building on it.
 - **Known gaps:**
   - `topology` and the forwarding walk are IPv4 only. Junos's interfaces and routes include IPv6; SR Linux's don't yet.
   - `bgp_sessions` is Junos only so far, the OSPF tools SR Linux only, and `ping` isn't on Junos yet.
