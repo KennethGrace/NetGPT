@@ -13,8 +13,8 @@ import pytest
 
 from netgpt.inventory import Inventory
 from netgpt.primitives import InterfaceCounters
-from netgpt.statistics import ChartError, Poller, rate, speed_name, summarize
-from netgpt.store import MemoryStore, Sample, StoreError
+from netgpt.statistics import ChartError, Poller, describe_chart, duration, per, speed_name, step_for
+from netgpt.store import MemoryStore, Rate, Sample, StoreError
 
 from fakes import FakePlatform
 
@@ -87,7 +87,7 @@ async def test_a_device_that_fails_or_cannot_be_polled_says_why_and_the_rest_sti
 class FullStore(MemoryStore):
     """A store that can't keep anything."""
 
-    async def add(self, at: float, readings: Sequence[InterfaceCounters]) -> None:
+    async def _keep(self, samples: Sequence[Sample], rates: Sequence[Rate | None]) -> None:
         raise StoreError("could not extend file: No space left on device")
 
 
@@ -105,25 +105,82 @@ async def test_counters_the_store_cannot_keep_are_reported_for_each_device_and_p
     ]
 
 
-def test_a_counter_that_goes_backwards_was_reset_and_that_interval_is_not_measured() -> None:
-    before, reset, after = Sample(0, reading(9_000_000)), Sample(30, reading(1_000)), Sample(60, reading(3_751_000))
-    assert rate(before, reset) is None
-    summary = summarize([before, reset, after], since=0)
-    assert summary is not None and (summary.in_mbps, summary.peak_in_mbps, summary.minutes) == (1.0, 1.0, 0.5)
+@pytest.mark.anyio
+async def test_a_counter_that_goes_backwards_was_reset_and_that_interval_is_not_measured(inventory: Inventory) -> None:
+    clock = Clock(60)
+    polls = poller(inventory, clock)
+    for at, octets in ((0, 9_000_000), (30, 1_000), (60, 3_751_000)):
+        await polls.store.add(at, [reading(octets)])
+    [summary], _ = await polls.traffic(["leaf1"], minutes=15)
+    assert (summary.in_mbps, summary.peak_in_mbps, summary.minutes) == (1.0, 1.0, 0.5)
 
 
-def test_the_latest_rate_is_the_last_interval_and_the_peak_and_counts_cover_the_window() -> None:
-    samples = [
-        Sample(0, reading(0)),
-        Sample(30, reading(37_500_000, in_errors=5)),
-        Sample(60, reading(41_250_000, in_errors=6, transitions=2)),
+@pytest.mark.anyio
+async def test_the_latest_rate_is_the_last_interval_and_the_average_peak_and_counts_cover_the_window(
+    inventory: Inventory,
+) -> None:
+    clock = Clock(60)
+    polls = poller(inventory, clock)
+    await polls.store.add(0, [reading(0)])
+    await polls.store.add(30, [reading(37_500_000, in_errors=5)])
+    await polls.store.add(60, [reading(41_250_000, in_errors=6, transitions=2)])
+    [summary], _ = await polls.traffic(["leaf1"], minutes=1)
+    assert (summary.in_mbps, summary.average_in_mbps, summary.peak_in_mbps) == (1.0, 5.5, 10.0)
+    assert (summary.in_errors, summary.flaps, summary.oper_state) == (6, 2, "up")
+    # Asking about only the last quarter minute leaves the busy interval out.
+    [recent], _ = await polls.traffic(["leaf1"], minutes=0.25)
+    assert (recent.average_in_mbps, recent.peak_in_mbps, recent.in_errors) == (1.0, 1.0, 1)
+
+
+@pytest.mark.anyio
+async def test_polls_more_than_three_intervals_apart_are_not_measured(inventory: Inventory, counter_reads: dict[str, int]) -> None:
+    clock = Clock()
+    polls = poller(inventory, clock)
+    await polls.poll()
+    clock.now += 91
+    await polls.poll()
+    _, errors = await polls.traffic(["leaf1"], minutes=15)
+    assert "No rates yet" in errors[0].error
+    clock.now += 90
+    await polls.poll()
+    [port], _ = await polls.traffic(["leaf1"], minutes=15)
+    assert port.minutes == 1.5
+
+
+@pytest.mark.anyio
+async def test_a_long_window_is_read_in_rollups_and_its_peak_is_still_the_busiest_interval(inventory: Inventory) -> None:
+    clock = Clock(6 * 3600)
+    polls = poller(inventory, clock, window=7 * 24 * 3600)
+    # Six hours of a poll every 30 seconds at 1 Mbit/s, but 9 Mbit/s for the half minute to the third hour.
+    octets = 0
+    for at in range(0, 6 * 3600 + 1, 30):
+        octets += 0 if at == 0 else 9 * 3_750_000 if at == 3 * 3600 else 3_750_000
+        await polls.store.add(at, [reading(octets, in_errors=at // 3600)])
+    [summary], _ = await polls.traffic(["leaf1"], minutes=6 * 60)
+    assert (summary.in_mbps, summary.peak_in_mbps, summary.in_errors) == (1.0, 9.0, 6)
+    assert summary.average_in_mbps == pytest.approx(1 + 8 / 720, abs=0.001)
+    chart = await polls.chart("Six hours", ["leaf1"], "traffic", 6 * 60)
+    # 720 polls are too many points for a line; 5-minute averages are 72, and one more for the 5 minutes under way.
+    assert (chart.step, len(chart.lines[0].points), chart.unit) == (300, 73, "Mbit/s")
+    assert max(value for _, value in chart.lines[0].points) == pytest.approx(1 + 8 / 10)
+    assert "over the last 6 hours. Each point is the average over 5 minutes." in describe_chart(chart)
+    errors = await polls.chart("Errors", ["leaf1"], "errors", 6 * 60)
+    assert errors.unit == "errors and discards per 5 minutes"
+    assert sum(value for _, value in errors.lines[0].points) == 6
+
+
+def test_a_window_is_read_poll_by_poll_until_its_lines_would_be_too_long() -> None:
+    assert [step_for(seconds, 30) for seconds in (3600, 400 * 30, 400 * 30 + 1, 7 * 86400, 730 * 86400)] == [
+        None, None, 300, 1800, 2 * 86400
     ]
-    summary = summarize(samples, since=0)
-    assert summary is not None
-    assert (summary.in_mbps, summary.peak_in_mbps, summary.in_errors, summary.flaps) == (1.0, 10.0, 6, 2)
-    # Asking about only the last half minute leaves the busy interval out.
-    recent = summarize(samples, since=45)
-    assert recent is not None and (recent.peak_in_mbps, recent.in_errors) == (1.0, 1)
+    assert step_for(86400, 300) == None and step_for(86400, 10) == 300
+
+
+def test_lengths_of_time_are_said_as_people_say_them() -> None:
+    assert [duration(seconds) for seconds in (150, 900, 3600, 90 * 60, 7 * 86400)] == [
+        "2.5 minutes", "15 minutes", "1 hour", "90 minutes", "7 days"
+    ]
+    assert [per(step) for step in (None, 300, 3600, 3 * 3600, 86400)] == ["poll", "5 minutes", "hour", "3 hours", "day"]
 
 
 @pytest.mark.anyio

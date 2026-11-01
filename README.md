@@ -25,7 +25,7 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
 | `ping_sweep`     | The addresses that answer ICMP in a network, pinged from a device (inside one of its network instances) or from the NetGPT host itself. |
-| `interface_traffic` | Each port's traffic in and out (Mbit/s, and percent of its speed), its busiest interval, and the errors, discards, and link flaps counted, from counters NetGPT polls. |
+| `interface_traffic` | Each port's traffic in and out (Mbit/s, and percent of its speed), its average and busiest interval over the window, and the errors, discards, and link flaps counted, from counters NetGPT polls. |
 
 The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call.
 
@@ -33,7 +33,7 @@ The multi-device tools query devices concurrently. A device that fails shows up 
 
 `forwarding_path` walks the routing tables the way the devices do. At each hop it takes the longest matching route, resolves the route's next hop down to an interface (a static route's next hop is often just an address), and follows the cable on that interface to the next device, through any switches in the way. Between two hosts on the same network, no router is involved: the path goes straight across the switch. It reports where the path ends: delivered, or lost, with the reason (no route, a route that drops the packet, a loop, a next hop nothing answers ARP for, or a device it couldn't read). It sends nothing on the network.
 
-`interface_traffic` reads from a poller, not from the devices directly. While a client is connected, NetGPT reads every device's interface counters every 30 seconds (`--poll-interval`; 0 turns polling and the tool off) and keeps the last hour in memory, or keeps a week in TimescaleDB, across restarts, with `--store postgresql://netgpt@127.0.0.1:5432/netgpt` (`pip install -e '.[store]'`; `dev/compose.yml` runs a TimescaleDB, and its password goes in `~/.pgpass`, never in the URL). A rate is the difference between two readings over the time between them. The second poll comes 5 seconds after the first, so there are rates almost at once. A counter that goes backwards was reset (the device restarted, or someone cleared it), and that interval isn't measured.
+`interface_traffic` reads from a poller, not from the devices directly. While a client is connected, NetGPT reads every device's interface counters every 30 seconds (`--poll-interval`; 0 turns polling and the tool off) and keeps the last hour in memory. With `--store postgresql://netgpt@127.0.0.1:5432/netgpt` it keeps them in TimescaleDB instead, across restarts (`pip install -e '.[store]'`; `dev/compose.yml` runs a TimescaleDB, and its password goes in `~/.pgpass`, never in the URL): every poll for a week, 5-minute averages for 90 days, and hourly ones for two years. A rate is the difference between two readings over the time between them. The second poll comes 5 seconds after the first, so there are rates almost at once. A counter that goes backwards was reset (the device restarted, or someone cleared it), and that interval isn't measured, nor is one more than three polls long. A window too long to read poll by poll (past 400 polls, over 3 hours at the default interval) is read from the averages, in 5-minute steps or longer, and each step keeps its busiest interval, so a peak survives the averaging.
 
 ## Safety model
 
@@ -154,7 +154,7 @@ You can pin nodes to lay the map out your way: say, a border leaf on top with th
 
 #### Charts
 
-When NetGPT polls (it does unless `--poll-interval 0`), the page also offers `chart`. Asked how busy something is, the model charts ports' traffic, utilization, or errors over the last minutes, right in the conversation. It names ports as `device:port`, a link as `leaf1--spine1`, or a device for all its ports. Each port gets its own color, with in drawn solid and out dashed. A chart keeps updating with every poll while it is on the page. Hovering shows every line's value at one poll, and the Data table under each chart has the same numbers.
+When NetGPT polls (it does unless `--poll-interval 0`), the page also offers `chart`. Asked how busy something is, the model charts ports' traffic, utilization, or errors over the last minutes, or days with TimescaleDB, right in the conversation. A chart of a long window plots averages (5-minute ones over 6 hours, 30-minute ones over a week), and its caption says which. It names ports as `device:port`, a link as `leaf1--spine1`, or a device for all its ports. Each port gets its own color, with in drawn solid and out dashed. A chart keeps updating with every poll while it is on the page. Hovering shows every line's value at one poll, and the Data table under each chart has the same numbers.
 
 #### Traffic on the map
 

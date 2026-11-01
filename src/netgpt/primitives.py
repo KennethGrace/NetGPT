@@ -121,6 +121,8 @@ class InterfaceTraffic(BaseModel):
     out_mbps: float = Field(description="Megabits per second sent, between the latest two polls.")
     in_percent: float | None = Field(None, description="in_mbps as a percent of the port's speed.")
     out_percent: float | None = Field(None, description="out_mbps as a percent of the port's speed.")
+    average_in_mbps: float = Field(description="Megabits per second received, averaged over the window.")
+    average_out_mbps: float = Field(description="Megabits per second sent, averaged over the window.")
     peak_in_mbps: float = Field(description="The highest in_mbps between any two polls in the window.")
     peak_out_mbps: float = Field(description="The highest out_mbps between any two polls in the window.")
     in_errors: int = Field(description="Packets received with errors, over the window.")

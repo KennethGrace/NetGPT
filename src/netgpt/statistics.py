@@ -6,7 +6,10 @@ the errors, discards, and link flaps counted between polls.
 Counters only grow, so a rate is the difference between two readings over the time
 between them. A counter that goes backwards was reset (the device restarted, or
 someone cleared it), and that interval isn't measured. The samples are kept in a
-store (netgpt.store): in memory for a window, unless the poller is given another.
+store (netgpt.store), which works out each interval's rate as it arrives: in memory
+for a window, unless the poller is given another. A window too long to read poll by
+poll is read from the store's rollups, in the shortest step that keeps a chart's
+line to a few hundred points.
 
 A Chart is a few ports' rates over time, which the web page draws in the
 conversation and keeps asking for again as the poller takes new samples.
@@ -21,7 +24,6 @@ import re
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
-from itertools import pairwise
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -29,22 +31,22 @@ from pydantic import BaseModel, Field
 from netgpt.inventory import Inventory, InventoryError
 from netgpt.platforms import PLATFORMS, Platform, PlatformError, connect
 from netgpt.primitives import DeviceError, InterfaceTraffic
-from netgpt.store import MemoryStore, Sample, Store, StoreError
+from netgpt.store import MemoryStore, Rate, Store, StoreError, combine
 
 logger = logging.getLogger("netgpt")
 
 DEFAULT_INTERVAL = 30.0
-# How far back statistics look, in seconds, however long the store keeps samples: a chart of a longer window
-# would be thousands of points a line until there are rollups to read instead.
-REACH = 3600.0
 # The second poll comes this soon after the first, so there are rates within seconds of starting.
 FIRST_INTERVAL = 5.0
-
-# The counters a rate is the difference of. Any of them going backwards means a reset.
-COUNTED = ("in_octets", "out_octets", "in_errors", "out_errors", "in_discards", "out_discards")
+# Two readings more than this many intervals apart aren't measured: polls were missed, or nothing was polling.
+LONGEST_GAP = 3
+# A window is read poll by poll while that is at most this many points a line, and from rollups past it, in the
+# shortest of these steps (seconds) that keeps to it.
+MOST_POINTS = 400
+STEPS = (300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 24 * 3600, 48 * 3600)
 
 Metric = Literal["traffic", "percent", "errors"]
-UNITS: dict[str, str] = {"traffic": "Mbit/s", "percent": "% of port speed", "errors": "errors and discards per poll"}
+UNITS: dict[str, str] = {"traffic": "Mbit/s", "percent": "% of port speed", "errors": "errors and discards per {step}"}
 # The page has six colors for ports, each port's in and out drawn in one of them.
 MAX_CHART_PORTS = 6
 
@@ -71,49 +73,11 @@ class Chart(BaseModel):
     unit: str
     minutes: float
     interval: float = Field(description="Seconds between polls: how often the chart has something new.")
+    step: int | None = Field(
+        None, description="Seconds each point covers when the window is read from rollups; none when each is one poll's."
+    )
     ports: list[str] = Field(description="The ports charted, as device:port, in the order they are colored.")
     lines: list[ChartLine]
-
-
-@dataclass(frozen=True)
-class Rate:
-    """One port's traffic between two samples."""
-
-    start: float
-    end: float
-    in_bps: float
-    out_bps: float
-    in_errors: int
-    out_errors: int
-    in_discards: int
-    out_discards: int
-    flaps: int | None
-    speed_bps: int | None
-
-
-def rate(earlier: Sample, later: Sample) -> Rate | None:
-    """The traffic between two samples of one port, or None if a counter was reset in between."""
-    seconds = later.at - earlier.at
-    deltas = {name: getattr(later.counters, name) - getattr(earlier.counters, name) for name in COUNTED}
-    if seconds <= 0 or any(delta < 0 for delta in deltas.values()):
-        return None
-    flaps = None
-    if later.counters.carrier_transitions is not None and earlier.counters.carrier_transitions is not None:
-        flaps = later.counters.carrier_transitions - earlier.counters.carrier_transitions
-        if flaps < 0:
-            return None
-    return Rate(
-        start=earlier.at,
-        end=later.at,
-        in_bps=deltas["in_octets"] * 8 / seconds,
-        out_bps=deltas["out_octets"] * 8 / seconds,
-        in_errors=deltas["in_errors"],
-        out_errors=deltas["out_errors"],
-        in_discards=deltas["in_discards"],
-        out_discards=deltas["out_discards"],
-        flaps=flaps,
-        speed_bps=later.counters.speed_bps,
-    )
 
 
 def speed_name(bps: int | None) -> str | None:
@@ -126,42 +90,66 @@ def speed_name(bps: int | None) -> str | None:
     return f"{bps}bps"
 
 
-def rates_since(samples: Sequence[Sample], since: float) -> list[Rate]:
-    """The rates between one port's samples, for the intervals that end after a moment."""
-    return [found for earlier, later in pairwise(samples) if later.at > since and (found := rate(earlier, later))]
+def duration(seconds: float) -> str:
+    """A length of time as people say it: 15 minutes, 3 hours, 7 days."""
+    for name, size in (("day", 24 * 3600), ("hour", 3600), ("minute", 60)):
+        if seconds >= size and seconds % size == 0:
+            count = int(seconds // size)
+            return f"{count} {name}" + ("s" if count != 1 else "")
+    return f"{seconds / 60:g} minutes"
 
 
-def summarize(samples: Sequence[Sample], since: float) -> InterfaceTraffic | None:
-    """What one port's samples say since a moment: None until there are two to compare after it."""
-    rates = rates_since(samples, since)
-    if not rates:
+def per(step: int | None) -> str:
+    """What one point covers: a poll, 5 minutes, an hour."""
+    if step is None:
+        return "poll"
+    return duration(step).removeprefix("1 ")
+
+
+def poll_by_poll(interval: float) -> float:
+    """The longest window, in seconds, read poll by poll at an interval."""
+    return MOST_POINTS * interval
+
+
+def step_for(seconds: float, interval: float) -> int | None:
+    """The step a window is read in: none (poll by poll) while it fits MOST_POINTS, or else the shortest that does."""
+    if seconds <= poll_by_poll(interval):
         return None
-    latest, counters = rates[-1], samples[-1].counters
+    return next((step for step in STEPS if seconds / step <= MOST_POINTS), STEPS[-1])
+
+
+def summarize(device: str, port: str, rates: Sequence[Rate], latest: Rate, oper_state: str | None) -> InterfaceTraffic:
+    """
+    What one port's rates over a window say: rates read poll by poll or in rollups,
+    and the latest interval between polls.
+    """
+    whole = combine(rates)
 
     def mbps(bps: float) -> float:
         return round(bps / 1e6, 3)
 
     def percent(bps: float) -> float | None:
-        return round(100 * bps / counters.speed_bps, 3) if counters.speed_bps else None
+        return round(100 * bps / latest.speed_bps, 3) if latest.speed_bps else None
 
-    flaps = [found.flaps for found in rates]
     return InterfaceTraffic(
-        device=counters.device,
-        interface=counters.interface,
-        oper_state=counters.oper_state,
-        speed=speed_name(counters.speed_bps),
-        minutes=round((latest.end - rates[0].start) / 60, 1),
+        device=device,
+        interface=port,
+        oper_state=oper_state,
+        speed=speed_name(latest.speed_bps),
+        minutes=round((whole.end - whole.start) / 60, 1),
         in_mbps=mbps(latest.in_bps),
         out_mbps=mbps(latest.out_bps),
         in_percent=percent(latest.in_bps),
         out_percent=percent(latest.out_bps),
-        peak_in_mbps=mbps(max(found.in_bps for found in rates)),
-        peak_out_mbps=mbps(max(found.out_bps for found in rates)),
-        in_errors=sum(found.in_errors for found in rates),
-        out_errors=sum(found.out_errors for found in rates),
-        in_discards=sum(found.in_discards for found in rates),
-        out_discards=sum(found.out_discards for found in rates),
-        flaps=None if None in flaps else sum(flap for flap in flaps if flap is not None),
+        average_in_mbps=mbps(whole.in_bps),
+        average_out_mbps=mbps(whole.out_bps),
+        peak_in_mbps=mbps(whole.peak_in_bps),
+        peak_out_mbps=mbps(whole.peak_out_bps),
+        in_errors=whole.in_errors,
+        out_errors=whole.out_errors,
+        in_discards=whole.in_discards,
+        out_discards=whole.out_discards,
+        flaps=whole.flaps,
     )
 
 
@@ -171,7 +159,7 @@ def port_order(name: str) -> list[str | int]:
 
 
 def chart_value(found: Rate, metric: Metric, direction: Literal["in", "out"]) -> float | None:
-    """One interval's value on a chart, or None for utilization on a port of unknown speed."""
+    """One point's value on a chart (an interval's, or a rollup's average), or None for utilization at an unknown speed."""
     if metric == "errors":
         return float(found.in_errors + found.in_discards if direction == "in" else found.out_errors + found.out_discards)
     bps = found.in_bps if direction == "in" else found.out_bps
@@ -182,9 +170,10 @@ def chart_value(found: Rate, metric: Metric, direction: Literal["in", "out"]) ->
 
 def describe_chart(chart: Chart) -> str:
     """What the model reads about a chart it drew: each line's latest value, average, and peak."""
+    each = f" Each point is the average over {duration(chart.step)}." if chart.step and chart.metric != "errors" else ""
     lines = [
-        f"Charted {chart.unit} for {', '.join(chart.ports)} over the last {chart.minutes:g} minutes. The chart is in "
-        f"the conversation, and it updates every {chart.interval:g} seconds."
+        f"Charted {chart.unit} for {', '.join(chart.ports)} over the last {duration(chart.minutes * 60)}.{each} The "
+        f"chart is in the conversation, and it updates every {chart.interval:g} seconds."
     ]
     for line in chart.lines:
         values = [value for _, value in line.points]
@@ -241,7 +230,7 @@ class Poller:
                 self._errors[name] = str(error)
                 return
             try:
-                await self.store.add(self._clock(), readings)
+                await self.store.add(self._clock(), readings, longest=LONGEST_GAP * self.interval)
             except StoreError as error:
                 logger.warning("Keeping %s's counters failed: %s", name, error)
                 self._errors[name] = f"{name} answered, but its counters couldn't be kept: {error}"
@@ -285,15 +274,29 @@ class Poller:
                 await self.store.close()
 
     @property
-    def window(self) -> float:
-        """How far back, in seconds, statistics reach: no further than REACH, or than the store keeps samples."""
-        return min(self.store.window, REACH)
+    def reach(self) -> float:
+        """How far back, in seconds, statistics reach: as far as the store keeps anything."""
+        return self.store.reach
+
+    async def summary(self, device: str, port: str, since: float, step: int | None) -> InterfaceTraffic | None:
+        """One port's traffic since a moment, read in a step: None until there are two polls to compare after it."""
+        rates = await self.store.rates(device, port, since, step)
+        if not rates:
+            return None
+        latest = rates[-1]
+        if step is not None:
+            # The latest interval between polls ends where the latest rollup does. Once the store has dropped the
+            # polls, the rollup's average is the latest there is.
+            latest = (await self.store.rates(device, port, since=latest.end - 0.001) or [latest])[-1]
+        last = await self.store.samples(device, port, since=self._clock())
+        return summarize(device, port, rates, latest, last[-1].counters.oper_state if last else None)
 
     async def traffic(self, devices: list[str] | None, minutes: float) -> tuple[list[InterfaceTraffic], list[DeviceError]]:
         """Each port's traffic over the last minutes, on the named devices or all of them, and why any device has none."""
         known = [device.name for device in self._inventory.devices]
         names = devices or known
-        since = self._clock() - min(minutes * 60, self.window)
+        seconds = min(minutes * 60, self.reach)
+        since, step = self._clock() - seconds, step_for(seconds, self.interval)
         items: list[InterfaceTraffic] = []
         errors: list[DeviceError] = []
         polled = await self.ports()
@@ -304,7 +307,7 @@ class Poller:
                 errors.append(DeviceError(device=name, error=str(error)))
                 continue
             ports = [port for device, port in polled if device == name]
-            found = [summary for port in ports if (summary := summarize(await self.store.samples(name, port, since), since))]
+            found = [summary for port in ports if (summary := await self.summary(name, port, since, step))]
             items.extend(found)
             if name in self._errors:
                 errors.append(DeviceError(device=name, error=self._errors[name]))
@@ -351,20 +354,21 @@ class Poller:
     async def chart(self, title: str, names: list[str], metric: Metric, minutes: float) -> Chart:
         """Chart some ports, named as resolve() takes them, over the last minutes."""
         ports = await self.resolve(names)
-        minutes = min(minutes, self.window / 60)
-        since = self._clock() - minutes * 60
+        seconds = min(minutes * 60, self.reach)
+        since, step = self._clock() - seconds, step_for(seconds, self.interval)
         lines = []
         for device, port in ports:
-            found = rates_since(await self.store.samples(device, port, since), since)
+            found = await self.store.rates(device, port, since, step)
             for direction in ("in", "out"):
                 points = [(item.end, value) for item in found if (value := chart_value(item, metric, direction)) is not None]
                 lines.append(ChartLine(port=f"{device}:{port}", direction=direction, points=points))
         return Chart(
             title=title,
             metric=metric,
-            unit=UNITS[metric],
-            minutes=minutes,
+            unit=UNITS[metric].format(step=per(step)),
+            minutes=seconds / 60,
             interval=self.interval,
+            step=step,
             ports=[f"{device}:{port}" for device, port in ports],
             lines=lines,
         )

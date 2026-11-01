@@ -50,7 +50,9 @@ from netgpt.primitives import (
     Route,
 )
 from netgpt.forwarding import ForwardingPath, TraceError, trace_path
-from netgpt.statistics import DEFAULT_INTERVAL, MAX_CHART_PORTS, REACH, Chart, ChartError, Metric, Poller, describe_chart
+from netgpt.statistics import (
+    DEFAULT_INTERVAL, MAX_CHART_PORTS, Chart, ChartError, Metric, Poller, describe_chart, duration, poll_by_poll,
+)
 from netgpt.store import STORE_HELP, StoreError, check_store, open_store
 from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_ospf, build_topology, ospf_mismatches, port_of
 from netgpt.views import View, ViewError, describe, make_view
@@ -72,8 +74,8 @@ cover; it accepts only read-only commands and says why when it refuses one.
 
 STATISTICS_INSTRUCTIONS = """\
 interface_traffic reads the interface counters NetGPT polls every {interval:g} seconds: how much each port
-sends and receives, how busy it is as a share of its speed, and the errors, discards, and link flaps
-counted lately.
+sends and receives, now, on average, and at its busiest, how busy it is as a share of its speed, and the
+errors, discards, and link flaps counted, over a window that reaches back as far as {reach}.
 """
 
 DISPLAY_INSTRUCTIONS = """\
@@ -128,9 +130,7 @@ DeviceNames = Annotated[
 ]
 
 
-Minutes = Annotated[
-    float, Field(description=f"How far back to look, in minutes. NetGPT looks back as far as {REACH / 60:g} minutes.")
-]
+Minutes = Annotated[float, Field(description="How far back to look, in minutes: 60 is an hour, 1440 a day, 10080 a week.")]
 
 
 ChartPorts = Annotated[
@@ -168,7 +168,7 @@ def build_server(
     """
     instructions = (
         INSTRUCTIONS
-        + (STATISTICS_INSTRUCTIONS.format(interval=statistics.interval) if statistics else "")
+        + (STATISTICS_INSTRUCTIONS.format(interval=statistics.interval, reach=duration(statistics.reach)) if statistics else "")
         + (DISPLAY_INSTRUCTIONS if display else "")
         + (CHART_INSTRUCTIONS if display and statistics else "")
     )
@@ -407,9 +407,10 @@ def build_server(
             description=(
                 "Return each port's traffic and errors over the last minutes, from the interface counters NetGPT polls "
                 f"every {statistics.interval:g} seconds: megabits per second in and out between the latest two polls, the "
-                "same as a percent of the port's speed, the busiest interval's rates, and the errors, discards, and link "
-                "flaps counted. Use it to find busy or saturated links, and links that drop or damage packets. One call "
-                "covers every device; name devices only to leave the others out."
+                "same as a percent of the port's speed, the average over the window, the busiest interval's rates, and "
+                "the errors, discards, and link flaps counted. Use it to find busy or saturated links, and links that "
+                f"drop or damage packets. It looks back as far as {duration(statistics.reach)}. One call covers every "
+                "device; name devices only to leave the others out."
             ),
         )
         async def interface_traffic(devices: DeviceNames = None, minutes: Minutes = 15) -> Collection[InterfaceTraffic]:
@@ -504,7 +505,9 @@ def build_server(
                 "link as device--device for the first device's port on it, or a device for all its ports except "
                 f"management; up to {MAX_CHART_PORTS} ports. metric is traffic "
                 "(Mbit/s in and out, the default), percent (of each port's speed), or errors (errors and discards in "
-                "each interval between polls, in and out)."
+                "each interval between polls, in and out). Over a window longer than "
+                f"{duration(poll_by_poll(statistics.interval))}, each point is the average over 5 minutes or more, "
+                f"and errors are counted per point. It looks back as far as {duration(statistics.reach)}."
             ),
         )
         async def chart(
