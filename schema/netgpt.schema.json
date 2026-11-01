@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "NetGPT",
-  "description": "Every record NetGPT sends outside itself, in the shape it sends them: the views the page's map draws, charts and the map's traffic, and the records the tools return. Each record is under $defs, by name. Every property is always sent; one that can be empty is null then. A tool that asks several devices returns {\"items\": [records], \"errors\": [DeviceError]}, so one device's failure leaves the rest of the answer.",
+  "description": "Every record NetGPT sends outside itself, in the shape it sends them: the views the page's map draws, charts and the map's traffic, the records the tools return, and the API's refusals. Each record is under $defs, by name. Every property is always sent; one that can be empty is null then. A tool that asks several devices returns {\"items\": [records], \"errors\": [DeviceError]}, so one device's failure leaves the rest of the answer.",
   "version": "0.4.0",
   "$defs": {
     "ArpEntry": {
@@ -1432,6 +1432,20 @@
       "title": "PingResult",
       "type": "object"
     },
+    "Refusal": {
+      "description": "What the API answers instead of a record: why it refused, in the tools' words, and what it would answer.",
+      "properties": {
+        "error": {
+          "title": "Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "Refusal",
+      "type": "object"
+    },
     "Route": {
       "description": "One route in a routing table, IPv4 or IPv6.",
       "properties": {
@@ -1770,12 +1784,21 @@
           },
           "title": "Ports",
           "type": "array"
+        },
+        "errors": {
+          "description": "The devices whose counters couldn't be read, and why.",
+          "items": {
+            "$ref": "#/$defs/DeviceError"
+          },
+          "title": "Errors",
+          "type": "array"
         }
       },
       "required": [
         "interval",
         "minutes",
-        "ports"
+        "ports",
+        "errors"
       ],
       "title": "Traffic",
       "type": "object"

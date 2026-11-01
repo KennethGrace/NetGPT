@@ -249,17 +249,20 @@ class FakePlatform(Platform):
     commands_run: list[str] = []
     pings: list[tuple[str, str, int, str]] = []
     counter_reads: dict[str, int] = {}
+    table_reads: list[tuple[str, str]] = []
 
     async def _run_checked_cli(self, command: str) -> str:
         FakePlatform.commands_run.append(command)
         return f"{self.device.name}: ran {command}"
 
     async def lldp_neighbors(self) -> list[LldpNeighbor]:
+        FakePlatform.table_reads.append((self.device.name, "lldp_neighbors"))
         if self.device.name == "broken":
             raise PlatformError("broken: connection refused")
         return [LldpNeighbor(device=self.device.name, interface="ethernet-1/49", neighbor="spine1")]
 
     async def arp_table(self) -> list[ArpEntry]:
+        FakePlatform.table_reads.append((self.device.name, "arp_table"))
         if self.device.name == "broken":
             raise PlatformError("broken: connection refused")
         host = {"leaf1": "198.51.100.11", "leaf2": "198.51.100.12"}[self.device.name]
@@ -300,6 +303,7 @@ class FakePlatform(Platform):
         return PingResult(source=self.device.name, destination=destination, sent=count, received=received)
 
     async def routes(self, network_instance: str) -> list[Route]:
+        FakePlatform.table_reads.append((self.device.name, "routes"))
         if self.device.name == "broken":
             raise PlatformError("broken: connection refused")
         hosts = {"leaf1": "198.51.100.8/30", "leaf2": "198.51.100.12/30"}[self.device.name]

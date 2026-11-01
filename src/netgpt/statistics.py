@@ -86,6 +86,7 @@ class Traffic(BaseModel):
     interval: float = Field(description="Seconds between polls: how often there is something new.")
     minutes: float = Field(description="How far back the errors, discards, flaps, and averages go.")
     ports: list[InterfaceTraffic]
+    errors: list[DeviceError] = Field(default_factory=list, description="The devices whose counters couldn't be read, and why.")
 
 
 def speed_name(bps: int | None) -> str | None:

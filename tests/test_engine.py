@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from netgpt.engine import Engine, RequestError
+from netgpt.engine import Engine, RequestError, SharedReads
 from netgpt.guard import GuardError
 from netgpt.inventory import Inventory, InventoryError
 from netgpt.statistics import Poller
@@ -64,3 +64,19 @@ async def test_an_engine_polls_only_while_a_face_holds_it_running(inventory: Inv
     assert reads >= 2
     await asyncio.sleep(0.05)
     assert counter_reads["leaf1"] == reads
+
+
+@pytest.mark.anyio
+async def test_shared_reads_read_again_after_something_no_one_anticipated() -> None:
+    shared = SharedReads(30, clock=lambda: 1000.0)
+    tries = []
+
+    async def fails() -> list[str]:
+        tries.append(1)
+        raise RuntimeError("a bug")
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            await shared.read(("leaf1", "lldp_neighbors", ()), fails)
+    # A device's own failure is an answer, and kept; a bug isn't, and the next request tries again.
+    assert len(tries) == 2

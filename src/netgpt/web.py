@@ -18,6 +18,9 @@ chart, the event carries the chart, which the page draws in the conversation
 (chart.js) and refreshes from /api/chart each time the poller has new samples.
 While NetGPT polls, the map also asks /api/traffic for every port's latest rates
 and recent errors, and draws them on the links.
+
+The engine's API (netgpt.api) is mounted at /api/v1, and takes the page's cookie,
+so a signed-in browser can read it too.
 """
 
 from __future__ import annotations
@@ -34,13 +37,14 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
+from netgpt.api import COOKIE, build_api
 from netgpt.chat import Chat, ChatError, ChatObserver
-from netgpt.statistics import MAX_CHART_PORTS, ChartError, Metric, Poller, Traffic
+from netgpt.engine import Engine
+from netgpt.statistics import MAX_CHART_PORTS, ChartError, Metric, Traffic
 from netgpt.store import StoreError
 
-COOKIE = "netgpt_token"
 DISPLAY_TOOL = "display"
 CHART_TOOL = "chart"
 ASSETS = {
@@ -140,8 +144,12 @@ def conversation_events(messages: list[dict[str, Any]]) -> list[Event]:
     return events
 
 
-def build_app(chat: Chat, token: str, statistics: Poller | None = None) -> Starlette:
-    """Build the web app serving one conversation, for browsers holding the token. Charts need the poller."""
+def build_app(chat: Chat, token: str, engine: Engine) -> Starlette:
+    """
+    Build the web app serving one conversation, for browsers holding the token, with
+    the engine's API beside it at /api/v1. Charts need the engine to poll.
+    """
+    statistics = engine.statistics
     static = files("netgpt") / "static"
     assets = {name: (static / name).read_text(encoding="utf-8") for name in ASSETS}
     expected = token.encode()
@@ -256,12 +264,13 @@ def build_app(chat: Chat, token: str, statistics: Poller | None = None) -> Starl
             Route("/api/reset", requires_sign_in(reset), methods=["POST"]),
             Route("/api/chart", requires_sign_in(chart), methods=["POST"]),
             Route("/api/traffic", requires_sign_in(traffic)),
+            Mount("/api/v1", app=build_api(engine, token)),
         ]
     )
 
 
-async def serve(chat: Chat, host: str, port: int, token: str, statistics: Poller | None = None) -> None:
-    """Serve the chat page until interrupted."""
+async def serve(chat: Chat, host: str, port: int, token: str, engine: Engine) -> None:
+    """Serve the chat page, and the engine's API, until interrupted."""
     # No access log: the first request's URL carries the token.
-    config = uvicorn.Config(build_app(chat, token, statistics), host=host, port=port, log_level="warning", access_log=False)
+    config = uvicorn.Config(build_app(chat, token, engine), host=host, port=port, log_level="warning", access_log=False)
     await uvicorn.Server(config).serve()

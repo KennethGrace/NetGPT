@@ -231,6 +231,27 @@ netgpt-schema --out schema/netgpt.schema.json
 
 Over MCP, each tool also publishes its own output schema, from the same models.
 
+## The API
+
+`netgpt-chat --web` also serves the engine's API at `/api/v1/`, for programs: a frontend in another repository, or a script. Every route answers GET with a record from [the schema](#the-schema), and needs the page's token, sent as `Authorization: Bearer <token>`. The signed-in page's cookie works too.
+
+| Route | Answers with |
+|---|---|
+| `devices` | The inventory's devices. |
+| `topology?layer=l2\|l3\|ospf&plane=data\|management\|all&network_instance=default` | `Topology`: the network as one graph. |
+| `path?source=…&destination=…&network_instance=default` | `ForwardingPath`: the way packets go, read from the routing tables. |
+| `view?layer=…&focus=…&highlight=…&source=…&destination=…&title=…` | `View`: the graph with your focus and highlight (each repeated for several names), and a path if you give its two ends. |
+| `tables/<table>?device=…` | One table's rows from every device, or those named: `lldp_neighbors`, `interfaces`, `mac_table`, `arp_table`, `routes` (with `network_instance`), `bgp_sessions`, `ospf_neighbors`, or `ospf_interfaces`. |
+| `traffic?device=…&minutes=5` | `Traffic`: every polled port's latest rates and recent errors. |
+| `chart?port=…&metric=traffic\|percent\|errors&minutes=15` | `Chart`: ports' rates over the window, with links named `device--device`. |
+| `schema` | The schema itself. |
+
+```bash
+curl -H "Authorization: Bearer $NETGPT_WEB_TOKEN" 'http://127.0.0.1:8080/api/v1/path?source=branch&destination=10.20.100.10'
+```
+
+Devices' answers are shared: one is reused for up to a poll interval (30 seconds), requests that arrive together wait for one read, and the `Age` header says how old the oldest answer behind a response is. `Cache-Control: no-cache` reads every device again. A frontend redrawing every poll then doesn't log in to every device each time; the model's tools always read live. A request NetGPT won't answer gets `{"error": …}` saying why, with the names it would accept: 400 for the request, 401 without the token, and 404 for a route that isn't one. There is no CORS: a browser app on another origin should reach the API through its own backend, which keeps the token out of the browser.
+
 ## Legacy web app (v0.3)
 
 The original 2023 NetGPT, a React chat interface and a FastAPI backend built on OpenAI's first function-calling API, with Keycloak authentication, is kept for reference at the tag [`v0.3.6g`](https://github.com/KennethGrace/NetGPT/tree/v0.3.6g). **Do not deploy it:** the v0.3 API accepts requests with any bearer token, because token validation errors are logged but never rejected.

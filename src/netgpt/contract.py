@@ -23,6 +23,7 @@ from pydantic.json_schema import GenerateJsonSchema, models_json_schema
 from pydantic_core import core_schema
 
 from netgpt import __version__
+from netgpt.api import Refusal
 from netgpt.forwarding import ForwardingPath
 from netgpt.primitives import (
     ArpEntry,
@@ -50,17 +51,19 @@ DIALECT = "https://json-schema.org/draft/2020-12/schema"
 VIEWS: tuple[type[BaseModel], ...] = (View, Topology, ForwardingPath)
 # What the page charts, and the traffic the map draws on its links.
 STATISTICS: tuple[type[BaseModel], ...] = (Chart, Traffic)
+# What the API answers when it won't answer with a record.
+REFUSALS: tuple[type[BaseModel], ...] = (Refusal,)
 # What the tools return, by layer, as netgpt.primitives groups them.
 PRIMITIVES: tuple[type[BaseModel], ...] = (
     DeviceInfo, DeviceError, CommandOutput, LldpNeighbor, Interface, InterfaceTraffic, MacEntry, ArpEntry, Route,
     BgpSession, OspfInterface, OspfInterfaces, OspfNeighbor, PingResult,
 )
-RECORDS = VIEWS + STATISTICS + PRIMITIVES
+RECORDS = VIEWS + STATISTICS + REFUSALS + PRIMITIVES
 
 DESCRIPTION = (
     "Every record NetGPT sends outside itself, in the shape it sends them: the views the page's map draws, charts and "
-    "the map's traffic, and the records the tools return. Each record is under $defs, by name. Every property is "
-    "always sent; one that can be empty is null then. A tool that asks several devices returns "
+    "the map's traffic, the records the tools return, and the API's refusals. Each record is under $defs, by name. "
+    "Every property is always sent; one that can be empty is null then. A tool that asks several devices returns "
     '{"items": [records], "errors": [DeviceError]}, so one device\'s failure leaves the rest of the answer.'
 )
 

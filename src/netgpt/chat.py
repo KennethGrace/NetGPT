@@ -390,8 +390,9 @@ async def run(args: argparse.Namespace) -> int:
             return 1
         statistics = Poller(inventory, interval=args.poll_interval, store=store)
     # Only the web page can show the map, so only it gets the tool that draws one.
+    engine = Engine(inventory, statistics=statistics)
     async with (
-        Client(build_server(Engine(inventory, statistics=statistics), display=args.web is not None)) as client,
+        Client(build_server(engine, display=args.web is not None)) as client,
         httpx.AsyncClient(base_url=args.ollama, timeout=timeout) as http,
     ):
         try:
@@ -408,7 +409,7 @@ async def run(args: argparse.Namespace) -> int:
             host, port = args.web
             token = os.environ.get("NETGPT_WEB_TOKEN") or secrets.token_urlsafe(24)
             progress(f"NetGPT chat with {chat.model} at http://{host}:{port}/?token={token}", GRAY)
-            await serve(chat, host, port, token, statistics)
+            await serve(chat, host, port, token, engine)
             return 0
         observer = TerminalObserver(args.verbose)
         if not args.questions:

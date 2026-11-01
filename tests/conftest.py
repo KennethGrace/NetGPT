@@ -57,5 +57,12 @@ def counter_reads() -> dict[str, int]:
 
 
 @pytest.fixture
+def table_reads() -> list[tuple[str, str]]:
+    """The tables the fake platform has been asked for during this test, as (device, table)."""
+    FakePlatform.table_reads = []
+    return FakePlatform.table_reads
+
+
+@pytest.fixture
 def client(inventory: Inventory, commands_run: list[str]) -> Client:
     return Client(build_server(Engine(inventory, platforms={"fake": FakePlatform})))

@@ -44,12 +44,12 @@ async def browser(inventory: Inventory) -> AsyncIterator[Browser]:
 
         async def open_page(ollama: ScriptedOllama, signed_in: bool = True, statistics: Poller | None = None) -> httpx.AsyncClient:
             # The page can draw, so its server offers display, as netgpt-chat --web does.
-            server = build_server(Engine(inventory, platforms={"fake": FakePlatform}, statistics=statistics), display=True)
-            client = await stack.enter_async_context(Client(server))
+            engine = Engine(inventory, platforms={"fake": FakePlatform}, statistics=statistics)
+            client = await stack.enter_async_context(Client(build_server(engine, display=True)))
             http = await stack.enter_async_context(ollama.client())
             chat = Chat(client, http, "scripted", {}, think=True)
             await chat.start()
-            app = build_app(chat, TOKEN, statistics)
+            app = build_app(chat, TOKEN, engine)
             page = await stack.enter_async_context(httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://netgpt.test"))
             if signed_in:
                 await page.get("/", params={"token": TOKEN})
@@ -214,3 +214,12 @@ async def test_the_map_gets_every_polled_port_s_latest_rates_and_recent_errors(
     leaf1 = ports[("leaf1", "ethernet-1/1")]
     # The rates are the last interval's; the errors are every interval's in the last five minutes.
     assert (leaf1["in_mbps"], leaf1["out_mbps"], leaf1["in_percent"], leaf1["speed"], leaf1["in_errors"]) == (10.0, 1.0, 1.0, "1G", 4)
+
+
+@pytest.mark.anyio
+async def test_a_signed_in_browser_reads_the_engine_s_api_too(browser: Browser) -> None:
+    page = await browser(ScriptedOllama())
+    devices = await page.get("/api/v1/devices")
+    assert devices.status_code == 200 and [device["name"] for device in devices.json()["items"]][0] == "leaf1"
+    stranger = await browser(ScriptedOllama(), signed_in=False)
+    assert (await stranger.get("/api/v1/devices")).status_code == 401
