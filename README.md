@@ -233,7 +233,14 @@ Over MCP, each tool also publishes its own output schema, from the same models.
 
 ## The API
 
-`netgpt-chat --web` also serves the engine's API at `/api/v1/`, for programs: a frontend in another repository, or a script. Every route answers GET with a record from [the schema](#the-schema), and needs the page's token, sent as `Authorization: Bearer <token>`. The signed-in page's cookie works too.
+The engine's API is at `/api/v1/`, for programs: a frontend in another repository, or a script. `netgpt-engine` serves it with no model behind it, polling the counters for as long as it runs:
+
+```bash
+export NETGPT_ENGINE_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(24))')
+netgpt-engine --inventory lab/wan/inventory.yml --listen 127.0.0.1:8081   # --store postgresql://... to keep the counters
+```
+
+`netgpt-chat --web` serves the same API beside its page, with the page's token. Every route answers GET with a record from [the schema](#the-schema), and needs the token, sent as `Authorization: Bearer <token>` (`$NETGPT_ENGINE_TOKEN` for `netgpt-engine`, or a random one it prints at startup). The signed-in page's cookie works too. Both poll, so give each its own `--store`: two pollers on one store count errors twice.
 
 | Route | Answers with |
 |---|---|
@@ -247,7 +254,7 @@ Over MCP, each tool also publishes its own output schema, from the same models.
 | `schema` | The schema itself. |
 
 ```bash
-curl -H "Authorization: Bearer $NETGPT_WEB_TOKEN" 'http://127.0.0.1:8080/api/v1/path?source=branch&destination=10.20.100.10'
+curl -H "Authorization: Bearer $NETGPT_ENGINE_TOKEN" 'http://127.0.0.1:8081/api/v1/path?source=branch&destination=10.20.100.10'
 ```
 
 Devices' answers are shared: one is reused for up to a poll interval (30 seconds), requests that arrive together wait for one read, and the `Age` header says how old the oldest answer behind a response is. `Cache-Control: no-cache` reads every device again. A frontend redrawing every poll then doesn't log in to every device each time; the model's tools always read live. A request NetGPT won't answer gets `{"error": …}` saying why, with the names it would accept: 400 for the request, 401 without the token, and 404 for a route that isn't one. There is no CORS: a browser app on another origin should reach the API through its own backend, which keeps the token out of the browser.

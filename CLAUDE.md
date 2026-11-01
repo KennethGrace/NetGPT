@@ -30,6 +30,7 @@ netgpt-chat --inventory lab/inventory.yml --model gemma4:e4b --ollama http://127
 netgpt-chat ... --web 127.0.0.1:8080    # sign-in token from $NETGPT_WEB_TOKEN, or printed
 netgpt-chat ... --poll-interval 10      # interface counters every 10 s (default 30; 0 turns polling off)
 netgpt-chat ... --store postgresql://netgpt@127.0.0.1:5432/netgpt   # keep them in TimescaleDB, across restarts
+netgpt-engine --inventory lab/wan/inventory.yml --listen 127.0.0.1:8081   # the API alone, no model; token from $NETGPT_ENGINE_TOKEN
 netgpt-schema --out schema/netgpt.schema.json   # rewrite the contract after changing a record NetGPT sends
 python lab/record_fixtures.py           # re-record the lab's responses as test fixtures
 python lab/record_junos.py --inventory I --rename R   # record Junos devices' replies as renamed fixtures
@@ -55,6 +56,7 @@ python lab/game.py --lab wan --anywhere ...       # each fault at a random one o
 - `src/netgpt/server.py`: the MCP tools, the engine's face for models: what each tool is for, the shapes small models send, and the text the model reads. `display` exists only when `build_server(engine, display=True)`.
 - `src/netgpt/chat.py`, `web.py`: the Ollama tool loop, and the web page's server.
 - `src/netgpt/api.py`: the engine's face for programs: GET routes under `/api/v1/` answering with contract records, behind the page's token, with devices' answers shared (`engine.SharedReads`). The page mounts it.
+- `src/netgpt/service.py`: `netgpt-engine`, the engine on its own: the API at `/api/v1`, with the engine held running (and polling) for as long as the service runs. MCP over HTTP will join it here.
 - `src/netgpt/contract.py`: the records NetGPT sends outside itself (views, charts, traffic, the primitives), and their JSON Schema. `schema/netgpt.schema.json` is the repository's copy, for other repositories to read.
 - `src/netgpt/static/`: the page. `map.js` is the map on vendored d3-force, with each link's traffic, and `chart.js` draws charts in the conversation and the map's inspector.
 - `lab/`: the containerlab lab (SR Linux spine, two leaves, a bridging switch, Linux hosts) and its inventory.
@@ -242,7 +244,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
       - The password is in `~/.pgpass` for NetGPT and in `~/.config/netgpt/timescale.env` for the container, both `chmod 600`. `dev/.env` (gitignored) can put the data in a directory of its own instead of a named volume.
       - A store that can't keep a poll is reported for each device it polled, and polling goes on. `open` connects once without the pool first, since a pool that can't connect only says it timed out.
       - The pool checks each connection as it hands it out, so after the database restarts, a dropped connection is replaced instead of failing a poll. `open` makes the tables under an advisory lock: two stores opening at once raced on `CREATE TABLE IF NOT EXISTS` without it. Both are tested.
-      - **Two pollers on one store** (a page and `netgpt-mcp`, say): since 3c, each works out its intervals from its own previous reading, so rates are right, and so are averages over a window (both measure the same seconds). But errors, discards, and flaps are counted twice, and a chart read poll by poll has both pollers' points. Run one poller per store until samples carry which poller took them.
+      - **Two pollers on one store** (a page and `netgpt-mcp` or `netgpt-engine`, say): since 3c, each works out its intervals from its own previous reading, so rates are right, and so are averages over a window (both measure the same seconds). But errors, discards, and flaps are counted twice, and a chart read poll by poll has both pollers' points. Run one poller per store until samples carry which poller took them.
       - Checked live: a poller ran against the WAN lab and stopped, and a new one, before it had polled, read the old one's rates and drew a chart from them.
       - The container is started by hand. A restart policy needs `podman-restart.service`, which would restart every rootless container on the machine, not just this one.
     - 3c is done: rollups, and `interface_traffic` and `chart` reading long windows from them.
@@ -283,6 +285,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
     - 2c, the page reads it: `/api/v1/traffic` and `/api/v1/chart` replace the page's own routes, and the map draws the network from `/api/v1/view` when the page opens, before any question.
       - Done: the page's `/api/traffic` and `/api/chart` are gone, and `traffic` and `chart` are API routes only while the engine polls, as their MCP tools are. Checked in headless Firefox on answers recorded from the live page's API: an empty conversation draws the WAN lab with its traffic, a chart refreshes through `GET /api/v1/chart?...&port=...`, and a narrow screen offers the Map button without marking it.
     - 2d, the engine without a model: `netgpt-engine --inventory I --listen HOST:PORT [--store URL]` serves the API with no Ollama behind it. Checked live on the WAN lab.
+      - Done: `netgpt.service` (`build_service`, the lifespan holding `engine.running()`) and the `netgpt-engine` script; `listen_address` moved there from the chat, which imports it. Checked live on the WAN lab: it polled with no client connected (24 ports), shared reads (0.30 s, then 0.01 s), answered 401 without the token, and stopped cleanly on Ctrl-C. uvicorn's access log goes to stdout.
     - 2e, commands: `show`, `ping`, and `ping_sweep` as POST routes, run every time and never shared, through the same guard, inventory, and sweep limits as the tools. An engineer at any frontend should be able to do what the model can. They can come any time after 2b.
     - **Not in Phase 2:** the model's views (what `display` draws) for other frontends. The chat would have to publish them.
   - After Phase 2: MCP over HTTP (Frontends Phase 1) lands on `netgpt-engine` as `/mcp`, and the chat becomes a client of the engine instead of embedding one, which also ends two pollers on one store.
