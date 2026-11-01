@@ -55,6 +55,7 @@ python lab/game.py --lab wan --anywhere ...       # each fault at a random one o
 - `src/netgpt/static/`: the page. `map.js` is the map on vendored d3-force, with each link's traffic, and `chart.js` draws charts in the conversation and the map's inspector.
 - `lab/`: the containerlab lab (SR Linux spine, two leaves, a bridging switch, Linux hosts) and its inventory.
 - `lab/wan/`: the WAN lab: three sites (HQ, Ops, a branch) on 25G, 10G, and 1G links, routed by OSPF, with its own inventory.
+- `.github/workflows/tests.yml`: the whole suite on every push to main and every pull request, against a fresh TimescaleDB.
 - The 2023 v0.3 app is at the tag `v0.3.6g`, kept for reference only. Never deploy it: its API accepts any bearer token.
 
 ## Rules that hold everywhere

@@ -1,0 +1,38 @@
+# The whole suite on every push to main and every pull request, the TimescaleDB store included.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    services:
+      timescale:
+        # The same TimescaleDB as dev/compose.yml.
+        image: timescale/timescaledb:2.31.0-pg17
+        env:
+          POSTGRES_USER: netgpt
+          POSTGRES_DB: netgpt_test
+          # The database lasts only as long as the job and listens only to it, so it keeps no password.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:5432:5432
+        # Over TCP, so the check waits for the server the image starts after its setup, not the one setup runs on.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U netgpt -d netgpt_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+    env:
+      NETGPT_TEST_STORE: postgresql://netgpt@127.0.0.1:5432/netgpt_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e '.[dev,store]'
+      - run: pytest
