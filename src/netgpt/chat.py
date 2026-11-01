@@ -31,6 +31,7 @@ from prompt_toolkit import PromptSession
 from netgpt.engine import Engine
 from netgpt.inventory import Inventory
 from netgpt.server import build_server
+from netgpt.service import listen_address
 from netgpt.statistics import DEFAULT_INTERVAL, Poller
 from netgpt.store import STORE_HELP, StoreError, check_store, open_store
 
@@ -364,14 +365,6 @@ async def interactive(chat: Chat, observer: ChatObserver) -> None:
                 progress(str(error), RED)
 
 
-def web_address(value: str) -> tuple[str, int]:
-    """Parse [HOST:]PORT for --web; the host defaults to loopback."""
-    host, _, port = value.rpartition(":")
-    if not port.isdigit() or not 0 < int(port) < 65536:
-        raise argparse.ArgumentTypeError(f"'{value}' is not [HOST:]PORT.")
-    return host.strip("[]") or "127.0.0.1", int(port)
-
-
 async def run(args: argparse.Namespace) -> int:
     """Serve the web page, answer the questions given, or chat in the terminal. Returns the exit status."""
     inventory = Inventory.load(Path(args.inventory))
@@ -479,7 +472,7 @@ def main() -> None:
     parser.add_argument("--store", metavar="memory|URL", help=STORE_HELP)
     parser.add_argument(
         "--web",
-        type=web_address,
+        type=listen_address,
         metavar="[HOST:]PORT",
         help="Serve the chat as a web page instead of the terminal. HOST defaults to 127.0.0.1. "
         "Sign-in uses $NETGPT_WEB_TOKEN, or a random token printed at startup.",
