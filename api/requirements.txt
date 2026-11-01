@@ -1,9 +1,0 @@
-fastapi==0.104.0
-uvicorn>=0.23.1
-openai==0.28.1
-python-jose>=3.3.0
-httpx>=0.24.1
-icmplib==3.0.4
-paramiko>=3.3.1
-netmiko>=4.2.0
-napalm>=4.1.0

@@ -7,14 +7,10 @@
 
 # Development Environment
 venv
-node_modules
 
 # Python bytecode (compiled)
 *.pyc
 __pycache__/
-
-# React builds
-dist/
 
 # Development secrets
 secret
@@ -31,6 +27,7 @@ certs
 
 # Python packaging and tests
 *.egg-info/
+dist/
 .pytest_cache/
 
 # containerlab lab directories (generated on deploy, contain node TLS keys)

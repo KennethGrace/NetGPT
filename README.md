@@ -221,4 +221,4 @@ python lab/record_junos.py --inventory my-junos.yml --rename my-renames.yml
 
 ## Legacy web app (v0.3)
 
-[`api/`](api/) and [`www/`](www/) contain the original 2023 NetGPT: a React chat interface and a FastAPI backend built on OpenAI's first function-calling API, with Keycloak authentication. They are kept for reference. **Do not deploy them:** the v0.3 API accepts requests with any bearer token, because token validation errors are logged but never rejected.
+The original 2023 NetGPT, a React chat interface and a FastAPI backend built on OpenAI's first function-calling API, with Keycloak authentication, is kept for reference at the tag [`v0.3.6g`](https://github.com/KennethGrace/NetGPT/tree/v0.3.6g). **Do not deploy it:** the v0.3 API accepts requests with any bearer token, because token validation errors are logged but never rejected.
