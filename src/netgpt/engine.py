@@ -7,6 +7,11 @@ through the routing tables; makes views of the graph; runs read-only commands an
 pings within the inventory's limits; and owns the poller whose counters give each
 port's traffic.
 
+A device's answer can be shared (SharedReads): kept for a while, and handed to
+every request that asks within it. A face that serves frontends redrawing every
+poll reads through an engine that shares (Engine.reading); the MCP server's engine
+reads live, since a model troubleshooting needs what changed a second ago.
+
 The engine has faces, which only translate: the MCP server (netgpt.server) for
 models, and an HTTP API for any frontend. The facts, and the limits on what may be
 asked, are all here, so every face gets the same ones.
@@ -18,8 +23,9 @@ import asyncio
 import contextlib
 import ipaddress
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from typing import TypeVar
+from typing import Any, Literal, TypeVar
 
 import icmplib
 
@@ -58,25 +64,51 @@ MAX_SWEEP_ADDRESSES = 1024
 # From a device, each ping is a command on the device: a /24 takes the better part of a minute.
 MAX_DEVICE_SWEEP_ADDRESSES = 256
 
-PrimitiveT = TypeVar("PrimitiveT")
+# The tables a platform reads, by the name of the method that reads each.
+Table = Literal[
+    "lldp_neighbors", "interfaces", "mac_table", "arp_table", "routes", "bgp_sessions", "ospf_neighbors", "ospf_interfaces"
+]
+# What a device answered when asked for a table: its rows, or the error it failed with.
+Answer = list[Any] | InventoryError | GuardError | PlatformError
 
-Query = Callable[[Platform], Awaitable[list[PrimitiveT]]]
+T = TypeVar("T")
 
 
 class RequestError(ValueError):
     """A request the engine refuses before asking any device, such as a network it may not sweep."""
 
 
-def optional(query: Query[PrimitiveT]) -> Query[PrimitiveT]:
-    """A query the topology can do without, on a platform that doesn't support it yet."""
+class SharedReads:
+    """
+    Devices' answers, kept for max_age seconds and handed to every request that asks
+    within it, so frontends redrawing every poll don't each log in to every device. A
+    request that arrives while a read is under way waits for that read. A failure is
+    kept as long as an answer, so an unreachable device isn't asked again on every
+    request.
+    """
 
-    async def tolerant(platform: Platform) -> list[PrimitiveT]:
+    def __init__(self, max_age: float, clock: Callable[[], float] = time.monotonic) -> None:
+        self.max_age = max_age
+        self.clock = clock
+        self._reads: dict[tuple[Any, ...], tuple[float, asyncio.Future[Any]]] = {}
+
+    async def read(self, key: tuple[Any, ...], fetch: Callable[[], Awaitable[T]]) -> tuple[T, float]:
+        """The answer for a key, and when it was read: kept from a read in the last max_age seconds, or read now."""
+        now = self.clock()
+        kept = self._reads.get(key)
+        if kept is None or now - kept[0] > self.max_age:
+            # Forget what is too old to hand out, so asking for many keys doesn't keep them all.
+            self._reads = {other: read for other, read in self._reads.items() if now - read[0] <= self.max_age}
+            kept = self._reads[key] = (now, asyncio.ensure_future(fetch()))
+        at, read = kept
         try:
-            return await query(platform)
-        except UnsupportedError:
-            return []
-
-    return tolerant
+            # A request that goes away doesn't cancel the read the others are waiting for.
+            return await asyncio.shield(read), at
+        except Exception:
+            # Something no one anticipated went wrong: the next request reads again.
+            if self._reads.get(key) is kept:
+                del self._reads[key]
+            raise
 
 
 def once(errors: Sequence[DeviceError]) -> list[DeviceError]:
@@ -92,11 +124,22 @@ class Engine:
     """
 
     def __init__(
-        self, inventory: Inventory, platforms: dict[str, type[Platform]] = PLATFORMS, statistics: Poller | None = None
+        self,
+        inventory: Inventory,
+        platforms: dict[str, type[Platform]] = PLATFORMS,
+        statistics: Poller | None = None,
+        shared: SharedReads | None = None,
     ) -> None:
         self.inventory = inventory
         self.platforms = platforms
         self.statistics = statistics
+        self.shared = shared
+        # When the oldest answer this engine was handed was read, on the shared reads' clock.
+        self.oldest: float | None = None
+
+    def reading(self, shared: SharedReads) -> Engine:
+        """An engine for one request that reads through shared: the same inventory, platforms, and poller."""
+        return Engine(self.inventory, self.platforms, self.statistics, shared)
 
     @contextlib.asynccontextmanager
     async def running(self) -> AsyncIterator[Engine]:
@@ -119,61 +162,77 @@ class Engine:
         pattern = self.platforms.get(self.inventory.get(device).platform, Platform).management_interfaces
         return pattern is not None and pattern.match(port_of(interface)) is not None
 
-    async def collect(self, devices: list[str] | None, query: Query[PrimitiveT]) -> tuple[list[PrimitiveT], list[DeviceError]]:
-        """Ask every device named (or every device) the same question at once, keeping each one's failure."""
+    async def read(self, name: str, table: Table, args: tuple[str, ...]) -> Answer:
+        """One device's answer to a table, read now."""
+        try:
+            async with connect_to(self.inventory, name, self.platforms) as platform:
+                return await getattr(platform, table)(*args)
+        except EXPECTED_ERRORS as error:
+            log = logger.debug if isinstance(error, UnsupportedError) else logger.info
+            log("Query failed on %s: %s", name, error)
+            return error
+
+    async def ask(self, name: str, table: Table, *args: str) -> Answer:
+        """One device's answer to a table: shared, if this engine shares reads, and read now if not."""
+        if self.shared is None:
+            return await self.read(name, table, args)
+        answer, at = await self.shared.read((name, table, args), lambda: self.read(name, table, args))
+        self.oldest = at if self.oldest is None else min(self.oldest, at)
+        return answer
+
+    async def collect(
+        self, devices: list[str] | None, table: Table, *args: str, optional: bool = False
+    ) -> tuple[list[Any], list[DeviceError]]:
+        """
+        Ask every device named (or every device) for one table at once, keeping each
+        one's failure as its error. optional: a platform that can't read the table yet
+        answers with no rows and no error, for the graphs that can do without it.
+        """
         names = devices or [device.name for device in self.inventory.devices]
-
-        async def one(name: str) -> tuple[list[PrimitiveT], DeviceError | None]:
-            try:
-                async with connect_to(self.inventory, name, self.platforms) as platform:
-                    return await query(platform), None
-            except EXPECTED_ERRORS as error:
-                logger.info("Query failed on %s: %s", name, error)
-                return [], DeviceError(device=name, error=str(error))
-
-        items: list[PrimitiveT] = []
+        items: list[Any] = []
         errors: list[DeviceError] = []
-        for found, error in await asyncio.gather(*(one(name) for name in names)):
-            items.extend(found)
-            if error is not None:
-                errors.append(error)
+        for name, answer in zip(names, await asyncio.gather(*(self.ask(name, table, *args) for name in names))):
+            if isinstance(answer, list):
+                items.extend(answer)
+            elif not (optional and isinstance(answer, UnsupportedError)):
+                errors.append(DeviceError(device=name, error=str(answer)))
         return items, errors
 
     # The tables, from every device named, or every device.
 
     async def lldp_neighbors(self, devices: list[str] | None = None) -> Collection[LldpNeighbor]:
-        items, errors = await self.collect(devices, lambda platform: platform.lldp_neighbors())
+        items, errors = await self.collect(devices, "lldp_neighbors")
         return Collection[LldpNeighbor](items=items, errors=errors)
 
     async def interfaces(self, devices: list[str] | None = None) -> Collection[Interface]:
-        items, errors = await self.collect(devices, lambda platform: platform.interfaces())
+        items, errors = await self.collect(devices, "interfaces")
         return Collection[Interface](items=items, errors=errors)
 
     async def mac_table(self, devices: list[str] | None = None) -> Collection[MacEntry]:
-        items, errors = await self.collect(devices, lambda platform: platform.mac_table())
+        items, errors = await self.collect(devices, "mac_table")
         return Collection[MacEntry](items=items, errors=errors)
 
     async def arp_table(self, devices: list[str] | None = None) -> Collection[ArpEntry]:
-        items, errors = await self.collect(devices, lambda platform: platform.arp_table())
+        items, errors = await self.collect(devices, "arp_table")
         return Collection[ArpEntry](items=items, errors=errors)
 
     async def routes(self, devices: list[str] | None = None, network_instance: str = "default") -> Collection[Route]:
-        items, errors = await self.collect(devices, lambda platform: platform.routes(network_instance))
+        items, errors = await self.collect(devices, "routes", network_instance)
         return Collection[Route](items=items, errors=errors)
 
     async def bgp_sessions(self, devices: list[str] | None = None) -> Collection[BgpSession]:
-        items, errors = await self.collect(devices, lambda platform: platform.bgp_sessions())
+        items, errors = await self.collect(devices, "bgp_sessions")
         return Collection[BgpSession](items=items, errors=errors)
 
     async def ospf_neighbors(self, devices: list[str] | None = None) -> Collection[OspfNeighbor]:
-        items, errors = await self.collect(devices, lambda platform: platform.ospf_neighbors())
+        items, errors = await self.collect(devices, "ospf_neighbors")
         return Collection[OspfNeighbor](items=items, errors=errors)
 
     async def ospf_interfaces(self, devices: list[str] | None = None) -> OspfInterfaces:
         """The OSPF interfaces, and the settings that keep routers sharing a network from being neighbors."""
         (items, ospf_errors), (found, interface_errors) = await asyncio.gather(
-            self.collect(devices, lambda platform: platform.ospf_interfaces()),
-            self.collect(devices, optional(lambda platform: platform.interfaces())),
+            self.collect(devices, "ospf_interfaces"),
+            self.collect(devices, "interfaces", optional=True),
         )
         return OspfInterfaces(items=items, errors=once(ospf_errors + interface_errors), mismatches=ospf_mismatches(found, items))
 
@@ -182,10 +241,10 @@ class Engine:
     async def layer2(self) -> tuple[Topology, list[Interface]]:
         """The layer 2 graph, and every device's interfaces, which layer 3 and the path walk need too."""
         (neighbors, lldp_errors), (bindings, arp_errors), (macs, mac_errors), (found, interface_errors) = await asyncio.gather(
-            self.collect(None, lambda platform: platform.lldp_neighbors()),
-            self.collect(None, lambda platform: platform.arp_table()),
-            self.collect(None, optional(lambda platform: platform.mac_table())),
-            self.collect(None, optional(lambda platform: platform.interfaces())),
+            self.collect(None, "lldp_neighbors"),
+            self.collect(None, "arp_table"),
+            self.collect(None, "mac_table", optional=True),
+            self.collect(None, "interfaces", optional=True),
         )
         errors = once(lldp_errors + arp_errors + mac_errors + interface_errors)
         return build_topology(self.devices(), neighbors, bindings, errors, self.is_management, macs, found), found
@@ -197,8 +256,8 @@ class Engine:
         if layer == "l3":
             return build_l3(self.devices(), topology, found, self.is_management, network_instance)
         (ospf, interface_errors), (heard, neighbor_errors) = await asyncio.gather(
-            self.collect(None, lambda platform: platform.ospf_interfaces()),
-            self.collect(None, lambda platform: platform.ospf_neighbors()),
+            self.collect(None, "ospf_interfaces"),
+            self.collect(None, "ospf_neighbors"),
         )
         errors = once(topology.errors + interface_errors + neighbor_errors)
         return build_ospf(self.devices(), found, ospf, heard, errors, network_instance)
@@ -212,7 +271,7 @@ class Engine:
     ) -> tuple[Topology, list[Interface], ForwardingPath]:
         """Trace a path, returning the layer 2 graph it was traced on, and the interfaces, as well."""
         (topology, found), (routes, failures) = await asyncio.gather(
-            self.layer2(), self.collect(None, lambda platform: platform.routes(network_instance))
+            self.layer2(), self.collect(None, "routes", network_instance)
         )
         tables: dict[str, list[Route]] = {}
         for route in routes:
@@ -273,7 +332,7 @@ class Engine:
         known = {device.name for device in self.inventory.devices}
         if ends[0] not in known:
             ends.reverse()
-        neighbors, _ = await self.collect([ends[0]], lambda platform: platform.lldp_neighbors())
+        neighbors, _ = await self.collect([ends[0]], "lldp_neighbors")
         ports = [neighbor.interface for neighbor in neighbors if neighbor.neighbor == ends[1]]
         if not ports:
             raise ChartError(f"LLDP shows no link from {ends[0]} to {ends[1]}. Name a port as device:port instead.")
