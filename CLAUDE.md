@@ -30,6 +30,7 @@ netgpt-chat --inventory lab/inventory.yml --model gemma4:e4b --ollama http://127
 netgpt-chat ... --web 127.0.0.1:8080    # sign-in token from $NETGPT_WEB_TOKEN, or printed
 netgpt-chat ... --poll-interval 10      # interface counters every 10 s (default 30; 0 turns polling off)
 netgpt-chat ... --store postgresql://netgpt@127.0.0.1:5432/netgpt   # keep them in TimescaleDB, across restarts
+netgpt-schema --out schema/netgpt.schema.json   # rewrite the contract after changing a record NetGPT sends
 python lab/record_fixtures.py           # re-record the lab's responses as test fixtures
 python lab/record_junos.py --inventory I --rename R   # record Junos devices' replies as renamed fixtures
 python lab/gremlin.py break|reveal|repair|check   # break one thing in the lab on purpose, and put it back
@@ -52,6 +53,7 @@ python lab/game.py --lab wan --anywhere ...       # each fault at a random one o
 - `src/netgpt/views.py`: turns the model's choices into a `View` of the graph. `describe` is the text the model reads back.
 - `src/netgpt/server.py`: the MCP tools. `display` exists only when `build_server(display=True)`.
 - `src/netgpt/chat.py`, `web.py`: the Ollama tool loop, and the web page's server.
+- `src/netgpt/contract.py`: the records NetGPT sends outside itself (views, charts, traffic, the primitives), and their JSON Schema. `schema/netgpt.schema.json` is the repository's copy, for other repositories to read.
 - `src/netgpt/static/`: the page. `map.js` is the map on vendored d3-force, with each link's traffic, and `chart.js` draws charts in the conversation and the map's inspector.
 - `lab/`: the containerlab lab (SR Linux spine, two leaves, a bridging switch, Linux hosts) and its inventory.
 - `lab/wan/`: the WAN lab: three sites (HQ, Ops, a branch) on 25G, 10G, and 1G links, routed by OSPF, with its own inventory.
@@ -97,6 +99,8 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **Junos fixtures** (`tests/fixtures/junos/`) are real switches' replies: a QFX5120 core and two EX4400 office switches, recorded by `lab/record_junos.py` through the real driver. `replies.json` says which RPC each file answers, and `test_junos.Replay` replays them.
   - **The repository is public, and the switches are real.** The recorder replaces every name and address listed in a YAML file kept outside the repository, and blanks serial numbers. Audit the fixtures before committing: LLDP on a management port carries the neighbor's management address, model, and software version.
 - **WAN fixtures** (`tests/fixtures/srlinux/wan/`) are the WAN lab's tables, OSPF included, and `fakes.recorded_wan()` parses them through the real driver. The OSPF view's failures (areas, MTUs, a passive or one-way end, and how the other interfaces are set) are tested on synthetic routers in `test_ospf.py`.
+- **The contract:** `tests/test_contract.py` keeps `schema/netgpt.schema.json` equal to what `netgpt-schema` writes, and checks what NetGPT sends against it: every tool's answer through MCP, the page's traffic and charts, views of both recorded labs, and the Juniper switches' tables. A tool that answers with a record the contract doesn't name fails it.
+  - After changing a record, rewrite the schema and read its diff: it is what the other repositories see change. A changed version in `pyproject.toml` reaches the schema only after `pip install -e`, since the version is read from the installed package.
 - **Synthetic networks:** `fakes.SwitchedNetwork` is a small routed network with a switch. `FakePlatform` backs the server, chat, and web tests. `ScriptedOllama` stands in for the model.
 - **Stores:** `tests/test_store.py` holds what every store must do, and runs it against each kind, rollups included: `MemoryStore` rolls up in Python and TimescaleDB in SQL, to the same answers. The TimescaleDB store is tested only when `NETGPT_TEST_STORE` names a database the tests may write to; each test makes a schema of its own and drops it. Its rollups are read in real time, so a test sees rows TimescaleDB hasn't stored in them yet.
   - **The tests' samples are stamped from 2100** (`START`), where TimescaleDB's jobs never reach. Stamped from 1970, a fresh database's retention job dropped them mid-test, every time. The dev container's `netgpt_test` runs no job scheduler, so it never showed; CI's fresh database does.
@@ -259,6 +263,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
     - **The page stays here.** Of the 9 commits that changed `static/` from the rewrite to v0.4.0, 7 changed the tools or the engine too: one computation, given to the model as text and to the page as the view. It moves out only when it needs a build step, something other than NetGPT's server has to serve it, or it talks to more than one backend.
     - **Fine-tuning** (the model lever) gets a repository when it starts: another toolchain, and it reads the game's transcripts as data, not code. The game stays here, since each round is marked with NetGPT's commit.
   - Phase 1: the contract. JSON Schema for every record NetGPT sends outside itself (views, charts, traffic, and the primitives the tools return), written from the pydantic models, checked in, versioned with the package, and kept equal to the code by a test.
+    - Phase 1 is done: `netgpt.contract` and `schema/netgpt.schema.json`, 25 records. `/api/traffic`'s answer became a model (`Traffic`) to be one of them. The schema is pydantic's serialization schema with every property required, since each is sent (null when empty). A multi-device result is described in the schema's description (`items` and `errors`), not as a record of its own, and the page's conversation stream stays the page's own, outside the contract.
   - Phase 2: a read API: views and traffic without a conversation, behind the page's token. The page's map reads it too.
   - Phase 3: xspace draws the lab from that API, with types generated from the schema in place of its protobuf stubs.
 - **Known gaps:**

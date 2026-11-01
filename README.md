@@ -219,6 +219,18 @@ To record new fixtures from Junos devices, list them in an inventory, and list e
 python lab/record_junos.py --inventory my-junos.yml --rename my-renames.yml
 ```
 
+## The schema
+
+[`schema/netgpt.schema.json`](schema/netgpt.schema.json) is the JSON Schema of every record NetGPT sends outside itself: the views the map draws, charts and the map's traffic, and the records the tools return, each under `$defs` by name. It is for programs that read NetGPT without being written in Python, such as a frontend in another repository: generate types from it instead of writing them by hand. Every property is always sent, so the schema marks every one required, and one that can be empty is null. Its `version` is the NetGPT version that wrote it.
+
+`netgpt-schema` writes it from the same pydantic models that make the records, and a test fails when the repository's copy and the code differ, so a change to what NetGPT sends shows up in a diff:
+
+```bash
+netgpt-schema --out schema/netgpt.schema.json
+```
+
+Over MCP, each tool also publishes its own output schema, from the same models.
+
 ## Legacy web app (v0.3)
 
 The original 2023 NetGPT, a React chat interface and a FastAPI backend built on OpenAI's first function-calling API, with Keycloak authentication, is kept for reference at the tag [`v0.3.6g`](https://github.com/KennethGrace/NetGPT/tree/v0.3.6g). **Do not deploy it:** the v0.3 API accepts requests with any bearer token, because token validation errors are logged but never rejected.

@@ -23,13 +23,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# jsonschema checks that what NetGPT sends matches its published schema.
+dev = ["pytest>=8", "jsonschema>=4.18"]
 # The TimescaleDB (PostgreSQL) store for statistics: --store postgresql://...
 store = ["psycopg[binary,pool]>=3.2"]
 
 [project.scripts]
 netgpt-mcp = "netgpt.server:main"
 netgpt-chat = "netgpt.chat:main"
+netgpt-schema = "netgpt.contract:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/netgpt"]

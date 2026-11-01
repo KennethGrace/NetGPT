@@ -1,0 +1,1897 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NetGPT",
+  "description": "Every record NetGPT sends outside itself, in the shape it sends them: the views the page's map draws, charts and the map's traffic, and the records the tools return. Each record is under $defs, by name. Every property is always sent; one that can be empty is null then. A tool that asks several devices returns {\"items\": [records], \"errors\": [DeviceError]}, so one device's failure leaves the rest of the answer.",
+  "version": "0.4.0",
+  "$defs": {
+    "ArpEntry": {
+      "description": "One ARP binding between an IPv4 address and a MAC address on an interface.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "interface": {
+          "title": "Interface",
+          "type": "string"
+        },
+        "ip_address": {
+          "title": "Ip Address",
+          "type": "string"
+        },
+        "mac": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mac"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For example dynamic or static.",
+          "title": "Origin"
+        }
+      },
+      "required": [
+        "device",
+        "interface",
+        "ip_address",
+        "mac",
+        "origin"
+      ],
+      "title": "ArpEntry",
+      "type": "object"
+    },
+    "BgpSession": {
+      "description": "One BGP session, as the device that has it configured reports it: who it peers\nwith, from which address, and how far it got. A session that isn't Established\nexchanges no routes.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "network_instance": {
+          "title": "Network Instance",
+          "type": "string"
+        },
+        "peer_address": {
+          "title": "Peer Address",
+          "type": "string"
+        },
+        "peer_as": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Peer As"
+        },
+        "local_address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The address the device sends from: configured, or chosen when the session came up.",
+          "title": "Local Address"
+        },
+        "local_as": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Local As"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
+        },
+        "state": {
+          "description": "Established when the session is up. Otherwise how far it got: Idle (not trying), Connect or Active (trying to open a TCP connection to the peer, and failing: Active does not mean up), OpenSent, OpenConfirm.",
+          "title": "State",
+          "type": "string"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Error"
+        },
+        "flags": {
+          "description": "The device's own notes on the session, as it spells them.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Flags",
+          "type": "array"
+        },
+        "families": {
+          "description": "The address families it carries, for example inet-unicast or evpn.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Families",
+          "type": "array"
+        },
+        "flaps": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many times it has gone down.",
+          "title": "Flaps"
+        },
+        "received_prefixes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Received Prefixes"
+        },
+        "active_prefixes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many of the received prefixes are the best route, and in use.",
+          "title": "Active Prefixes"
+        }
+      },
+      "required": [
+        "device",
+        "network_instance",
+        "peer_address",
+        "peer_as",
+        "local_address",
+        "local_as",
+        "group",
+        "state",
+        "last_error",
+        "flags",
+        "families",
+        "flaps",
+        "received_prefixes",
+        "active_prefixes"
+      ],
+      "title": "BgpSession",
+      "type": "object"
+    },
+    "Chart": {
+      "description": "A few ports' rates over the last minutes, for the page to draw and keep up to date.",
+      "properties": {
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "metric": {
+          "enum": [
+            "traffic",
+            "percent",
+            "errors"
+          ],
+          "title": "Metric",
+          "type": "string"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        },
+        "minutes": {
+          "title": "Minutes",
+          "type": "number"
+        },
+        "interval": {
+          "description": "Seconds between polls: how often the chart has something new.",
+          "title": "Interval",
+          "type": "number"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds each point covers when the window is read from rollups; none when each is one poll's.",
+          "title": "Step"
+        },
+        "ports": {
+          "description": "The ports charted, as device:port, in the order they are colored.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ports",
+          "type": "array"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/ChartLine"
+          },
+          "title": "Lines",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "metric",
+        "unit",
+        "minutes",
+        "interval",
+        "step",
+        "ports",
+        "lines"
+      ],
+      "title": "Chart",
+      "type": "object"
+    },
+    "ChartLine": {
+      "description": "One line on a chart: one port's traffic, utilization, or errors, one way.",
+      "properties": {
+        "port": {
+          "description": "The device and port, as device:port.",
+          "title": "Port",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "in",
+            "out"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "points": {
+          "description": "(time, value) at the end of each interval between polls; time in seconds since the epoch.",
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Points",
+          "type": "array"
+        }
+      },
+      "required": [
+        "port",
+        "direction",
+        "points"
+      ],
+      "title": "ChartLine",
+      "type": "object"
+    },
+    "CommandOutput": {
+      "description": "The raw text output of a read-only CLI command.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "output": {
+          "title": "Output",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "device",
+        "command",
+        "output",
+        "truncated"
+      ],
+      "title": "CommandOutput",
+      "type": "object"
+    },
+    "DeviceError": {
+      "description": "A failure on one device during a multi-device query.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "error": {
+          "title": "Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device",
+        "error"
+      ],
+      "title": "DeviceError",
+      "type": "object"
+    },
+    "DeviceInfo": {
+      "description": "A device in the inventory, as the model is allowed to see it (no credentials).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        }
+      },
+      "required": [
+        "name",
+        "platform",
+        "host",
+        "role"
+      ],
+      "title": "DeviceInfo",
+      "type": "object"
+    },
+    "ForwardingPath": {
+      "description": "The path packets take from a source to a destination, read from each device's routing table.",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "destination": {
+          "title": "Destination",
+          "type": "string"
+        },
+        "network_instance": {
+          "title": "Network Instance",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "delivered",
+            "no_route",
+            "dropped",
+            "loop",
+            "unresolved",
+            "left_inventory",
+            "unreadable"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "detail": {
+          "description": "What happened, in a sentence or two.",
+          "title": "Detail",
+          "type": "string"
+        },
+        "hops": {
+          "items": {
+            "$ref": "#/$defs/Hop"
+          },
+          "title": "Hops",
+          "type": "array"
+        },
+        "nodes": {
+          "description": "Every node on the path, shared segments included, in order.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "links": {
+          "description": "The topology links the path uses.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "trouble": {
+          "description": "The nodes where the path, or a branch of it, is lost.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Trouble",
+          "type": "array"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/DeviceError"
+          },
+          "title": "Errors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "source",
+        "destination",
+        "network_instance",
+        "outcome",
+        "detail",
+        "hops",
+        "nodes",
+        "links",
+        "trouble",
+        "errors"
+      ],
+      "title": "ForwardingPath",
+      "type": "object"
+    },
+    "Hop": {
+      "description": "One node on a forwarding path, and what it does with the packet.",
+      "properties": {
+        "node": {
+          "description": "The node's ID in the topology.",
+          "title": "Node",
+          "type": "string"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Route"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The route that matched on this device. None for hosts and switches."
+        },
+        "interfaces": {
+          "description": "The interfaces the packet leaves by.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "next": {
+          "description": "The next nodes; more than one for equal-cost paths.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Next",
+          "type": "array"
+        },
+        "note": {
+          "description": "What happens here, in a few words.",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "route",
+        "interfaces",
+        "next",
+        "note"
+      ],
+      "title": "Hop",
+      "type": "object"
+    },
+    "Interface": {
+      "description": "One logical interface (a subinterface on most platforms): the network instance it\nbelongs to, whether it routes or bridges, and its addresses.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "name": {
+          "description": "For example ethernet-1/1.0 or GigabitEthernet0/1.",
+          "title": "Name",
+          "type": "string"
+        },
+        "network_instance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The VRF, or the layer 2 network instance (bridge), it belongs to.",
+          "title": "Network Instance"
+        },
+        "mode": {
+          "description": "routed: it has addresses and routes packets. bridged: it switches frames in a layer 2 network instance.",
+          "enum": [
+            "routed",
+            "bridged"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "addresses": {
+          "description": "IPv4 and IPv6 addresses with prefix length, such as 192.168.12.1/24 or fd00::1/128. Link-local addresses are left out.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Addresses",
+          "type": "array"
+        },
+        "oper_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For example up or down.",
+          "title": "Oper State"
+        }
+      },
+      "required": [
+        "device",
+        "name",
+        "network_instance",
+        "mode",
+        "addresses",
+        "oper_state"
+      ],
+      "title": "Interface",
+      "type": "object"
+    },
+    "InterfaceTraffic": {
+      "description": "One port's traffic and errors over the last minutes, worked out from the counters\nNetGPT polls: the latest rates, the busiest interval's, and what was counted.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "interface": {
+          "title": "Interface",
+          "type": "string"
+        },
+        "oper_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Oper State"
+        },
+        "speed": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The port's speed, for example 25G.",
+          "title": "Speed"
+        },
+        "minutes": {
+          "description": "How far back the figures go: less than asked for if polling began more recently.",
+          "title": "Minutes",
+          "type": "number"
+        },
+        "in_mbps": {
+          "description": "Megabits per second received, between the latest two polls.",
+          "title": "In Mbps",
+          "type": "number"
+        },
+        "out_mbps": {
+          "description": "Megabits per second sent, between the latest two polls.",
+          "title": "Out Mbps",
+          "type": "number"
+        },
+        "in_percent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "in_mbps as a percent of the port's speed.",
+          "title": "In Percent"
+        },
+        "out_percent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "out_mbps as a percent of the port's speed.",
+          "title": "Out Percent"
+        },
+        "average_in_mbps": {
+          "description": "Megabits per second received, averaged over the window.",
+          "title": "Average In Mbps",
+          "type": "number"
+        },
+        "average_out_mbps": {
+          "description": "Megabits per second sent, averaged over the window.",
+          "title": "Average Out Mbps",
+          "type": "number"
+        },
+        "peak_in_mbps": {
+          "description": "The highest in_mbps between any two polls in the window.",
+          "title": "Peak In Mbps",
+          "type": "number"
+        },
+        "peak_out_mbps": {
+          "description": "The highest out_mbps between any two polls in the window.",
+          "title": "Peak Out Mbps",
+          "type": "number"
+        },
+        "in_errors": {
+          "description": "Packets received with errors, over the window.",
+          "title": "In Errors",
+          "type": "integer"
+        },
+        "out_errors": {
+          "description": "Packets that failed to send, over the window.",
+          "title": "Out Errors",
+          "type": "integer"
+        },
+        "in_discards": {
+          "description": "Received packets dropped without an error, for example for lack of buffer, over the window.",
+          "title": "In Discards",
+          "type": "integer"
+        },
+        "out_discards": {
+          "description": "Packets dropped instead of sent, over the window.",
+          "title": "Out Discards",
+          "type": "integer"
+        },
+        "flaps": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many times the link went up or down, over the window.",
+          "title": "Flaps"
+        }
+      },
+      "required": [
+        "device",
+        "interface",
+        "oper_state",
+        "speed",
+        "minutes",
+        "in_mbps",
+        "out_mbps",
+        "in_percent",
+        "out_percent",
+        "average_in_mbps",
+        "average_out_mbps",
+        "peak_in_mbps",
+        "peak_out_mbps",
+        "in_errors",
+        "out_errors",
+        "in_discards",
+        "out_discards",
+        "flaps"
+      ],
+      "title": "InterfaceTraffic",
+      "type": "object"
+    },
+    "LinkEnd": {
+      "description": "One end of a link: a node, and the interface on it when one is known.",
+      "properties": {
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interface"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "At layer 3, this end's address with prefix length.",
+          "title": "Address"
+        },
+        "bridges": {
+          "description": "At layer 2, the bridges (layer 2 network instances) this port switches in.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Bridges",
+          "type": "array"
+        },
+        "area": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "In the OSPF view, the area this end's interface is in.",
+          "title": "Area"
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "In the OSPF view, this end's cost to send across the link.",
+          "title": "Cost"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "In the OSPF view, the adjacency's state as this end sees it; none if it doesn't hear the other end.",
+          "title": "State"
+        }
+      },
+      "required": [
+        "node",
+        "interface",
+        "address",
+        "bridges",
+        "area",
+        "cost",
+        "state"
+      ],
+      "title": "LinkEnd",
+      "type": "object"
+    },
+    "LldpNeighbor": {
+      "description": "One LLDP adjacency: a local interface and the remote system and port it sees.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "interface": {
+          "title": "Interface",
+          "type": "string"
+        },
+        "neighbor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The remote system name.",
+          "title": "Neighbor"
+        },
+        "neighbor_interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The remote port ID.",
+          "title": "Neighbor Interface"
+        },
+        "neighbor_chassis_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Neighbor Chassis Id"
+        }
+      },
+      "required": [
+        "device",
+        "interface",
+        "neighbor",
+        "neighbor_interface",
+        "neighbor_chassis_id"
+      ],
+      "title": "LldpNeighbor",
+      "type": "object"
+    },
+    "MacEntry": {
+      "description": "One entry in a layer 2 forwarding database (MAC table).",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "network_instance": {
+          "title": "Network Instance",
+          "type": "string"
+        },
+        "mac": {
+          "title": "Mac",
+          "type": "string"
+        },
+        "interface": {
+          "title": "Interface",
+          "type": "string"
+        },
+        "entry_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For example learned, static, or irb-interface.",
+          "title": "Entry Type"
+        }
+      },
+      "required": [
+        "device",
+        "network_instance",
+        "mac",
+        "interface",
+        "entry_type"
+      ],
+      "title": "MacEntry",
+      "type": "object"
+    },
+    "NextHop": {
+      "description": "Where a route sends a packet.",
+      "properties": {
+        "address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The next router's address; none for a directly connected network.",
+          "title": "Address"
+        },
+        "interface": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The interface the packet leaves by, when the device names it.",
+          "title": "Interface"
+        },
+        "action": {
+          "default": "forward",
+          "description": "receive: the packet is for the device itself. drop: it is discarded.",
+          "enum": [
+            "forward",
+            "receive",
+            "drop"
+          ],
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "address",
+        "interface",
+        "action"
+      ],
+      "title": "NextHop",
+      "type": "object"
+    },
+    "OspfInterface": {
+      "description": "An interface a router runs OSPF on: the area it is in, and the settings both\nends of a link must agree on before they become neighbors.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "network_instance": {
+          "title": "Network Instance",
+          "type": "string"
+        },
+        "router_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "This router's OSPF router ID.",
+          "title": "Router Id"
+        },
+        "area": {
+          "description": "The area, for example 0.0.0.0. Both ends of a link must be in the same one.",
+          "title": "Area",
+          "type": "string"
+        },
+        "interface": {
+          "title": "Interface",
+          "type": "string"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Address"
+        },
+        "network_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "point-to-point or broadcast. Both ends of a link must agree.",
+          "title": "Network Type"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its OSPF state: point-to-point, designated-router, backup-designated-router, dr-other, waiting, or down.",
+          "title": "State"
+        },
+        "area_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "normal, stub, or nssa. Every router in an area must agree: hellos carry the area's type, and two routers whose types differ are never neighbors.",
+          "title": "Area Type"
+        },
+        "passive": {
+          "default": false,
+          "description": "Passive: OSPF advertises the network but sends no hellos and forms no adjacency on it.",
+          "title": "Passive",
+          "type": "boolean"
+        },
+        "authentication": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How it authenticates OSPF packets: none, or its keychain's algorithm, such as md5. Both ends of a link must agree, and share a key, which NetGPT never reads.",
+          "title": "Authentication"
+        },
+        "keychain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The keychain it authenticates with, if it does.",
+          "title": "Keychain"
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "This end's cost to send out of the interface. Each direction of a link has its own.",
+          "title": "Cost"
+        },
+        "hello_interval": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds between hellos. Both ends of a link must agree, as on the dead interval.",
+          "title": "Hello Interval"
+        },
+        "dead_interval": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dead Interval"
+        },
+        "mtu": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The MTU OSPF advertises. When the two ends differ, their adjacency sticks in exstart.",
+          "title": "Mtu"
+        },
+        "neighbors": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many neighbors it hears.",
+          "title": "Neighbors"
+        },
+        "designated_router": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "On a broadcast network, the router ID of the designated router.",
+          "title": "Designated Router"
+        },
+        "backup_designated_router": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backup Designated Router"
+        }
+      },
+      "required": [
+        "device",
+        "network_instance",
+        "router_id",
+        "area",
+        "interface",
+        "address",
+        "network_type",
+        "state",
+        "area_type",
+        "passive",
+        "authentication",
+        "keychain",
+        "cost",
+        "hello_interval",
+        "dead_interval",
+        "mtu",
+        "neighbors",
+        "designated_router",
+        "backup_designated_router"
+      ],
+      "title": "OspfInterface",
+      "type": "object"
+    },
+    "OspfInterfaces": {
+      "description": "Every OSPF interface the devices reported, and what keeps routers that share a network from being neighbors.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/OspfInterface"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/DeviceError"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "mismatches": {
+          "description": "For each network two of these routers share: each setting their ends disagree on, which keeps them from becoming neighbors, with how the other OSPF interfaces that aren't passive are set; and an end that is passive. Empty when every pair agrees.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Mismatches",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "errors",
+        "mismatches"
+      ],
+      "title": "OspfInterfaces",
+      "type": "object"
+    },
+    "OspfNeighbor": {
+      "description": "An OSPF neighbor, as one router sees it on one of its interfaces.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "network_instance": {
+          "title": "Network Instance",
+          "type": "string"
+        },
+        "area": {
+          "title": "Area",
+          "type": "string"
+        },
+        "interface": {
+          "description": "This router's interface that hears the neighbor.",
+          "title": "Interface",
+          "type": "string"
+        },
+        "router_id": {
+          "description": "The neighbor's router ID.",
+          "title": "Router Id",
+          "type": "string"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The neighbor's address on the link.",
+          "title": "Address"
+        },
+        "state": {
+          "description": "full: the adjacency is complete, and routes are exchanged. 2-way: normal between two routers that are neither DR nor BDR on a broadcast network, but no adjacency anywhere else. init: this router hears the neighbor, but the neighbor doesn't hear it. exstart or exchange that doesn't move on: usually the two ends' MTUs differ. down: its hellos stopped.",
+          "title": "State",
+          "type": "string"
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priority"
+        },
+        "dead_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds left before it is declared down, unless it says hello again.",
+          "title": "Dead Seconds"
+        },
+        "uptime_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How long the adjacency has been up.",
+          "title": "Uptime Seconds"
+        },
+        "state_changes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many times its state has changed. A count that keeps climbing is a flap.",
+          "title": "State Changes"
+        }
+      },
+      "required": [
+        "device",
+        "network_instance",
+        "area",
+        "interface",
+        "router_id",
+        "address",
+        "state",
+        "priority",
+        "dead_seconds",
+        "uptime_seconds",
+        "state_changes"
+      ],
+      "title": "OspfNeighbor",
+      "type": "object"
+    },
+    "PingResult": {
+      "description": "The outcome of ICMP echo requests from a source to one destination.",
+      "properties": {
+        "source": {
+          "description": "The device that sent the pings, or 'netgpt' for the server itself.",
+          "title": "Source",
+          "type": "string"
+        },
+        "destination": {
+          "title": "Destination",
+          "type": "string"
+        },
+        "sent": {
+          "title": "Sent",
+          "type": "integer"
+        },
+        "received": {
+          "title": "Received",
+          "type": "integer"
+        },
+        "rtt_avg_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rtt Avg Ms"
+        }
+      },
+      "required": [
+        "source",
+        "destination",
+        "sent",
+        "received",
+        "rtt_avg_ms"
+      ],
+      "title": "PingResult",
+      "type": "object"
+    },
+    "Route": {
+      "description": "One route in a routing table, IPv4 or IPv6.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "network_instance": {
+          "title": "Network Instance",
+          "type": "string"
+        },
+        "prefix": {
+          "title": "Prefix",
+          "type": "string"
+        },
+        "protocol": {
+          "description": "The route owner, for example local, static, ospfv2, or bgp.",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "next_hops": {
+          "items": {
+            "$ref": "#/$defs/NextHop"
+          },
+          "title": "Next Hops",
+          "type": "array"
+        },
+        "active": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "preference": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preference"
+        }
+      },
+      "required": [
+        "device",
+        "network_instance",
+        "prefix",
+        "protocol",
+        "next_hops",
+        "active",
+        "metric",
+        "preference"
+      ],
+      "title": "Route",
+      "type": "object"
+    },
+    "Topology": {
+      "description": "The network as a graph at one layer. Devices that could not be queried are listed in errors.",
+      "properties": {
+        "layer": {
+          "default": "l2",
+          "enum": [
+            "l2",
+            "l3",
+            "ospf"
+          ],
+          "title": "Layer",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/TopologyNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/TopologyLink"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/DeviceError"
+          },
+          "title": "Errors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "layer",
+        "nodes",
+        "links",
+        "errors"
+      ],
+      "title": "Topology",
+      "type": "object"
+    },
+    "TopologyLink": {
+      "description": "A cable seen by LLDP, an attachment seen by ARP, or a network two routers share.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "a": {
+          "$ref": "#/$defs/LinkEnd"
+        },
+        "b": {
+          "$ref": "#/$defs/LinkEnd"
+        },
+        "plane": {
+          "enum": [
+            "data",
+            "management"
+          ],
+          "title": "Plane",
+          "type": "string"
+        },
+        "subnet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "At layer 3, the network a link between two routers is.",
+          "title": "Subnet"
+        },
+        "one_sided": {
+          "default": false,
+          "description": "Only one end reported this link, though both ends were asked.",
+          "title": "One Sided",
+          "type": "boolean"
+        },
+        "problems": {
+          "description": "In the OSPF view, why the link has no full adjacency, or what its two ends disagree on.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Problems",
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "a",
+        "b",
+        "plane",
+        "subnet",
+        "one_sided",
+        "problems",
+        "evidence"
+      ],
+      "title": "TopologyLink",
+      "type": "object"
+    },
+    "TopologyNode": {
+      "description": "A device, an LLDP neighbor outside the inventory, a host found by ARP, a shared segment, or an IP network.",
+      "properties": {
+        "id": {
+          "description": "How to name the node: a device or system name, a host's IPv4 address, a segment ID, or a network.",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "device",
+            "neighbor",
+            "host",
+            "segment",
+            "subnet"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "plane": {
+          "anyOf": [
+            {
+              "enum": [
+                "data",
+                "management"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The plane a host, neighbor, segment, or network is on. None for inventory devices: they are on both.",
+          "title": "Plane"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Platform"
+        },
+        "addresses": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Addresses",
+          "type": "array"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why the device could not be fully queried.",
+          "title": "Error"
+        },
+        "router_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "In the OSPF view, the router's OSPF router ID.",
+          "title": "Router Id"
+        },
+        "areas": {
+          "description": "In the OSPF view, the areas the router is in. More than one is an area border router.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Areas",
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "plane",
+        "role",
+        "platform",
+        "addresses",
+        "error",
+        "router_id",
+        "areas",
+        "evidence"
+      ],
+      "title": "TopologyNode",
+      "type": "object"
+    },
+    "Traffic": {
+      "description": "Every polled port's latest traffic and recent errors, which the page's map asks for again every poll.",
+      "properties": {
+        "interval": {
+          "description": "Seconds between polls: how often there is something new.",
+          "title": "Interval",
+          "type": "number"
+        },
+        "minutes": {
+          "description": "How far back the errors, discards, flaps, and averages go.",
+          "title": "Minutes",
+          "type": "number"
+        },
+        "ports": {
+          "items": {
+            "$ref": "#/$defs/InterfaceTraffic"
+          },
+          "title": "Ports",
+          "type": "array"
+        }
+      },
+      "required": [
+        "interval",
+        "minutes",
+        "ports"
+      ],
+      "title": "Traffic",
+      "type": "object"
+    },
+    "View": {
+      "description": "A drawing of the network: the graph on one plane, with what the model chose to\nshow. Every node and link has an emphasis: focus (what the view is about), near\n(one hop from the focus), or context (everything else, kept on screen but\npushed aside). With nothing focused, the whole graph is in focus.",
+      "properties": {
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "layer": {
+          "default": "l2",
+          "enum": [
+            "l2",
+            "l3",
+            "ospf"
+          ],
+          "title": "Layer",
+          "type": "string"
+        },
+        "plane": {
+          "enum": [
+            "data",
+            "management",
+            "all"
+          ],
+          "title": "Plane",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/TopologyNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/TopologyLink"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "emphasis": {
+          "additionalProperties": {
+            "enum": [
+              "focus",
+              "near",
+              "context"
+            ],
+            "type": "string"
+          },
+          "description": "The emphasis of every node and link, by ID.",
+          "title": "Emphasis",
+          "type": "object"
+        },
+        "highlight": {
+          "description": "IDs of the highlighted nodes and links.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Highlight",
+          "type": "array"
+        },
+        "notes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Notes on nodes and links, by ID.",
+          "title": "Notes",
+          "type": "object"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForwardingPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The forwarding path the view shows, if it shows one."
+        },
+        "trouble": {
+          "description": "IDs of the nodes where the path is lost.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Trouble",
+          "type": "array"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/DeviceError"
+          },
+          "title": "Errors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "layer",
+        "plane",
+        "nodes",
+        "links",
+        "emphasis",
+        "highlight",
+        "notes",
+        "path",
+        "trouble",
+        "errors"
+      ],
+      "title": "View",
+      "type": "object"
+    }
+  }
+}
