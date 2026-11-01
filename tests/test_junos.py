@@ -9,7 +9,6 @@ after it came up.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -19,25 +18,9 @@ from netgpt.inventory import Credentials, Device, Inventory, InventoryError
 from netgpt.platforms.base import PlatformError
 from netgpt.platforms.junos import CLI_HINT, JunosPlatform
 
-FIXTURES = Path(__file__).parent / "fixtures" / "junos"
+from fakes import JUNOS_FIXTURES, NetconfReplay
 
 pytestmark = pytest.mark.anyio
-
-
-class Replay:
-    """A NETCONF session that answers each RPC with the reply recorded for it, and keeps what was asked."""
-
-    def __init__(self, device: str) -> None:
-        self.folder = FIXTURES / device
-        self.replies: dict[str, str] = json.loads((self.folder / "replies.json").read_text())
-        self.asked: list[str] = []
-
-    async def rpc(self, body: str) -> str:
-        self.asked.append(body)
-        return (self.folder / self.replies[body]).read_text()
-
-    async def close(self) -> None:
-        pass
 
 
 class Scripted:
@@ -53,8 +36,8 @@ class Scripted:
         pass
 
 
-def junos(device: str, session: Replay | Scripted | None = None) -> tuple[JunosPlatform, Replay | Scripted]:
-    session = session or Replay(device)
+def junos(device: str, session: NetconfReplay | Scripted | None = None) -> tuple[JunosPlatform, NetconfReplay | Scripted]:
+    session = session or NetconfReplay(device)
     info = Device(name=device, host="192.0.2.1", platform="juniper_junos", credentials="lab")
     return JunosPlatform(info, Credentials(username="netgpt", password_env="UNUSED"), session=session), session
 
@@ -151,7 +134,7 @@ async def test_bgp_sessions_say_who_each_peers_with_from_where_and_how_far_it_go
 
 
 async def test_an_established_session_counts_each_prefix_once_where_it_arrived() -> None:
-    reply = (FIXTURES / "core-bgp-established.xml").read_text()
+    reply = (JUNOS_FIXTURES / "core-bgp-established.xml").read_text()
     platform, _ = junos("core", Scripted(reply))
     south, north = await platform.bgp_sessions()
     # The TCP port is not part of the address.
