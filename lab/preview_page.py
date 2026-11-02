@@ -141,7 +141,8 @@ class ScriptedModel:
 
 async def run(args: argparse.Namespace) -> None:
     inventory = Inventory.load(args.inventory)
-    engine = Engine(inventory, statistics=Poller(inventory, interval=args.poll_interval))
+    statistics = Poller(inventory, interval=args.poll_interval) if args.poll_interval > 0 else None
+    engine = Engine(inventory, statistics=statistics)
     model = ScriptedModel(args.pace)
     async with (
         Client(build_server(engine, display=True, max_answer=answer_limit(CONTEXT))) as client,
@@ -160,7 +161,7 @@ def main() -> None:
     parser.add_argument("--listen", type=listen_address, default=("127.0.0.1", 8090), help="[HOST:]PORT to serve on.")
     parser.add_argument("--token", default=os.environ.get("NETGPT_PREVIEW_TOKEN", "preview"), help="The sign-in token.")
     parser.add_argument("--pace", type=float, default=0.04, help="Seconds between the script's streamed chunks.")
-    parser.add_argument("--poll-interval", type=float, default=30, help="Seconds between polls of the counters.")
+    parser.add_argument("--poll-interval", type=float, default=30, help="Seconds between polls of the counters; 0 for none.")
     args = parser.parse_args()
     asyncio.run(run(args))
 

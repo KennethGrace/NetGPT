@@ -315,7 +315,29 @@ function viewCard(view) {
 }
 
 function mentionedIn(element) {
-  return [...element.querySelectorAll(".mention")].map((mention) => mention.dataset.id);
+  // The nodes an element's mentions name: a link's two ends, a port's device.
+  return [...element.querySelectorAll(".mention")].flatMap((mention) => (mention.dataset.nodes ? mention.dataset.nodes.split(" ") : [mention.dataset.id]));
+}
+
+function castOf(answer) {
+  // Under an answer, what it names, and a way to see just those on the map with the links between them.
+  const named = [...new Set(mentionedIn(answer))].filter((id) => netregistry.has(id));
+  if (named.length < 2) return;
+  const cast = node("div", "cast");
+  cast.append(node("span", "eyebrow", `Named here · ${named.length}`));
+  const list = node("span", "who");
+  for (const id of named) list.append(node("span", "", id), " ");
+  cast.append(list);
+  netthreads.mark(list);
+  const show = node("button", "", "Show these on the map");
+  show.type = "button";
+  show.addEventListener("click", () => {
+    if (narrow.matches) setScreen(true);
+    if (!netmap.focusOn(named, "Named in the answer")) return;
+    for (const other of conversation.querySelectorAll(".view-card.active")) other.classList.remove("active");
+  });
+  cast.append(show);
+  answer.after(cast);
 }
 
 function handle(event, live) {
@@ -396,6 +418,7 @@ function handle(event, live) {
       block.innerHTML = renderMarkdown(event.text);
       netthreads.mark(block);
       netmap.mention(mentionedIn(block));
+      castOf(block);
       turn = null;
       if (live && onMap()) markNew();
       break;
@@ -534,7 +557,7 @@ netmap.on("inspect", (id, panel) => {
   if (!isLink) {
     const around = node("button", "", "Focus here");
     around.type = "button";
-    around.addEventListener("click", () => netmap.focusOn(id));
+    around.addEventListener("click", () => netmap.focusOn([id]));
     box.append(around);
   }
   panel.append(box);

@@ -439,6 +439,22 @@ pre code { background: none; padding: 0; }
 .mention.flash { animation: flash 1.4s ease-out; }
 code .mention { margin: 0; }
 
+/* Under an answer: what it names, and a way to see just those on the map. */
+.cast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 2px 0 6px;
+  padding: 8px 0 0;
+  border-top: 1px dashed var(--hairline);
+  font-size: 13px;
+}
+.cast .eyebrow { display: inline; }
+.cast .who { line-height: 2; }
+.cast .mention { font-family: var(--font-mono); font-size: 12px; padding: 1px 5px; margin-right: 2px; }
+.cast button { font-size: 12.5px; padding: 2px 11px; margin-left: auto; }
+
 /* A view the model drew: a card with the view in miniature, that brings it back. */
 .view-card {
   display: flex;
@@ -661,6 +677,11 @@ code .mention { margin: 0; }
 #map-graph .link .port.flagged { visibility: visible; }
 #map-graph .rate { font: 10px var(--font-mono); fill: var(--ink); font-variant-numeric: tabular-nums; visibility: hidden; }
 #map-graph .link.focus .rate { visibility: visible; }
+/* A crowded map: names, ports, and rates only on what stands out, and on what the pointer is on. */
+#map-graph.crowded .node.focus:not(.kind-device):not(.lit):not(.spot):not(.selected):not(.hovered):not(.beside) .label { display: none; }
+#map-graph.overview .link:not(.spot):not(.selected):not(.hovered):not(.beside) .port:not(.flagged):not(.network),
+#map-graph.crowded .link:not(.lit):not(.spot):not(.selected):not(.hovered) .port:not(.flagged),
+#map-graph.crowded .link:not(.lit):not(.spot):not(.selected):not(.hovered) .rate { visibility: hidden; }
 
 /* Traffic lanes: one per direction, colored by share of port speed from a one-hue ramp,
    validated as an ordinal ramp against the table in both modes. */

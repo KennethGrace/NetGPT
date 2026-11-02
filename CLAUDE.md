@@ -60,7 +60,8 @@ python lab/game.py --lab wan --anywhere ...       # each fault at a random one o
 - `src/netgpt/api.py`: the engine's face for programs: GET routes under `/api/v1/` answering with contract records, behind the page's token, with devices' answers shared (`engine.SharedReads`). The page mounts it.
 - `src/netgpt/service.py`: `netgpt-engine`, the engine on its own: the API at `/api/v1`, with the engine held running (and polling) for as long as the service runs. MCP over HTTP will join it here.
 - `src/netgpt/contract.py`: the records NetGPT sends outside itself (views, charts, traffic, the primitives), and their JSON Schema. `schema/netgpt.schema.json` is the repository's copy, for other repositories to read.
-- `src/netgpt/static/`: the page. `map.js` is the map on vendored d3-force, with each link's traffic, and `chart.js` draws charts in the conversation and the map's inspector.
+- `src/netgpt/static/`: the page. `registry.js` remembers every node the page has seen and gives each its tone; `map.js` is the map (the table) on vendored d3-force, with each link's traffic; `threads.js` marks names in the conversation and ties them to the map; `chart.js` draws charts in the conversation and the map's inspector; `app.js` is the conversation. `fonts/` holds the vendored fonts and their OFL licenses.
+- `lab/preview_page.py`: the page against a real inventory with a scripted model, for working on the page without one.
 - `lab/`: the containerlab lab (SR Linux spine, two leaves, a bridging switch, Linux hosts) and its inventory.
 - `lab/wan/`: the WAN lab: three sites (HQ, Ops, a branch) on 25G, 10G, and 1G links, routed by OSPF, with its own inventory.
 - `.github/workflows/tests.yml`: the whole suite on every push to main and every pull request, against a fresh TimescaleDB.
@@ -124,12 +125,11 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **The SSH session limit** (`tests/test_ssh.py`) stands in for `asyncssh.connect` and counts the connections open to each host.
 - **Filters and limits** (`tests/test_filters.py`, and the limit's refusals in `test_server.py`) run the engine on the recorded Nexus switches (the `nexus` fixture, through `fakes.RecordedNexus`), whose MAC entries have VLANs.
 - **Check driver changes against the live lab** before calling them done. Recording the lab found that SR Linux spells a learned MAC `learnt`. SR Linux also reports an unanswered ping as either a result or an error.
-- **The page has no JS test suite.** Check it in headless Firefox:
-  - Build a static copy of the page whose stub `fetch` replays real views, and screenshot it.
-  - `ui.prefersReducedMotion=1` in the profile's `user.js` makes the layout settle at once.
-  - For interaction, inject a script that dispatches `PointerEvent`s, with `setPointerCapture` stubbed out.
-  - Serve the copy over HTTP if it needs `localStorage`.
-  - Once a page scrolls, Firefox draws its fixed and sticky layers about 110px off, so keep test pages short.
+- **The page has no JS test suite.** Check it in a headless browser against `lab/preview_page.py` (the WAN lab, a scripted model):
+  - puppeteer's Chrome drives it with real pointer events and screenshots it in both color schemes and at phone width. The preview reads the page's files at startup, so restart it after changing `static/`.
+  - Wait for the page's `load`, not network idle: with polling off, the traffic route's 404 keeps puppeteer's idle wait from settling.
+  - For a big network, the preview can stand on recorded tables by swapping the platform in `netgpt.platforms.PLATFORMS` before it starts (the Nexus snapshot: 41 nodes at layer 2, about 300 at layer 3).
+  - Headless Firefox works too: `ui.prefersReducedMotion=1` in the profile's `user.js` makes the layout settle at once, and once a page scrolls it draws fixed and sticky layers about 110px off.
 
 ## The lab
 
@@ -189,16 +189,23 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 
 ## The page
 
-- **The CSP is strict** (`script-src 'self'; style-src 'self'`). No inline scripts or styles. Style through classes in `app.css`, since a stylesheet rule beats an SVG presentation attribute.
+- **The page is a sheet of paper on a drafting table.** The map (`#stage`) fills the window, tan with a dot grid; the conversation (`#sheet`) lies on its left, and the map's drawing (`#map-graph`) takes the rest. Threads (`#threads`) are a layer over everything that takes no pointer events.
+- **Color is the page's shared language.** Each inventory device takes the next of seven `--tone-n` tokens in inventory order (`registry.js`), validated as a categorical palette against the tan table and the cream sheet in light mode and the walnut ones in dark: four light tones sit under 3:1 on the tan, so every node is labeled in ink and every mention spells its name. A host, LLDP neighbor, or network wears the tone of the one device it hangs off (tone 0, neutral, if several). Tones never change once given. A chart's line wears the tone of its port's far end, or a `--series-n` slot when two ports lead to one device.
+- **Mentions are made from text nodes** (`threads.mark`): device and neighbor names (and their first label, when unique), addresses, MACs in any spelling, `device:port`, a port after its device in the same sentence or cell (the registry knows each device's ports from links), and `a--b`. Code blocks aren't marked. Pointing at a mention spotlights its node (its neighbors half lit) and runs a thread; on the sheet a thread runs along the gap under the mention's line to the paper's edge, then leaps to the map, so it crosses no words. Hovering a node runs threads back to every mention in sight; a selection marks its mentions and the rail without threads.
+- **The map talks back through hooks** (`netmap.on`): `hover`, `select`, and `inspect` (the inspector's mentions count and its Ask and Focus buttons are the conversation's). `netmap.anchor` gives a thing's screen position for a thread.
+- **Tool calls stream twice** (`calling` as they start, then `tool`): the card goes up dashed and the devices the call reads ripple (`netmap.reading`), from its arguments, or every device for a table tool given none.
+- **A crowded map** (over 24 nodes) names only devices and what is lit, pointed at, selected, or under the pointer and its neighbors; port names and rates likewise.
+- **The camera fits the drawing into what nothing covers:** under the title plaque, above the legend, beside the inspector's card, and never past 1.15 times its own size, so text stays its set size.
+- **The CSP is strict** (`script-src 'self'; style-src 'self'; font-src 'self'`). No inline scripts or styles. Style through classes in `app.css`, since a stylesheet rule beats an SVG presentation attribute; a value only script knows goes in a custom property set through `style.setProperty`, which the CSP allows.
 - **Device data reaches the DOM only as text:** `textContent` and attributes, never HTML.
-- **The page reads the network from the engine's API** (`/api/v1`), like any other frontend: the map's traffic, a live chart's refresh, and the whole network (`showNetwork`), drawn when the conversation has no view yet, at load and after a reset, without a chip. A view from the model that lands first wins. A 404 from `/api/v1/traffic` means NetGPT isn't polling, and hides the map's traffic.
-- **Narrow screens (under 1000px) show the map or the conversation, not both.** `body.map-full` gives the map the screen. The header button names the screen it leads to, so it has no pressed state there. A live view or answer marks it `fresh` instead of switching screens. A view's chip opens the map.
+- **The page reads the network from the engine's API** (`/api/v1`), like any other frontend: the map's traffic, a live chart's refresh, and the whole network (`showNetwork`) at the layer the viewer picks, drawn at load (before the conversation is replayed, so its names have something to be tied to) and after a reset, without a card. A view from the model that lands first wins. A 404 from `/api/v1/traffic` means NetGPT isn't polling, and hides the map's traffic.
+- **Narrow screens (under 1000px) show the map or the conversation, not both.** `body.map-full` gives the map the screen. The header button names the screen it leads to, so it has no pressed state there. A live view or answer marks it `fresh` instead of switching screens. A view's card opens the map. Threads are off: the two are never on screen together.
 - **Pins are the viewer's, not the model's.** They are kept per plane in `localStorage`, and every access is wrapped in `try`.
 - **The OSPF view** labels each end of a link with its cost and drops the network from the middle. Area 0 keeps the plain wire, and each other area takes one of three `--area-n` tokens in turn, on its links and stub networks, below the highlight in the stylesheet. They weren't checked as carefully as the chart colors. A link with problems is dashed in `--error`. A link keeps its element from view to view, and layer 3 and OSPF name a link between routers alike, so `relabel` refreshes its labels on every view.
 - **The map orders a row of devices by the inventory.** The WAN inventory lists the branch between the two sites, so it sits between their cores.
 - **Long charts:** a chart read from rollups has `step` set. Its caption names the averages ("30-minute averages"), the hover matches points within half a step, and errors count in whole numbers. Time ticks fall on the viewer's clock (hours and midnights where they are), and past a day they carry the weekday or the date.
 - **Chart colors** are six `--series-n` tokens in `app.css`, one per port in a fixed order, checked for both modes against the page's own surfaces. Three of the light ones are under 3:1 contrast, so every chart has a Data table, and values never wear a series color.
-- **Traffic on the map** is a weathermap: each link gets a lane per direction, on the right as it travels. A lane's color is its share of port speed, in five bands from the `--load-n` ramp. That ramp is one hue (teal, since blue means highlighted), checked as an ordinal ramp in both modes. A direction is the sending port's out counter, or else the receiving port's in. A subinterface's traffic is its port's.
+- **Traffic on the map** is a weathermap: each link gets a lane per direction, on the right as it travels. A lane's color is its share of port speed, in five bands from the `--load-n` ramp. That ramp is one hue (teal), checked as an ordinal ramp in both modes; the light steps were made darker for the tan table, where the old lightest band was 1.6:1. A direction is the sending port's out counter, or else the receiving port's in. A subinterface's traffic is its port's.
   - Rate labels go at whichever end of their lane overlaps least with what is already drawn.
   - Errors get ⚠ and a count, in the warn color. Discards are only told in the inspector.
   - The lab's links run far under 10% of their virtual speeds, so every lane there is the lightest band. To see the others, check against a copy whose ports claim 100M.

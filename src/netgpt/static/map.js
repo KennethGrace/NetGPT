@@ -71,12 +71,15 @@ const netmap = (() => {
   const RING = { focus: 0, near: 0.06, context: 0.4 }; // toward a ring around the focus
   const CHARGE = { focus: -520, near: -360, context: -200 };
   const SPRING = { focus: 0.8, near: 0.4, context: 0.1 };
-  const LENGTH = { focus: 100, near: 120, context: 120 };
+  const LENGTH = { focus: 125, near: 130, context: 120 };
   const CHAR_WIDTH = 7; // roughly, for the 12–13px label and note text
   const BACKBONE = "0.0.0.0";
   const AREA_COLORS = 3; // --area-1 to -3 in app.css, used in turn
   const LAYER_NAMES = { l2: "cabling", l3: "routing", ospf: "OSPF" };
   const MAX_ZOOM = 1.15;
+  // Past this many nodes the map is crowded: only devices, and what is lit, pointed at, or
+  // selected, keep their names on the drawing; the rest show theirs when the pointer is on them.
+  const CROWDED = 24;
   const SNAP = 8; // screen pixels: a dragged node this close to a pinned node's row or column joins it
   const DOUBLE_TAP = 400; // milliseconds
   const PINS = "netgpt.map.pins";
@@ -380,28 +383,38 @@ const netmap = (() => {
     inspect(null);
   }
 
-  function focusOn(id) {
-    // The viewer's own focus: the node and what is linked to it in the middle, the rest
-    // aside, on the view already drawn. The view's own choices come back with it.
-    if (!current || !nodes.has(id)) return false;
+  function focusOn(ids, title = null) {
+    // The viewer's own focus, on the view already drawn: the nodes in the middle, what is
+    // linked to them near, the rest aside, and the links between them marked. The view's own
+    // choices come back with its card.
+    const wanted = new Set((Array.isArray(ids) ? ids : [ids]).filter((id) => nodes.has(id)));
+    if (!current || !wanted.size) return false;
     const near = new Set();
     const emphasis = {};
+    const lit = [...wanted];
     for (const link of current.links) {
-      const touches = link.a.node === id || link.b.node === id;
+      const [a, b] = [link.a.node, link.b.node];
+      const between = wanted.has(a) && wanted.has(b);
+      const touches = wanted.has(a) || wanted.has(b);
       emphasis[link.id] = touches ? "focus" : "context";
-      if (touches) near.add(link.a.node).add(link.b.node);
+      if (between && wanted.size > 1) lit.push(link.id);
+      if (touches) near.add(a).add(b);
     }
-    for (const node of current.nodes) emphasis[node.id] = node.id === id ? "focus" : near.has(node.id) ? "near" : "context";
-    const label = netregistry.label(id);
-    const view = { ...current, title: `Around ${label}`, emphasis, highlight: [id], notes: {}, path: null, trouble: [] };
+    for (const node of current.nodes) emphasis[node.id] = wanted.has(node.id) ? "focus" : near.has(node.id) ? "near" : "context";
+    const named = title || `Around ${netregistry.label([...wanted][0])}`;
+    const view = { ...current, title: named, emphasis, highlight: lit, notes: {}, path: null, trouble: [] };
     show(view, "Your focus");
-    inspect(id);
+    if (wanted.size === 1) inspect([...wanted][0]);
     return true;
   }
 
+  const crowded = () => nodes.size > CROWDED;
+  // Whether a node's name is drawn: always on a small map; on a crowded one, a device's, or what stands out.
+  const named = (node) => !crowded() || node.data.kind === "device" || node.lit || node.emphasis !== "focus" || node.id === selected;
+
   function textWidth(node) {
     const note = node.emphasis === "context" ? 0 : node.note.length;
-    return Math.max(node.data.label.length, note) * CHAR_WIDTH;
+    return Math.max(named(node) ? node.data.label.length : 0, note) * CHAR_WIDTH;
   }
 
   function labelRoom(alpha) {
@@ -435,11 +448,14 @@ const netmap = (() => {
 
   function restyle() {
     // What is linked to something the conversation points at stays half lit: its relationships.
+    // On a crowded map, what is linked to the node under the pointer is named too.
     const beside = new Set();
+    const lights = new Set(spotted);
+    if (hovered && nodes.has(hovered) && crowded()) lights.add(hovered);
     for (const link of links) {
       const [a, b] = [link.data.a.node, link.data.b.node];
-      if (spotted.has(a)) beside.add(b);
-      if (spotted.has(b)) beside.add(a);
+      if (lights.has(a)) beside.add(b);
+      if (lights.has(b)) beside.add(a);
     }
     for (const node of nodes.values()) {
       const { element, data } = node;
@@ -457,6 +473,7 @@ const netmap = (() => {
           isPinned(node) && "pinned",
           selected === node.id && "selected",
           node.hop && "on-path",
+          hovered === node.id && "hovered",
           spotted.has(node.id) && "spot",
           !spotted.has(node.id) && beside.has(node.id) && "beside",
           read.has(node.id) && "reading",
@@ -502,6 +519,7 @@ const netmap = (() => {
           areaClass([...new Set([link.data.a.area, link.data.b.area].filter(Boolean))]),
           link.data.plane === "management" && "management",
           selected === link.id && "selected",
+          hovered === link.id && "hovered",
           (spotted.has(link.id) || (spotted.size && ends.every((end) => spotted.has(end)))) && "spot",
           ends.some((end) => spotted.has(end)) && "beside",
         ]
@@ -511,6 +529,9 @@ const netmap = (() => {
       link.element.querySelector(".note").textContent = link.emphasis === "context" ? "" : link.note;
     }
     svg.classList.toggle("spotlit", spotted.size > 0);
+    svg.classList.toggle("crowded", crowded());
+    // With nothing singled out, ports are named only where the viewer looks; the rates stay.
+    svg.classList.toggle("overview", [...nodes.values()].every((node) => node.emphasis === "focus") && !links.some((link) => link.lit));
   }
 
   function draw() {
@@ -813,6 +834,7 @@ const netmap = (() => {
         // NetGPT isn't polling: there is no traffic to show, now or later.
         polling = false;
         trafficButton.hidden = true;
+        if (current) inspect(selected);
         return;
       }
       if (!response.ok) return;
@@ -1191,6 +1213,7 @@ const netmap = (() => {
   function hoverOn(id) {
     if (id === hovered || dragging) return;
     hovered = id;
+    if (crowded()) restyle(); // a crowded map names what the pointer is on
     emit("hover", id);
   }
   svg.addEventListener("pointerover", (event) => {
