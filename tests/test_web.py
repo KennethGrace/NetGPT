@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
@@ -16,6 +17,7 @@ import httpx
 import pytest
 from mcp import Client
 
+from netgpt import REPOSITORY, __version__
 from netgpt.chat import Chat
 from netgpt.engine import Engine
 from netgpt.inventory import Inventory
@@ -92,6 +94,16 @@ async def test_token_link_becomes_a_strict_cookie_and_a_clean_url(browser: Brows
     assert "font-src 'self'" in index.headers["content-security-policy"]
     font = await page.get("/fonts/fraunces.woff2")
     assert font.headers["content-type"] == "font/woff2" and font.content[:4] == b"wOF2"
+
+
+@pytest.mark.anyio
+async def test_the_page_says_which_netgpt_and_model_it_is(browser: Browser, inventory: Inventory) -> None:
+    page = await browser(ScriptedOllama())
+    conversation = (await page.get("/api/conversation")).json()
+    assert (conversation["model"], conversation["think"]) == ("scripted", True)
+    platforms = {"fake": 3, "juniper_junos": 1}
+    assert platforms == Counter(device.platform for device in inventory.devices)
+    assert conversation["about"] == {"version": __version__, "repository": REPOSITORY, "context": None, "replies": 10, "platforms": platforms}
 
 
 @pytest.mark.anyio

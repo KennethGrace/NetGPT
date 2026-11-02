@@ -14,6 +14,7 @@ import httpx
 import pytest
 from mcp import Client
 
+from netgpt import REPOSITORY, __version__
 from netgpt.chat import (
     OUT_OF_TOOLS, REPLY_SHARE, Chat, ChatError, ChatObserver, answer_limit, plain_schema, supports_thinking,
 )
@@ -72,6 +73,17 @@ async def test_tool_results_go_back_to_the_model(chat_with: Any) -> None:
     # The structured result stays in the history, for the page to redraw, but never reaches Ollama.
     assert chat.messages[3]["_structured"]["items"][0]["neighbor"] == "spine1"
     assert "_structured" not in tool_message
+
+
+@pytest.mark.anyio
+async def test_the_model_is_told_what_it_is_and_what_it_runs_in(chat_with: Any) -> None:
+    ollama = ScriptedOllama(says("I am scripted, the model in NetGPT."))
+    chat = await chat_with(ollama)
+    await chat.ask("What is this?")
+    system = ollama.messages(0)[0]["content"]
+    assert system.startswith(f"You are scripted, the model that powers the AI features of NetGPT {__version__}")
+    assert f"This is NetGPT {__version__}" in system
+    assert REPOSITORY in system and "list_devices" in system
 
 
 @pytest.mark.anyio

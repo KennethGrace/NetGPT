@@ -754,6 +754,60 @@ async function ask(text) {
   }
 }
 
+// ---- About: the (i) card, with the version and what a bug report would want.
+
+const aboutOpen = document.getElementById("about-open");
+const aboutCard = document.getElementById("about");
+const PLATFORMS = { cisco_nxos: "Cisco NX-OS", juniper_junos: "Juniper Junos", nokia_srlinux: "Nokia SR Linux" };
+
+function describeAbout(data) {
+  // The card's facts, as [label, value] pairs, which an issue's report repeats.
+  const about = data.about;
+  const devices = Object.entries(about.platforms)
+    .map(([platform, count]) => `${count} ${PLATFORMS[platform] || platform}`)
+    .join(", ");
+  const model = [data.model, data.think ? "thinking" : ""].filter(Boolean).join(", ");
+  const context = [about.context ? `${about.context.toLocaleString("en-US")} tokens` : "", `${about.replies} replies a question`];
+  return [
+    ["Version", about.version],
+    ["Model", model],
+    ["Context", context.filter(Boolean).join(" · ")],
+    ["Devices", devices || "none"],
+  ];
+}
+
+function fillAbout(data) {
+  const facts = describeAbout(data);
+  document.getElementById("about-version").textContent = data.about.version;
+  // The version is in the card's title; the report repeats it.
+  const shown = facts.filter(([label]) => label !== "Version");
+  document.getElementById("about-facts").replaceChildren(...shown.flatMap(([label, value]) => [node("dt", "eyebrow", label), node("dd", "", value)]));
+  document.getElementById("about-source").href = data.about.repository;
+  const report = ["", "", "---", ...facts.map(([label, value]) => `${label}: ${value}`), `Browser: ${navigator.userAgent}`];
+  document.getElementById("about-issue").href = `${data.about.repository}/issues/new?body=${encodeURIComponent(report.join("\n"))}`;
+}
+
+function showAbout(open) {
+  aboutCard.hidden = !open;
+  aboutOpen.setAttribute("aria-expanded", String(open));
+  if (open) aboutCard.querySelector(".close").focus();
+}
+
+aboutOpen.addEventListener("click", () => showAbout(aboutCard.hidden));
+aboutCard.querySelector(".close").addEventListener("click", () => {
+  showAbout(false);
+  aboutOpen.focus();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !aboutCard.hidden) {
+    showAbout(false);
+    aboutOpen.focus();
+  }
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!aboutCard.hidden && !aboutCard.contains(event.target) && !aboutOpen.contains(event.target)) showAbout(false);
+});
+
 async function load() {
   const response = await fetch("api/conversation");
   if (response.status === 401) {
@@ -762,6 +816,7 @@ async function load() {
   }
   const data = await response.json();
   model.textContent = data.think ? `${data.model} · thinking` : data.model;
+  fillAbout(data);
   // The whole network first, so the conversation's names have something to be tied to.
   if (!showingNetwork && !shown) await showNetwork(layer);
   conversation.replaceChildren();

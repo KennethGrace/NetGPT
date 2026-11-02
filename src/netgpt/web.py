@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from importlib.resources import files
 from importlib.resources.abc import Traversable
@@ -43,6 +44,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 
+from netgpt import REPOSITORY, __version__
 from netgpt.api import COOKIE, build_api
 from netgpt.chat import Chat, ChatError, ChatObserver
 from netgpt.engine import Engine
@@ -190,9 +192,24 @@ def build_app(chat: Chat, token: str, engine: Engine) -> Starlette:
             return HTMLResponse(SIGN_IN_PAGE, status_code=401, headers=SECURITY_HEADERS)
         return HTMLResponse(assets["index.html"][0].decode("utf-8"), headers=SECURITY_HEADERS)
 
+    # What the page's (i) card says about this NetGPT, and what a bug report would want.
+    about = {
+        "version": __version__,
+        "repository": REPOSITORY,
+        "context": chat.context,
+        "replies": chat.replies,
+        "platforms": dict(Counter(device.platform for device in engine.inventory.devices)),
+    }
+
     async def conversation(request: Request) -> Response:
         return JSONResponse(
-            {"model": chat.model, "think": chat.think, "busy": busy.locked(), "events": conversation_events(chat.messages)},
+            {
+                "model": chat.model,
+                "think": chat.think,
+                "busy": busy.locked(),
+                "about": about,
+                "events": conversation_events(chat.messages),
+            },
             headers=SECURITY_HEADERS,
         )
 

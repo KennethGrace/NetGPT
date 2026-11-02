@@ -227,6 +227,64 @@ button:focus-visible, textarea:focus-visible, .mention:focus-visible { outline: 
   text-overflow: ellipsis;
 }
 #map-toggle, #reset { white-space: nowrap; }
+
+/* About: a small (i) beside the model, and the index card it opens under the masthead. */
+#masthead .info {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1.5px solid var(--ink-2);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-2);
+  font: 600 13px/1 var(--font-display);
+  font-style: italic;
+}
+#masthead .info:hover { border-color: var(--ink); color: var(--ink); }
+#masthead .info[aria-expanded="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+#about {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 16px;
+  z-index: 8;
+  width: min(370px, calc(100vw - 32px));
+  padding: 14px 18px 12px;
+  font-size: 13.5px;
+  /* The brand's three tones, as the card's top edge. */
+  border-top: 5px solid transparent;
+  border-image: linear-gradient(90deg, var(--tone-1) 0 33.3%, var(--tone-2) 33.3% 66.6%, var(--tone-3) 66.6%) 1;
+  border-radius: 0 0 12px 12px;
+}
+#about[hidden] { display: none; }
+#about .head { display: flex; align-items: center; gap: 9px; }
+#about h2 {
+  flex: 1;
+  margin: 0;
+  font: 600 20px/1.2 var(--font-display);
+  font-variation-settings: "SOFT" 100, "opsz" 36;
+}
+#about-version { font: 500 13px/1 var(--font-mono); color: var(--ink-2); margin-left: 4px; }
+#about .close { border: 0; background: transparent; font-size: 18px; line-height: 1; padding: 0 4px; color: var(--muted); }
+#about .lede { margin: 8px 0 10px; color: var(--ink-2); }
+#about dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0 0 12px; }
+#about dt { line-height: 1.9; }
+#about dd { margin: 0; overflow-wrap: anywhere; }
+#about .links { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+#about .links a {
+  font-size: 13px;
+  color: var(--ink);
+  text-decoration: none;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 3px 12px;
+  background: var(--paper);
+}
+#about .links a:hover { border-color: var(--ink-2); }
+#about .links a::after { content: " ↗"; color: var(--muted); }
+#about a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+#about .credits { margin: 0; font-size: 11.5px; color: var(--muted); }
+#about .whole { white-space: nowrap; }
 #map-toggle:not([hidden]) { margin-left: auto; }
 #map-toggle[hidden] + #reset { margin-left: auto; }
 #map-toggle[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }

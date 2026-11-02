@@ -22,8 +22,23 @@
       <h1>NetGPT</h1>
     </div>
     <span id="model" class="badge"></span>
+    <button id="about-open" class="info" type="button" title="About NetGPT" aria-label="About NetGPT" aria-expanded="false" aria-controls="about">i</button>
     <button id="map-toggle" type="button" title="Show or hide the map" hidden>Map</button>
     <button id="reset" type="button">New conversation</button>
+    <section id="about" class="card" role="dialog" aria-labelledby="about-title" hidden>
+      <div class="head">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <h2 id="about-title">NetGPT <span id="about-version"></span></h2>
+        <button class="close" type="button" aria-label="Close">×</button>
+      </div>
+      <p class="lede">An open-source, AI-enabled network engineering platform. Language models get read-only access to the network's devices, and draw what they find on the map.</p>
+      <dl id="about-facts"></dl>
+      <p class="links">
+        <a id="about-source" target="_blank" rel="noopener">Source code</a>
+        <a id="about-issue" target="_blank" rel="noopener">Report an issue</a>
+      </p>
+      <p class="credits">MIT License. Set in Fraunces, Atkinson Hyperlegible Next, and JetBrains Mono, under the SIL Open Font License; laid out by <span class="whole">d3-force</span>.</p>
+    </section>
   </header>
 
   <div id="stage" hidden>

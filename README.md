@@ -160,6 +160,8 @@ netgpt-chat --inventory lab/inventory.yml --web 10.0.0.5:8080
 
 Anyone who can load the page can query the network, so every request needs a token: `$NETGPT_WEB_TOKEN` if set, otherwise a random one. At startup, netgpt-chat prints a link that carries the token. Opening it swaps the token for an HttpOnly cookie. The page is plain HTTP, so bind it to an address only trusted machines can reach, such as a VPN address or 127.0.0.1 behind an SSH tunnel. There is one conversation, and it answers one question at a time.
 
+The **(i)** beside the model's name says which NetGPT this is and what it runs: the version, the model and its context, and the devices by platform. Its **Report an issue** link opens a GitHub issue with those already filled in. The model knows too: ask it what this is, and it says which NetGPT and which model you are talking to.
+
 To work on the page without a model, `python lab/preview_page.py` serves it against a real inventory (the WAN lab's, by default) with a scripted model, whose canned answers call the real tools and stream at a reading pace.
 
 #### The map and the conversation, tied together
