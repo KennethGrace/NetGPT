@@ -12,8 +12,8 @@ import re
 import pytest
 
 from netgpt.primitives import ArpEntry, DeviceError, DeviceInfo, Interface, LldpNeighbor, MacEntry
-from netgpt.topology import Topology, build_l3, build_topology
-from netgpt.views import ViewError, describe, make_view
+from netgpt.topology import Topology, TopologyNode, build_l3, build_topology
+from netgpt.views import ViewError, describe, focused, make_view, named
 
 from fakes import LAB, RecordedLab, SwitchedNetwork, recorded_lab
 
@@ -244,6 +244,137 @@ def test_an_address_on_the_switchs_own_mac_is_the_switchs() -> None:
     assert "10.1.0.254" not in {n.id for n in topology.nodes}
 
 
+def port_channel_network() -> tuple[list[DeviceInfo], list[LldpNeighbor], list[Interface]]:
+    """
+    A core and an access switch joined by a port-channel of two cables. Each end's
+    LLDP is heard on the members, and each sends its ports' short names: the core
+    sends Eth1/1, and the access switch Gi1/0/51.
+    """
+    devices = [
+        DeviceInfo(name="core", platform="cisco_nxos", host="172.20.20.60", role="core"),
+        DeviceInfo(name="access", platform="cisco_ios", host="172.20.20.61", role="access"),
+    ]
+    neighbors = [
+        LldpNeighbor(device="core", interface="Ethernet1/1", neighbor="access", neighbor_interface="Gi1/0/51"),
+        LldpNeighbor(device="core", interface="Ethernet1/2", neighbor="access", neighbor_interface="Gi1/0/52"),
+        LldpNeighbor(device="access", interface="GigabitEthernet1/0/51", neighbor="core", neighbor_interface="Eth1/1"),
+        LldpNeighbor(device="access", interface="GigabitEthernet1/0/52", neighbor="core", neighbor_interface="Eth1/2"),
+    ]
+    interfaces = [
+        Interface(device="core", name="Vlan10", network_instance="default", mode="routed", addresses=["10.3.0.1/24"]),
+        Interface(device="core", name="Ethernet1/1", network_instance="default", mode="bridged", aggregate="port-channel10"),
+        Interface(device="core", name="Ethernet1/2", network_instance="default", mode="bridged", aggregate="port-channel10"),
+        Interface(device="core", name="port-channel10", network_instance="default", mode="bridged"),
+        Interface(device="access", name="GigabitEthernet1/0/51", network_instance="default", mode="bridged", aggregate="Port-channel1"),
+        Interface(device="access", name="GigabitEthernet1/0/52", network_instance="default", mode="bridged", aggregate="Port-channel1"),
+        Interface(device="access", name="Port-channel1", network_instance="default", mode="bridged"),
+        Interface(device="access", name="GigabitEthernet1/0/10", network_instance="default", mode="bridged"),
+    ]
+    return devices, neighbors, interfaces
+
+
+def test_both_ends_of_a_cable_are_one_link_when_each_sends_a_short_name_for_its_port() -> None:
+    devices, neighbors, interfaces = port_channel_network()
+    topology = build_topology(devices, neighbors, [], [], is_management, [], interfaces)
+    assert sorted(link.id for link in topology.links) == [
+        "access:GigabitEthernet1/0/51--core:Ethernet1/1", "access:GigabitEthernet1/0/52--core:Ethernet1/2",
+    ]
+    assert not any(link.one_sided for link in topology.links)
+
+
+def test_a_short_name_that_could_be_two_ports_is_left_as_it_was_sent() -> None:
+    devices = [DeviceInfo(name="core", platform="cisco_nxos", host="172.20.20.60"), DeviceInfo(name="access", platform="cisco_ios", host="172.20.20.61")]
+    neighbors = [LldpNeighbor(device="core", interface="Ethernet1/1", neighbor="access", neighbor_interface="Tw1/0/1")]
+    interfaces = [
+        Interface(device="access", name="TwoGigabitEthernet1/0/1", mode="bridged"),
+        Interface(device="access", name="TwentyFiveGigE1/0/1", mode="bridged"),
+    ]
+    topology = build_topology(devices, neighbors, [], [], is_management, [], interfaces)
+    assert [link.id for link in topology.links] == ["access:Tw1/0/1--core:Ethernet1/1"]
+
+
+def test_a_host_behind_a_port_channel_is_followed_to_the_switch_its_members_are_cabled_to() -> None:
+    devices, neighbors, interfaces = port_channel_network()
+    arp = [ArpEntry(device="core", interface="Vlan10", ip_address="10.3.0.20", mac="0200.0000.0020")]
+    macs = [
+        # The MAC tables name the port-channels, not the cables LLDP is heard on.
+        MacEntry(device="core", network_instance="default", mac="0200.0000.0020", interface="port-channel10", vlan=10),
+        MacEntry(device="access", network_instance="default", mac="0200.0000.0020", interface="GigabitEthernet1/0/10", vlan=10),
+    ]
+    topology = build_topology(devices, neighbors, arp, [], is_management, macs, interfaces)
+    host = next(link for link in topology.links if "10.3.0.20" in link.id)
+    assert host.id == "10.3.0.20--access:GigabitEthernet1/0/10"
+    assert host.evidence == [
+        "ARP on core Vlan10: 10.3.0.20 is at 0200.0000.0020; MAC table on core (default): 0200.0000.0020 on port-channel10; "
+        "MAC table on access (default): 0200.0000.0020 on GigabitEthernet1/0/10."
+    ]
+
+
+def test_a_mac_the_far_switch_has_on_its_port_channel_back_is_the_far_switch_s() -> None:
+    devices, neighbors, interfaces = port_channel_network()
+    arp = [ArpEntry(device="core", interface="Vlan10", ip_address="10.3.0.2", mac="0200.0000.0002")]
+    macs = [
+        MacEntry(device="core", network_instance="default", mac="0200.0000.0002", interface="port-channel10", vlan=10),
+        MacEntry(device="access", network_instance="default", mac="0200.0000.0002", interface="Port-channel1", vlan=10),
+    ]
+    topology = build_topology(devices, neighbors, arp, [], is_management, macs, interfaces)
+    assert "10.3.0.2" in node(topology, "access").addresses
+    assert "10.3.0.2" not in {n.id for n in topology.nodes}
+
+
+def test_an_address_at_the_switch_s_own_gateway_mac_is_the_switch_s() -> None:
+    # A gateway address the core shares with its vPC peer by VRRP: its own MAC table says the MAC is its own.
+    devices, neighbors, interfaces = port_channel_network()
+    arp = [ArpEntry(device="core", interface="Vlan10", ip_address="10.3.0.254", mac="0000.5e00.010a")]
+    macs = [MacEntry(device="core", network_instance="default", mac="0000.5e00.010a", interface="sup-eth1", entry_type="gateway", vlan=10)]
+    topology = build_topology(devices, neighbors, arp, [], is_management, macs, interfaces)
+    assert "10.3.0.254" in node(topology, "core").addresses
+    assert "10.3.0.254" not in {n.id for n in topology.nodes}
+
+
+def vpc_pair(entry_type: str, oper_state: str, lldp: bool = True) -> Topology:
+    """
+    Two gateways that both ARP for a host, which is cabled to core2 alone: core1's MAC table names its own port of
+    the same number, as NX-OS does with its vPC peer's MACs, and that port has no cable.
+    """
+    devices = [DeviceInfo(name=name, platform="cisco_nxos", host=f"192.0.2.{index}")
+               for index, name in enumerate(("core1", "core2"), start=1)]
+    mac = "0200.0000.00ea"
+    neighbors = [LldpNeighbor(device="core2", interface="Ethernet1/24", neighbor="server1", neighbor_interface="eth0",
+                              neighbor_chassis_id=mac)] if lldp else []
+    interfaces = [Interface(device=device, name="Ethernet1/24", network_instance="default", mode="bridged",
+                            oper_state=oper_state if device == "core1" else "up") for device in ("core1", "core2")]
+    interfaces += [Interface(device=device, name="Vlan254", network_instance="default", mode="routed",
+                             addresses=[f"198.51.100.{index}/24"]) for index, device in enumerate(("core1", "core2"), start=2)]
+    arp = [ArpEntry(device=device, interface="Vlan254", ip_address="198.51.100.234", mac=mac) for device in ("core1", "core2")]
+    macs = [MacEntry(device="core1", network_instance="default", mac=mac, interface="Ethernet1/24", entry_type=entry_type, vlan=254),
+            MacEntry(device="core2", network_instance="default", mac=mac, interface="Ethernet1/24", entry_type="dynamic", vlan=254)]
+    return build_topology(devices, neighbors, arp, [], is_management, macs, interfaces)
+
+
+@pytest.mark.parametrize(("entry_type", "oper_state"), [("secondary", "up"), ("dynamic", "down")])
+def test_a_mac_entry_the_switch_didn_t_learn_or_on_a_port_that_is_down_doesn_t_place_a_host(
+    entry_type: str, oper_state: str
+) -> None:
+    topology = vpc_pair(entry_type, oper_state)
+    # Placed once, where core2's walk ended: the LLDP neighbor that is the host, not a phantom on core1's port.
+    assert "198.51.100.234" not in {item.id for item in topology.nodes}
+    server = node(topology, "server1")
+    assert server.addresses == ["198.51.100.234"] and server.macs == ["0200.0000.00ea"]
+    why = "an entry it didn't learn itself" if entry_type == "secondary" else "a port that is down"
+    # What core1 saw stays as evidence, with why its MAC table entry wasn't followed.
+    assert f"ARP on core1 Vlan254: 198.51.100.234 is at 0200.0000.00ea; MAC table on core1 (default): 0200.0000.00ea " \
+           f"on Ethernet1/24, {why}." in server.evidence
+
+
+def test_two_walks_that_end_at_ports_both_place_the_host() -> None:
+    # A host with a NIC on each gateway, and no LLDP: both walks found a port, so both are kept.
+    topology = vpc_pair("dynamic", "up", lldp=False)
+    assert {link.id for link in topology.links if "198.51.100.234" in link.id} == {
+        "198.51.100.234--core1:Ethernet1/24", "198.51.100.234--core2:Ethernet1/24",
+    }
+
+
 def test_layer_3_is_the_routers_and_the_networks_between_them() -> None:
     network = SwitchedNetwork()
     l3 = build_l3(network.devices, network.topology(is_management), network.interfaces, is_management)
@@ -283,3 +414,57 @@ def test_a_layer_3_view_names_networks_and_says_which_layer_it_is() -> None:
     assert "at layer 3 (routers and the networks between them)" in describe(view)
     with pytest.raises(ViewError, match="nothing on the data plane at layer 3 called 'sw1'"):
         make_view(l3, "", ["sw1"], [], {})
+
+
+def test_a_host_s_node_has_the_mac_arp_found_it_at_and_a_device_s_has_none() -> None:
+    topology = SwitchedNetwork().topology(is_management)
+    assert node(topology, "10.1.0.2").macs == ["AA:00:00:00:00:02"]
+    assert all(not item.macs for item in topology.nodes if item.kind == "device")
+
+
+def test_focus_on_a_host_is_the_host_its_cable_and_the_switch_at_the_far_end_without_its_evidence() -> None:
+    around = focused(SwitchedNetwork().topology(is_management), ["10.1.0.2"])
+    assert [link.id for link in around.links] == ["10.1.0.2--sw1:ethernet-1/2"]
+    assert {item.id: bool(item.evidence) for item in around.nodes} == {"sw1": False, "10.1.0.2": True}
+
+
+@pytest.mark.parametrize("name", ["aa00.0000.0003", "aa-00-00-00-00-03", "AA:00:00:00:00:03"])
+def test_a_host_is_found_by_its_mac_in_any_spelling(name: str) -> None:
+    topology = SwitchedNetwork().topology(is_management)
+    assert [item.id for item in focused(topology, [name]).nodes if item.kind == "host"] == ["10.1.0.3"]
+    assert make_view(topology, "", [], [name], {}).highlight == ["10.1.0.3"]
+
+
+def test_a_network_with_no_node_of_its_own_names_the_hosts_on_it() -> None:
+    around = focused(SwitchedNetwork().topology(is_management), ["10.1.0.0/24"])
+    assert {item.id for item in around.nodes if item.kind == "host"} == {"10.1.0.2", "10.1.0.3"}
+
+
+def big_graph(hosts: int) -> Topology:
+    devices = [TopologyNode(id=name, kind="device", label=name) for name in ("core1.example.net", "core2.example.net")]
+    found = [TopologyNode(id=f"10.0.0.{index}", kind="host", label=f"10.0.0.{index}", addresses=[f"10.0.0.{index}"])
+             for index in range(1, hosts + 1)]
+    return Topology(nodes=devices + found)
+
+
+def test_a_device_is_found_by_its_name_without_the_domain() -> None:
+    assert [item.id for item in focused(big_graph(1), ["CORE1"]).nodes] == ["core1.example.net"]
+
+
+def test_a_name_on_a_big_graph_that_isnt_there_is_refused_with_its_devices_and_how_many_hosts() -> None:
+    with pytest.raises(ViewError) as refused:
+        focused(big_graph(50), ["core3"])
+    message = str(refused.value)
+    assert "Its nodes are: core1.example.net, core2.example.net, and 50 hosts, named by address." in message
+    assert "10.0.0.1" not in message
+
+
+def test_an_address_two_nodes_hold_names_them_both() -> None:
+    # A gateway address a pair of switches share.
+    graph = big_graph(1)
+    for device in graph.nodes[:2]:
+        device.addresses.append("10.0.0.254")
+    assert {item.id for item in focused(graph, ["10.0.0.254"]).nodes} == {"core1.example.net", "core2.example.net"}
+    assert named(graph, ["10.0.0.254", "10.0.0.1"]) == {
+        "10.0.0.254": {"core1.example.net", "core2.example.net"}, "10.0.0.1": {"10.0.0.1"},
+    }

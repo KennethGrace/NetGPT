@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
-import logging
 import re
 import xml.etree.ElementTree as ElementTree
 from typing import Protocol
@@ -20,8 +19,9 @@ from xml.sax.saxutils import escape
 import asyncssh
 
 from netgpt.guard import JUNIPER_JUNOS
-from netgpt.inventory import Credentials, Device, InventoryError
+from netgpt.inventory import Credentials, Device
 from netgpt.platforms.base import Platform, PlatformError
+from netgpt.platforms.ssh import TIMEOUT, SshLogin
 from netgpt.primitives import (
     ArpEntry,
     BgpSession,
@@ -34,16 +34,11 @@ from netgpt.primitives import (
     Route,
 )
 
-# asyncssh logs every connection at INFO, and NetGPT opens one per query.
-logging.getLogger("asyncssh").setLevel(logging.WARNING)
-
 END_OF_MESSAGE = "]]>]]>"
 HELLO = (
     '<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><capabilities>'
     "<capability>urn:ietf:params:netconf:base:1.0</capability></capabilities></hello>"
 )
-# Seconds to wait for a login, or for one reply. A whole switch's interfaces at the extensive level take a few.
-TIMEOUT = 60.0
 
 NETWORK_INSTANCE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 # Junos calls the main routing instance master; NetGPT calls it default on every platform, and accepts either.
@@ -87,52 +82,25 @@ class NetconfOverSsh:
 
     def __init__(self, device: Device, credentials: Credentials) -> None:
         self._device = device
-        self._credentials = credentials
-        self._connection: asyncssh.SSHClientConnection | None = None
+        self._login = SshLogin(device, credentials)
         self._writer: asyncssh.SSHWriter[str] | None = None
         self._reader: asyncssh.SSHReader[str] | None = None
         self._lock = asyncio.Lock()
         self._message_id = 0
 
     async def _open(self) -> None:
-        device, credentials = self._device, self._credentials
-        known_hosts = device.known_hosts.expanduser() if device.known_hosts else None
-        if known_hosts is not None and not known_hosts.is_file():
-            raise InventoryError(f"Known hosts file {known_hosts} for {device.name} does not exist.")
-        if credentials.ssh_key_file is not None:
-            secret = {"client_keys": [str(credentials.ssh_key())], "password": None}
-        else:
-            secret = {"client_keys": None, "password": credentials.password()}
+        connection = await self._login.connection()
         try:
-            # No ~/.ssh/config and no agent: the inventory says how to log in, and nothing else does.
-            self._connection = await asyncio.wait_for(
-                asyncssh.connect(
-                    device.host,
-                    username=credentials.username,
-                    known_hosts=str(known_hosts) if known_hosts else (),
-                    config=None,
-                    agent_path=None,
-                    **secret,
-                ),
-                TIMEOUT,
-            )
-            self._writer, self._reader, _ = await self._connection.open_session(subsystem="netconf", encoding="utf-8")
+            self._writer, self._reader, _ = await connection.open_session(subsystem="netconf", encoding="utf-8")
             self._writer.write(HELLO + END_OF_MESSAGE)
             await asyncio.wait_for(self._reader.readuntil(END_OF_MESSAGE), TIMEOUT)
-        except asyncssh.PermissionDenied:
-            await self.close()
-            raise PlatformError(f"{device.name}: the device refused the SSH login for {credentials.username}.") from None
-        except asyncssh.HostKeyNotVerifiable:
-            await self.close()
-            where = known_hosts or "~/.ssh/known_hosts"
-            raise PlatformError(f"{device.name}: its SSH host key isn't the one in {where}, so NetGPT won't log in.") from None
         except (OSError, asyncssh.Error, asyncio.IncompleteReadError, TimeoutError) as error:
             await self.close()
-            raise PlatformError(f"{device.name}: {type(error).__name__}: {error}") from error
+            raise PlatformError(f"{self._device.name}: {type(error).__name__}: {error}") from error
 
     async def rpc(self, body: str) -> str:
         async with self._lock:
-            if self._connection is None:
+            if self._writer is None:
                 await self._open()
             assert self._writer is not None and self._reader is not None
             self._message_id += 1
@@ -146,10 +114,8 @@ class NetconfOverSsh:
             return reply[: -len(END_OF_MESSAGE)]
 
     async def close(self) -> None:
-        connection, self._connection, self._writer, self._reader = self._connection, None, None, None
-        if connection is not None:
-            connection.close()
-            await connection.wait_closed()
+        self._writer, self._reader = None, None
+        await self._login.close()
 
 
 def text_of(element: ElementTree.Element | None, path: str) -> str | None:

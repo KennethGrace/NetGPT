@@ -1,0 +1,86 @@
+{
+ "TABLE_ctx": {
+  "ROW_ctx": [
+   {
+    "ptag": "2",
+    "cname": "ICL",
+    "TABLE_nbr": {
+     "ROW_nbr": [
+      {
+       "rid": "198.18.14.2",
+       "addr": "198.18.6.2",
+       "area": "0.0.0.0",
+       "intf": "Ethernet1/29",
+       "state": "FULL",
+       "transition": "10",
+       "lastchange": "P1M12DT17H45M37S",
+       "priority": "1",
+       "dr": "198.18.6.1",
+       "bdr": "198.18.6.2",
+       "helloptions": "0x2",
+       "dbdoptions": "0x42",
+       "lastnonhello": "P4M25DT9H39M28S",
+       "deadtimer": "PT37S"
+      },
+      {
+       "rid": "198.18.14.3",
+       "addr": "198.18.6.6",
+       "area": "0.0.0.0",
+       "intf": "Ethernet1/30",
+       "state": "FULL",
+       "transition": "10",
+       "lastchange": "P1M12DT17H45M19S",
+       "priority": "1",
+       "dr": "198.18.6.5",
+       "bdr": "198.18.6.6",
+       "helloptions": "0x2",
+       "dbdoptions": "0x42",
+       "lastnonhello": "P4M25DT9H39M27S",
+       "deadtimer": "PT35S"
+      }
+     ]
+    }
+   },
+   {
+    "ptag": "1",
+    "cname": "default",
+    "TABLE_nbr": {
+     "ROW_nbr": [
+      {
+       "rid": "198.18.3.3",
+       "addr": "198.18.5.254",
+       "area": "0.0.0.0",
+       "intf": "Vlan3090",
+       "state": "FULL",
+       "transition": "5",
+       "lastchange": "P4M25DT9H43M53S",
+       "priority": "1",
+       "dr": "198.18.5.254",
+       "bdr": "198.18.5.253",
+       "helloptions": "0x2",
+       "dbdoptions": "0x42",
+       "lastnonhello": "P4M25DT9H39M29S",
+       "deadtimer": "PT37S"
+      },
+      {
+       "rid": "198.18.11.0",
+       "addr": "198.18.5.1",
+       "area": "0.0.0.0",
+       "intf": "Ethernet1/17.1",
+       "state": "FULL",
+       "transition": "6",
+       "lastchange": "P4M25DT9H44M4S",
+       "priority": "1",
+       "dr": "198.18.5.1",
+       "bdr": "198.18.5.2",
+       "helloptions": "0x2",
+       "dbdoptions": "0x42",
+       "lastnonhello": "P4M25DT9H39M27S",
+       "deadtimer": "PT36S"
+      }
+     ]
+    }
+   }
+  ]
+ }
+}

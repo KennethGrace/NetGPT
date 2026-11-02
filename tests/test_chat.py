@@ -14,7 +14,10 @@ import httpx
 import pytest
 from mcp import Client
 
-from netgpt.chat import OUT_OF_TOOLS, Chat, ChatError, ChatObserver, plain_schema, supports_thinking
+from netgpt.chat import (
+    OUT_OF_TOOLS, REPLY_SHARE, Chat, ChatError, ChatObserver, answer_limit, plain_schema, supports_thinking,
+)
+from netgpt.server import tokens_in
 
 from fakes import ScriptedOllama, calls, says
 
@@ -191,6 +194,47 @@ async def test_ollama_errors_are_reported(chat_with: Any) -> None:
     chat = await chat_with(ScriptedOllama())
     with pytest.raises(ChatError, match="model 'missing' not found"):
         await chat.ask("Anyone home?")
+
+
+@pytest.mark.anyio
+async def test_a_conversation_that_outgrew_the_context_says_so_rather_than_what_ollama_said(client: Client) -> None:
+    # Ollama trims a conversation longer than num_ctx from the front, the question with it, then refuses it.
+    def overflowed(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "no user query found in messages"})
+
+    async with client, httpx.AsyncClient(base_url="http://ollama.test", transport=httpx.MockTransport(overflowed)) as http:
+        chat = Chat(client, http, "scripted", {"num_ctx": 65536})
+        await chat.start()
+        with pytest.raises(ChatError, match=r"outgrew the model's context \(65,536 tokens\), and Ollama dropped the question"):
+            await chat.ask("Where is every MAC?")
+
+
+@pytest.mark.anyio
+async def test_a_tool_answer_with_no_room_left_in_the_context_is_dropped_and_the_model_told(client: Client) -> None:
+    ollama = ScriptedOllama(calls("topology", {}), says("I'll ask about less."))
+    observer = RecordingObserver()
+    async with client, ollama.client() as http:
+        # How much of a context the conversation takes before the question, so this one can leave about 200 tokens.
+        probe = Chat(client, http, "scripted", {"num_ctx": 80_000})
+        await probe.start()
+        used = 80_000 - 80_000 // REPLY_SHARE - (probe.room() or 0)
+        chat = Chat(client, http, "scripted", {"num_ctx": (used + 200) * REPLY_SHARE // (REPLY_SHARE - 1)})
+        await chat.start()
+        assert await chat.ask("What does the network look like?", observer) == "I'll ask about less."
+    dropped = ollama.messages(1)[-1]["content"]
+    assert dropped.startswith("This answer was about ")
+    assert "tokens of this conversation's context are left, so it was dropped" in dropped
+    assert ("tool", ("topology", {}, True)) in observer.events
+
+
+def test_one_answer_may_have_a_quarter_of_the_context() -> None:
+    assert answer_limit(65536) == 16384
+
+
+def test_a_digit_counts_as_a_token_of_its_own() -> None:
+    # qwen's and gemma's tokenizers split numbers into digits, so an address is about a token a character.
+    assert tokens_in("192.0.2.1") == 6 + 3 // 3
+    assert tokens_in('{"device":"core"}') == 17 // 3
 
 
 def test_schemas_reach_ollama_without_references_or_null_unions() -> None:

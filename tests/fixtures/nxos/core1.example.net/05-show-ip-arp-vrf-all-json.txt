@@ -1,0 +1,87 @@
+{
+ "TABLE_vrf": {
+  "ROW_vrf": {
+   "vrf-name-out": "all",
+   "cnt-total": "314",
+   "TABLE_adj": {
+    "ROW_adj": [
+     {
+      "intf-out": "Vlan3097",
+      "ip-addr-out": "198.18.7.13",
+      "time-stamp": "P4M25DT9H46M51S",
+      "incomplete": "true",
+      "flags": null
+     },
+     {
+      "intf-out": "Vlan3091",
+      "ip-addr-out": "198.18.7.1",
+      "time-stamp": "P4M25DT9H46M57S",
+      "incomplete": "true",
+      "flags": null
+     },
+     {
+      "intf-out": "Vlan3090",
+      "ip-addr-out": "198.18.5.254",
+      "time-stamp": "P4M25DT9H44M55S",
+      "mac": "0200.0000.0025",
+      "flags": null
+     },
+     {
+      "intf-out": "Vlan2999",
+      "ip-addr-out": "198.18.8.3",
+      "time-stamp": "P4M25DT9H44M59S",
+      "mac": "0200.0000.0025",
+      "flags": null
+     },
+     {
+      "intf-out": "Vlan2552",
+      "ip-addr-out": "198.18.9.20",
+      "time-stamp": "P4M25DT9H46M43S",
+      "mac": "0200.0000.0026",
+      "flags": "+"
+     },
+     {
+      "intf-out": "Vlan2552",
+      "ip-addr-out": "198.18.9.21",
+      "time-stamp": "P4M25DT9H41M5S",
+      "mac": "0200.0000.0027",
+      "flags": "+"
+     },
+     {
+      "intf-out": "mgmt0",
+      "ip-addr-out": "198.18.0.2",
+      "time-stamp": "P4M25DT9H43M37S",
+      "mac": "0200.0000.0001",
+      "flags": null
+     },
+     {
+      "intf-out": "Ethernet1/29",
+      "ip-addr-out": "198.18.6.2",
+      "time-stamp": "P4M25DT9H41M44S",
+      "mac": "0200.0000.0028",
+      "flags": null
+     },
+     {
+      "intf-out": "Ethernet1/30",
+      "ip-addr-out": "198.18.6.6",
+      "time-stamp": "P4M25DT9H34M41S",
+      "mac": "0200.0000.0029",
+      "flags": null
+     },
+     {
+      "intf-out": "Vlan2999",
+      "ip-addr-out": "198.18.8.1",
+      "time-stamp": "-",
+      "mac": "0000.0c9f.fbb7"
+     },
+     {
+      "intf-out": "Vlan2845",
+      "ip-addr-out": "198.18.10.1",
+      "time-stamp": "-",
+      "mac": "0000.5e00.012d"
+     }
+    ]
+   }
+  }
+ }
+}

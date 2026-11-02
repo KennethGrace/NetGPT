@@ -1,0 +1,4 @@
+Syntax error while parsing 'show bogus'
+
+
+Cmd exec error.

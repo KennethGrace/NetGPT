@@ -1,0 +1,66 @@
+{
+ "TABLE_ctx": {
+  "ROW_ctx": {
+   "ptag": "1",
+   "cname": "default",
+   "TABLE_intf": {
+    "ROW_intf": [
+     {
+      "ifname": "Vlan91",
+      "admin_status": "up",
+      "proto_status": "up",
+      "addr": "198.18.35.2",
+      "masklen": 24,
+      "area": "198.18.13.0",
+      "if_cfg": "true",
+      "state_str": "BDR",
+      "type_str": "BROADCAST",
+      "cost": 40,
+      "index": 1,
+      "transmit_delay": 1,
+      "if_priority": 1,
+      "dr_rid": "198.18.3.103",
+      "dr_addr": "198.18.35.3",
+      "bdr_rid": "198.18.3.102",
+      "bdr_addr": "198.18.35.2",
+      "nbr_total": 1,
+      "nbr_flood": 1,
+      "nbr_adjs": 1,
+      "hello_interval": 10,
+      "dead_interval": 40,
+      "wait_interval": 40,
+      "rxmt_interval": 5,
+      "hello_timer": "PT5S",
+      "auth_type": "none",
+      "link_lsa_cnt": 0,
+      "link_lsa_crc": 0
+     },
+     {
+      "ifname": "Ethernet1/25",
+      "admin_status": "up",
+      "proto_status": "down",
+      "addr": "198.18.5.102",
+      "masklen": 30,
+      "area": "0.0.0.0",
+      "if_cfg": "true",
+      "state_str": "DOWN",
+      "type_str": "P2P",
+      "cost": 4,
+      "index": 2,
+      "transmit_delay": 1,
+      "nbr_total": 0,
+      "nbr_flood": 0,
+      "nbr_adjs": 0,
+      "hello_interval": 10,
+      "dead_interval": 40,
+      "wait_interval": 40,
+      "rxmt_interval": 5,
+      "auth_type": "none",
+      "link_lsa_cnt": 0,
+      "link_lsa_crc": 0
+     }
+    ]
+   }
+  }
+ }
+}

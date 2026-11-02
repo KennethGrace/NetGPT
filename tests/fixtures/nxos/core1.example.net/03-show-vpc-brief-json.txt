@@ -1,0 +1,61 @@
+{
+ "vpc-domain-id": "1",
+ "vpc-peer-status": "peer-ok",
+ "vpc-peer-status-reason": "SUCCESS",
+ "vpc-peer-keepalive-status": "peer-alive",
+ "vpc-peer-consistency": "consistent",
+ "vpc-per-vlan-peer-consistency": "consistent",
+ "vpc-peer-consistency-status": "SUCCESS",
+ "vpc-type-2-consistency": "inconsistent",
+ "vpc-type-2-consistency-status": "SYSERR_SVI_COMPAT_CHECK_FAILURE",
+ "vpc-role": "primary",
+ "num-of-vpcs": "21",
+ "peer-gateway": "1",
+ "dual-active-excluded-vlans": "-",
+ "vpc-graceful-consistency-check-status": "enabled",
+ "vpc-auto-recovery-status": "Enabled, timer is off.(timeout = 240s)",
+ "vpc-delay-restore-status": "Timer is off.(timeout = 30s)",
+ "vpc-delay-restore-svi-status": "Timer is off.(timeout = 10s)",
+ "operational-l3-peer": "Enabled",
+ "vpc-peer-link-hdr": "Start of VPC peer-link table",
+ "TABLE_peerlink": {
+  "ROW_peerlink": {
+   "peer-link-id": "1",
+   "peerlink-ifindex": "Po1",
+   "peer-link-port-state": "1",
+   "peer-up-vlan-bitset": "1,5,9-10,20,23,28,30-31,36,40,50,60,66,77,80,88-91,99-103,105,114,118,130,144,151,154-174,193-196,199,201-202,211,214-215,246-248,250-255,311,411-412,488-489,511-512,599,666,690,810-814,820-826,888,999,1600,1680,1924,2048,2133,2146-2147,2197-2199,2418,2500-2502,2508,2552,2700,2727,2730,2764-2766,2785,2828,2845,2999,3001,3090-3092,3097,3120"
+  }
+ },
+ "vpc-end": [
+  "End of table",
+  "End of table"
+ ],
+ "vpc-hdr": "Start of vPC table",
+ "vpc-not-es": "vPC complex",
+ "TABLE_vpc": {
+  "ROW_vpc": [
+   {
+    "vpc-id": "2",
+    "vpc-ifindex": "Po2",
+    "vpc-port-state": "1",
+    "phy-port-if-removed": "disabled",
+    "vpc-thru-peerlink": "0",
+    "vpc-consistency": "consistent",
+    "vpc-consistency-status": "SUCCESS",
+    "up-vlan-bitset": "1,5,9-10,20,23,28,30-31,36,40,50,60,66,77,80,88-91,99-103,105,114,118,130,144,151,154-174,193-196,199,201-202,211,214-215,246-248,250-255,311,411-412,488-489,511-512,599,666,690,810-814,820-826,888,999,1600,1680,1924,2048,2133,2146-2147,2197-2199,2418,2500-2502,2508,2552,2700,2727,2730,2764-2766,2785,2828,2845,2999,3001,3090-3092,3097,3120",
+    "es-attr": "DF: Invalid"
+   },
+   {
+    "vpc-id": "3",
+    "vpc-ifindex": "Po3",
+    "vpc-port-state": "1",
+    "phy-port-if-removed": "disabled",
+    "vpc-thru-peerlink": "0",
+    "vpc-consistency": "consistent",
+    "vpc-consistency-status": "SUCCESS",
+    "up-vlan-bitset": "3120",
+    "es-attr": "DF: Invalid"
+   }
+  ]
+ }
+}

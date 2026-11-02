@@ -267,6 +267,16 @@ def test_ospf_interfaces_names_each_mismatch_after_its_network() -> None:
     ]
 
 
+def test_a_network_two_routers_both_advertise_passively_is_no_missing_adjacency() -> None:
+    # A pair of gateways (VRRP, HSRP) are each passive on the hosts' network, by design.
+    ospf = [ospf_interface("r1", "10.1.0.0", passive=True), ospf_interface("r2", "10.1.0.1", passive=True, mtu=9000)]
+    assert ospf_mismatches(LINK, ospf) == []
+    graph = build_ospf(ROUTERS, LINK, ospf, [], [])
+    assert {link.id: link.problems for link in graph.links} == {
+        "10.1.0.0/31--r1:ethernet-1/1.0": [], "10.1.0.0/31--r2:ethernet-1/1.0": [],
+    }
+
+
 @pytest.mark.anyio
 async def test_every_pair_of_ospf_interfaces_in_the_wan_lab_agrees() -> None:
     wan = await recorded_wan()

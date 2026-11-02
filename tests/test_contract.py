@@ -23,12 +23,13 @@ from netgpt.engine import Engine
 from netgpt.forwarding import trace_path
 from netgpt.inventory import Credentials, Device, Inventory
 from netgpt.platforms.junos import JunosPlatform
+from netgpt.platforms.nxos import NxosPlatform
 from netgpt.server import build_server
 from netgpt.statistics import Poller
 from netgpt.views import make_view
 from netgpt.web import build_app
 
-from fakes import FakePlatform, NetconfReplay, ScriptedOllama, recorded_lab, recorded_wan
+from fakes import CommandReplay, FakePlatform, NetconfReplay, ScriptedOllama, recorded_lab, recorded_wan
 from schemas import SCHEMA, check, published
 
 TOKEN = "correct-horse-battery-staple"
@@ -161,6 +162,25 @@ async def test_the_recorded_juniper_switches_tables_match_the_schema() -> None:
         found["ArpEntry"] += await platform.arp_table()
         found["Route"] += await platform.routes("default")
         found["BgpSession"] += await platform.bgp_sessions()
+    for record, items in found.items():
+        assert items, record
+        for item in items:
+            check(record, item.model_dump(mode="json"))
+
+
+@pytest.mark.anyio
+async def test_the_recorded_nexus_switches_tables_match_the_schema() -> None:
+    found: dict[str, list[BaseModel]] = defaultdict(list)
+    for name in ("core1.example.net", "dc1.example.net"):
+        device = Device(name=name, host="192.0.2.1", platform="cisco_nxos", credentials="lab")
+        platform = NxosPlatform(device, Credentials(username="netgpt", password_env="UNUSED"), session=CommandReplay(name))
+        found["LldpNeighbor"] += await platform.lldp_neighbors()
+        found["Interface"] += await platform.interfaces()
+        found["MacEntry"] += await platform.mac_table()
+        found["ArpEntry"] += await platform.arp_table()
+        found["Route"] += await platform.routes("default")
+        found["OspfInterface"] += await platform.ospf_interfaces()
+        found["OspfNeighbor"] += await platform.ospf_neighbors()
     for record, items in found.items():
         assert items, record
         for item in items:

@@ -114,12 +114,29 @@ class Inventory(BaseModel):
         return inventory
 
     def get(self, name: str) -> Device:
-        """Return the named device, or raise InventoryError listing the known names."""
+        """
+        Return the named device, or raise InventoryError listing the known names. A
+        name may leave out the domain (core1 for core1.example.net), in any case, when
+        only one device's name starts with it.
+        """
         for device in self.devices:
             if device.name == name:
                 return device
+        wanted = name.strip().lower()
+        found = [device for device in self.devices if wanted in (device.name.lower(), device.name.lower().split(".")[0])]
+        if len(found) == 1:
+            return found[0]
+        if found:
+            raise InventoryError(f"'{name}' could be {' or '.join(device.name for device in found)}. Name one.")
         known = ", ".join(device.name for device in self.devices)
         raise InventoryError(f"Unknown device '{name}'. Known devices: {known}.")
+
+    def name_of(self, name: str) -> str:
+        """A device's name as the inventory has it, from any name get takes; a name it doesn't take, as given."""
+        try:
+            return self.get(name).name
+        except InventoryError:
+            return name
 
     def check_sweep(self, network: ipaddress.IPv4Network) -> None:
         """Raise InventoryError unless the network lies inside one of the sweep networks."""

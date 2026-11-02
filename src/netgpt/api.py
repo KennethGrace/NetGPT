@@ -39,6 +39,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from netgpt.engine import Engine, RequestError, SharedReads, Table
+from netgpt.filters import FilterError
 from netgpt.forwarding import TraceError
 from netgpt.guard import GuardError
 from netgpt.inventory import InventoryError
@@ -58,7 +59,7 @@ DEFAULT_MAX_AGE = 30.0
 HEADERS = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"}
 
 # What the engine refuses, by the status that says so. Anything else is a bug, and fails loudly.
-REFUSED = (RequestError, InventoryError, GuardError, TraceError, ViewError, ChartError)
+REFUSED = (RequestError, FilterError, InventoryError, GuardError, TraceError, ViewError, ChartError)
 UNSUPPORTED = (UnsupportedError,)
 FAILED = (PlatformError,)
 UNAVAILABLE = (StoreError,)
@@ -80,6 +81,10 @@ class TopologyQuery(Query):
     plane: PlaneChoice = "data"
     layer: Layer = "l2"
     network_instance: str = "default"
+
+
+class FocusedQuery(TopologyQuery):
+    focus: list[str] = Field(default_factory=list)
 
 
 class PathQuery(Query):
@@ -106,13 +111,37 @@ class TableQuery(Query):
     device: list[str] = Field(default_factory=list)
 
 
+# Each table's filters (netgpt.filters), given once for each value: ?mac=0200.c0ff&mac=ee01.
+
+
+class PortsQuery(TableQuery):
+    interface: list[str] = Field(default_factory=list)
+
+
+class InterfacesQuery(PortsQuery):
+    address: list[str] = Field(default_factory=list)
+
+
+class MacQuery(PortsQuery):
+    mac: list[str] = Field(default_factory=list)
+    vlan: list[int] = Field(default_factory=list)
+
+
+class ArpQuery(PortsQuery):
+    address: list[str] = Field(default_factory=list)
+    mac: list[str] = Field(default_factory=list)
+
+
 class RoutesQuery(TableQuery):
     network_instance: str = "default"
+    destination: list[str] = Field(default_factory=list)
+    protocol: list[str] = Field(default_factory=list)
 
 
 class TrafficQuery(Query):
     device: list[str] = Field(default_factory=list)
     minutes: float = Field(5.0, gt=0)
+    interface: list[str] = Field(default_factory=list)
 
 
 class ChartQuery(Query):
@@ -146,6 +175,11 @@ class SweepBody(Query):
 TABLES: dict[str, Table] = {
     "lldp_neighbors": "lldp_neighbors", "interfaces": "interfaces", "mac_table": "mac_table", "arp_table": "arp_table",
     "routes": "routes", "bgp_sessions": "bgp_sessions", "ospf_neighbors": "ospf_neighbors", "ospf_interfaces": "ospf_interfaces",
+}
+# What each table takes besides device: the engine's own parameters, so they pass straight through.
+TABLE_QUERIES: dict[str, type[TableQuery]] = {
+    "lldp_neighbors": PortsQuery, "interfaces": InterfacesQuery, "mac_table": MacQuery, "arp_table": ArpQuery,
+    "routes": RoutesQuery, "ospf_interfaces": PortsQuery,
 }
 
 Handler = Callable[[Request, Engine], Awaitable[BaseModel | dict[str, Any]]]
@@ -257,8 +291,8 @@ def build_api(engine: Engine, token: str, shared: SharedReads | None = None) -> 
         return Collection[DeviceInfo](items=engine.devices())
 
     async def topology(request: Request, engine: Engine) -> BaseModel:
-        asked = parse(TopologyQuery, request)
-        return await engine.topology(asked.plane, asked.layer, asked.network_instance)
+        asked = parse(FocusedQuery, request)
+        return await engine.topology(asked.plane, asked.layer, asked.network_instance, asked.focus or None)
 
     async def path(request: Request, engine: Engine) -> BaseModel:
         asked = parse(PathQuery, request)
@@ -275,15 +309,14 @@ def build_api(engine: Engine, token: str, shared: SharedReads | None = None) -> 
         name = request.path_params["table"]
         if name not in TABLES:
             raise RequestError(f"There's no table called {name!r}. The tables are {', '.join(TABLES)}.")
-        if name == "routes":
-            asked = parse(RoutesQuery, request)
-            return await engine.routes(asked.device or None, asked.network_instance)
-        asked = parse(TableQuery, request)
-        return await getattr(engine, name)(asked.device or None)
+        asked = parse(TABLE_QUERIES.get(name, TableQuery), request)
+        # A filter not given is an empty list here, and None to the engine: every row.
+        given = {key: (value or None) if isinstance(value, list) else value for key, value in asked.model_dump().items()}
+        return await getattr(engine, name)(given.pop("device"), **given)
 
     async def traffic(request: Request, engine: Engine) -> BaseModel:
         asked = parse(TrafficQuery, request)
-        found = await engine.traffic(asked.device or None, asked.minutes)
+        found = await engine.traffic(asked.device or None, asked.minutes, asked.interface or None)
         return Traffic(interval=engine.poller().interval, minutes=asked.minutes, ports=found.items, errors=found.errors)
 
     async def chart(request: Request, engine: Engine) -> BaseModel:

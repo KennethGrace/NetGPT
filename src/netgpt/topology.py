@@ -48,10 +48,15 @@ Layer = Literal["l2", "l3", "ospf"]
 
 # A subinterface (ethernet-1/1.0, GigabitEthernet0/0.100) belongs to the port before the dot.
 SUBINTERFACE = re.compile(r"^(?P<port>.+)\.\d+$")
+# A port's name is a word and a number. An abbreviation spells less of the word: Gi1/0/51 is
+# GigabitEthernet1/0/51, and Eth1/30 is Ethernet1/30.
+PORT_NAME = re.compile(r"^(?P<word>[A-Za-z][A-Za-z-]*?)(?P<number>\d[\d/.:]*)$")
 
-# MAC table entries for the switch's own addresses (its IRB interfaces, reserved MACs). Every other
-# kind (learnt, learned, dynamic, static, ...) says which port a MAC is behind.
-OWN_ENTRIES = {"irb-interface", "irb-interface-anycast", "reserved"}
+# MAC table entries for the switch's own addresses (its IRB interfaces, its gateway MACs, reserved MACs).
+# Every other kind (learnt, learned, dynamic, static, ...) says which port a MAC is behind, but a secondary one.
+OWN_ENTRIES = {"irb-interface", "irb-interface-anycast", "reserved", "gateway"}
+# An entry the switch didn't learn itself (NX-OS's without its * mark): it says nothing about where the MAC is.
+SECONDARY_ENTRIES = {"secondary"}
 
 # How far an address is followed from switch to switch before giving up.
 MAX_SWITCHES = 16
@@ -87,6 +92,9 @@ class TopologyNode(BaseModel):
     role: str | None = None
     platform: str | None = None
     addresses: list[str] = Field(default_factory=list)
+    macs: list[str] = Field(
+        default_factory=list, description="The MAC addresses ARP found its addresses at, for a host or an LLDP neighbor."
+    )
     error: str | None = Field(None, description="Why the device could not be fully queried.")
     router_id: str | None = Field(None, description="In the OSPF view, the router's OSPF router ID.")
     areas: list[str] = Field(
@@ -216,6 +224,36 @@ def _neighbor_id(record: LldpNeighbor) -> str:
     return record.neighbor or record.neighbor_chassis_id or f"unknown neighbor of {record.device} {record.interface}"
 
 
+def _named_as_their_own(neighbors: list[LldpNeighbor], interfaces: list[Interface]) -> list[LldpNeighbor]:
+    """
+    The neighbors, with each far port named as the far device names it, when that
+    device's interfaces were read. A device may send an abbreviation as its port ID
+    (Cisco's switches send Gi1/0/51 for GigabitEthernet1/0/51), and both ends of a
+    cable must name its ports alike to be one link. An abbreviation that could be
+    more than one of the device's ports is left as it was sent.
+    """
+    names: dict[str, set[str]] = defaultdict(set)
+    by_number: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for interface in interfaces:
+        names[interface.device].add(interface.name)
+        if (match := PORT_NAME.match(interface.name)) is not None:
+            by_number[(interface.device, match["number"])].append(interface.name)
+
+    def own(device: str, port: str | None) -> str | None:
+        if port is None or device not in names or port in names[device] or (match := PORT_NAME.match(port)) is None:
+            return port
+        word = match["word"].lower()
+        found = [
+            name for name in by_number.get((device, match["number"]), []) if PORT_NAME.match(name)["word"].lower().startswith(word)
+        ]
+        return found[0] if len(found) == 1 else port
+
+    return [
+        record.model_copy(update={"neighbor_interface": own(_neighbor_id(record), record.neighbor_interface)})
+        for record in neighbors
+    ]
+
+
 def _address_key(node: TopologyNode) -> tuple[int, ...]:
     """Hosts and networks in address order."""
     try:
@@ -251,6 +289,8 @@ def build_topology(
     into one graph of the network at layer 2.
     """
     graph = _Graph()
+    interfaces = list(interfaces)
+    neighbors = _named_as_their_own(neighbors, interfaces)
     inventory = {device.name: device for device in devices}
     failed: dict[str, list[str]] = defaultdict(list)
     for error in errors:
@@ -271,16 +311,23 @@ def build_topology(
         )
 
     # The bridges each port switches in, the addresses each device owns, and where switches have seen each MAC.
+    # A port in an aggregate is cabled on its own, but the MAC table names the aggregate.
     bridges_at: dict[Endpoint, set[str]] = defaultdict(set)
     owned: dict[str, str] = {}
+    aggregate_of: dict[Endpoint, str] = {}
+    members_of: dict[Endpoint, list[str]] = defaultdict(list)
     for interface in interfaces:
         if interface.mode == "bridged" and interface.network_instance:
             bridges_at[(interface.device, port_of(interface.name))].add(interface.network_instance)
         for address in interface.addresses:
             owned.setdefault(address.split("/")[0], interface.device)
+        if interface.aggregate:
+            aggregate_of[(interface.device, port_of(interface.name))] = interface.aggregate
+            members_of[(interface.device, interface.aggregate)].append(port_of(interface.name))
     learned: dict[tuple[str, str], list[MacEntry]] = defaultdict(list)
     for entry in macs:
         learned[(entry.device, mac_key(entry.mac))].append(entry)
+    down = {(interface.device, interface.name) for interface in interfaces if (interface.oper_state or "").lower() == "down"}
 
     def management(endpoint: Endpoint) -> bool:
         node, interface = endpoint
@@ -335,12 +382,37 @@ def build_topology(
                     device,
                 )
 
+    def heard_on(device: str, port: str) -> list[LldpNeighbor]:
+        """What LLDP hears on a port, or on an aggregate's members, which go where the aggregate goes."""
+        return seen.get((device, port)) or [
+            record for member in members_of.get((device, port), []) for record in seen.get((device, member), [])
+        ]
+
+    def same_port(device: str, one: str, other: str) -> bool:
+        """Whether two of a device's interfaces are on one port, an aggregate and its members being one."""
+        return len({aggregate_of.get((device, port_of(name)), port_of(name)) for name in (one, other)}) == 1
+
+    def unusable(entry: MacEntry) -> str | None:
+        """Why a MAC table entry says nothing about where its MAC is, if it doesn't."""
+        if (entry.entry_type or "").lower() in SECONDARY_ENTRIES:
+            return "an entry it didn't learn itself"
+        if (entry.device, entry.interface) in down:
+            return "a port that is down"
+        return None
+
     def forwarding(device: str, mac: str, bridges: set[str] | None) -> MacEntry | None:
         """Where a switch's MAC table says a MAC is, in one of the given bridges (or any)."""
         for entry in learned.get((device, mac), []):
-            if bridges is None or entry.network_instance in bridges:
+            if unusable(entry) is None and (bridges is None or entry.network_instance in bridges):
                 return entry
         return None
+
+    def passed_over(device: str, mac: str) -> list[str]:
+        """The entries forwarding passes over, and why, for the evidence."""
+        return [
+            f"MAC table on {device} ({entry.network_instance}): {entry.mac} on {entry.interface}, {why}"
+            for entry in learned.get((device, mac), []) if (why := unusable(entry)) is not None
+        ]
 
     def locate(entry: ArpEntry) -> tuple[str | None, LinkEnd | None, list[str]]:
         """
@@ -357,11 +429,16 @@ def build_topology(
         if (node, port) not in seen and mac and (found := forwarding(node, mac, None)) is not None:
             # Heard on a VLAN interface (IRB, SVI): the bridge's own MAC table says which port.
             trail.append(f"MAC table on {node} ({found.network_instance}): {entry.mac} on {found.interface}")
+            if (found.entry_type or "").lower() in OWN_ENTRIES:
+                # The switch's own MAC, such as a gateway address it shares with a peer: the address is its own too.
+                return node, None, trail
             port = port_of(found.interface)
+        elif (node, port) not in seen and mac:
+            trail += passed_over(node, mac)
         for _ in range(MAX_SWITCHES):
             if (segment := segment_of.get((node, port))) is not None:
                 return None, LinkEnd(node=segment), trail
-            heard = seen.get((node, port), [])
+            heard = heard_on(node, port)
             if not heard:
                 return None, LinkEnd(node=node, interface=port, bridges=sorted(bridges_at.get((node, port), ()))), trail
             far, far_port = _neighbor_id(heard[0]), heard[0].neighbor_interface
@@ -371,36 +448,60 @@ def build_topology(
                 return far, None, trail
             found = forwarding(far, mac, bridges) if mac else None
             if found is None:
+                trail += passed_over(far, mac) if mac else []
                 trail.append(f"{far} bridges {far_port}, but its MAC table doesn't list {entry.mac or 'the MAC'} (aged out?)")
                 return None, LinkEnd(node=far, bridges=sorted(bridges)), trail
             trail.append(f"MAC table on {far} ({found.network_instance}): {entry.mac} on {found.interface}")
-            if (found.entry_type or "").lower() in OWN_ENTRIES or port_of(found.interface) == port_of(far_port):
+            if (found.entry_type or "").lower() in OWN_ENTRIES or same_port(far, found.interface, far_port):
                 return far, None, trail
             node, port = far, port_of(found.interface)
         return None, LinkEnd(node=node, interface=port), trail
 
+    # Where each address is, by every ARP entry for it: several devices can ARP for one address (a pair of gateways
+    # does), and their walks can end in different places.
     managed_at = {device.host: device.name for device in devices}
+    placed: dict[str, list[tuple[int, ArpEntry, str | None, LinkEnd | None, list[str], str, Plane]]] = defaultdict(list)
     for entry in arp:
         endpoint: Endpoint = (entry.device, port_of(entry.interface))
-        plane = "management" if management(endpoint) else "data"
+        plane: Plane = "management" if management(endpoint) else "data"
         evidence = f"ARP on {entry.device} {entry.interface}: {entry.ip_address} is at {entry.mac or 'an unknown MAC'}"
         if entry.ip_address in managed_at:
             continue  # An inventory device's own management address; nothing new.
         if entry.ip_address in owned:
             continue  # An address an inventory device reports on its own interfaces.
         owner, attach, trail = locate(entry)
-        said = "; ".join([evidence, *trail])
-        if owner is not None:
-            node = graph.nodes[owner]
-            if entry.ip_address not in node.addresses:
-                node.addresses.append(entry.ip_address)
-            node.evidence.append(f"{said}, the LLDP neighbor on that port." if not trail else f"{said}: {owner}'s address.")
-            continue
-        host = graph.node(entry.ip_address, kind="host", plane=plane, addresses=[entry.ip_address])
-        if plane == "data":
-            host.plane = "data"  # Seen on the data plane anywhere puts a host on it.
-        host.evidence.append(f"{said}.")
-        graph.link(attach, LinkEnd(node=entry.ip_address), plane, f"{said}.", entry.device)
+        # A node that owns the address is the most a walk can find; a walk that went past the interface ARP heard it
+        # on, through a MAC table or a cable, found more than one that stayed there.
+        moved = attach is not None and (attach.node, attach.interface) != endpoint
+        rank = 2 if owner is not None else 1 if moved else 0
+        placed[entry.ip_address].append((rank, entry, owner, attach, trail, "; ".join([evidence, *trail]), plane))
+
+    passed: list[tuple[str, str]] = []
+    for address, placements in placed.items():
+        best = max(placement[0] for placement in placements)
+        for rank, entry, owner, attach, trail, said, plane in placements:
+            if rank < best:
+                passed.append((address, f"{said}."))  # Another walk found more; what this one saw is evidence for it.
+                continue
+            if owner is not None:
+                node = graph.nodes[owner]
+                if address not in node.addresses:
+                    node.addresses.append(address)
+                if entry.mac and node.kind != "device" and entry.mac not in node.macs:
+                    node.macs.append(entry.mac)
+                node.evidence.append(f"{said}, the LLDP neighbor on that port." if not trail else f"{said}: {owner}'s address.")
+                continue
+            host = graph.node(address, kind="host", plane=plane, addresses=[address])
+            if plane == "data":
+                host.plane = "data"  # Seen on the data plane anywhere puts a host on it.
+            if entry.mac and entry.mac not in host.macs:
+                host.macs.append(entry.mac)
+            host.evidence.append(f"{said}.")
+            graph.link(attach, LinkEnd(node=address), plane, f"{said}.", entry.device)
+    for address, said in passed:
+        for node in graph.nodes.values():
+            if address in node.addresses and node.kind != "device" and said not in node.evidence:
+                node.evidence.append(said)
 
     for link in graph.links.values():
         for end in (link.a, link.b):
@@ -609,11 +710,18 @@ def _ospf_networks(
     return dict(sorted(members.items(), key=lambda item: (item[0].network_address, item[0].prefixlen)))
 
 
-def ospf_mismatches(interfaces: Iterable[Interface], ospf_interfaces: Iterable[OspfInterface]) -> list[str]:
+def ospf_mismatches(
+    interfaces: Iterable[Interface],
+    ospf_interfaces: Iterable[OspfInterface],
+    about: Callable[[OspfInterface], bool] | None = None,
+) -> list[str]:
     """
     What keeps routers that share a network from becoming neighbors, from their
     settings alone: for each network with two routers' OSPF interfaces on it, in each
-    network instance, what the two ends disagree on (ospf_disagreements), after the network.
+    network instance, what the two ends disagree on (ospf_disagreements), after the
+    network. Two passive ends aren't meant to be neighbors: each advertises the
+    network, as a pair of gateways does. about: only the networks with an end it
+    accepts, though every interface still counts in how the others are set.
     """
     ospf_interfaces = list(ospf_interfaces)
     prefixes = _addresses(interfaces)
@@ -621,7 +729,9 @@ def ospf_mismatches(interfaces: Iterable[Interface], ospf_interfaces: Iterable[O
     for instance in sorted({interface.network_instance for interface in ospf_interfaces}):
         mine = [interface for interface in ospf_interfaces if interface.network_instance == instance]
         for network, ends in _ospf_networks(mine, prefixes).items():
-            if len(ends) == 2 and ends[0].device != ends[1].device:
+            if about is not None and not any(about(end) for end in ends):
+                continue
+            if len(ends) == 2 and ends[0].device != ends[1].device and not all(end.passive for end in ends):
                 where = f"{network}" if instance == "default" else f"{network} in {instance}"
                 mismatches += [f"{where}: {line}" for line in ospf_disagreements(ends, _others(ends, mine))]
     return mismatches
@@ -704,7 +814,7 @@ def build_ospf(
     for network, ends in _ospf_networks(mine, prefixes).items():
         routers = {end.device for end in ends}
         evidence = [_ospf_says(end) for end in ends]
-        if len(ends) == 2 and len(routers) == 2:
+        if len(ends) == 2 and len(routers) == 2 and not all(end.passive for end in ends):
             states = {end.device: state_of(end.device, end.interface, other.device) for end, other in (ends, ends[::-1])}
             a, b = (
                 LinkEnd(node=end.device, interface=end.interface, address=str(prefix), area=end.area, cost=end.cost,
@@ -741,7 +851,8 @@ def build_ospf(
             ]
             paired.add((end.device, end.interface))
             continue
-        # A network with one OSPF router on it (a LAN it advertises) or several (a shared segment): a node.
+        # A network with one OSPF router on it (a LAN it advertises), two passive ones (gateways that both advertise
+        # it), or several (a shared segment): a node.
         areas = sorted({end.area for end in ends})
         subnet = graph.node(str(network), kind="subnet", plane="data", areas=areas, evidence=evidence)
         for end in ends:

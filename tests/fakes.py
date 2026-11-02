@@ -17,6 +17,7 @@ import httpx
 from netgpt.guard import NOKIA_SRLINUX
 from netgpt.platforms import Platform, PlatformError
 from netgpt.inventory import Credentials, Device
+from netgpt.platforms.nxos import NxosPlatform, Reply
 from netgpt.platforms.srlinux import SRLinuxPlatform
 from netgpt.primitives import (
     ArpEntry,
@@ -55,6 +56,31 @@ def replay(fixtures: dict[str, str]) -> tuple[httpx.MockTransport, list[str]]:
 
 
 JUNOS_FIXTURES = Path(__file__).parent / "fixtures" / "junos"
+NXOS_FIXTURES = Path(__file__).parent / "fixtures" / "nxos"
+
+
+class CommandReplay:
+    """Answers each CLI command with the reply recorded for it on an NX-OS device, and keeps what was asked."""
+
+    def __init__(self, device: str) -> None:
+        self.folder = NXOS_FIXTURES / device
+        self.replies: dict[str, dict[str, Any]] = json.loads((self.folder / "replies.json").read_text())
+        self.asked: list[str] = []
+
+    async def run(self, command: str) -> Reply:
+        self.asked.append(command)
+        reply = self.replies[command]
+        return Reply(reply["status"], (self.folder / reply["file"]).read_text())
+
+    async def close(self) -> None:
+        pass
+
+
+class RecordedNexus(NxosPlatform):
+    """An NX-OS switch that answers from its recorded replies, for an engine to read."""
+
+    def __init__(self, device: Device, credentials: Credentials, session: Any = None) -> None:
+        super().__init__(device, credentials, session=session or CommandReplay(device.name))
 
 
 class NetconfReplay:

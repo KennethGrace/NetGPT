@@ -142,7 +142,9 @@ async def test_a_refusal_says_what_the_api_would_answer(api: httpx.AsyncClient) 
     refusals = [
         ("/tables/nope", {}, 400, "The tables are lldp_neighbors, interfaces"),
         ("/topology", {"layer": "l7"}, 400, "layer: Input should be 'l2', 'l3' or 'ospf'."),
-        ("/topology", {"layers": "l3"}, 400, "layers isn't a parameter here; the route takes plane, layer, network_instance."),
+        ("/topology", {"layers": "l3"}, 400, "layers isn't a parameter here; the route takes plane, layer, network_instance, focus"),
+        ("/tables/arp_table", {"mac": "core1"}, 400, "'core1' isn't part of a MAC address."),
+        ("/tables/bgp_sessions", {"mac": "8da3"}, 400, "mac isn't a parameter here; the route takes device."),
         ("/devices", {"device": "leaf1"}, 400, "the route takes no parameters"),
         ("/view", {"focus": "leaf9"}, 400, "'leaf9'"),
         ("/view", {"source": "198.51.100.11"}, 400, "A path needs both a source and a destination."),
@@ -158,6 +160,19 @@ async def test_a_refusal_says_what_the_api_would_answer(api: httpx.AsyncClient) 
         check("Refusal", response.json())
     posted = await api.post("/devices")
     assert posted.status_code == 405 and "it answers GET" in posted.json()["error"]
+
+
+@pytest.mark.anyio
+async def test_the_tables_take_the_tools_filters_and_topology_its_focus(nexus: Engine) -> None:
+    transport = httpx.ASGITransport(app=build_api(nexus, TOKEN))
+    async with httpx.AsyncClient(transport=transport, base_url="http://netgpt.test", headers=BEARER) as api:
+        macs = await api.get("/tables/mac_table", params={"vlan": ["80", "20"], "interface": "Eth1/32"})
+        routes = await api.get("/tables/routes", params={"device": "core1", "destination": "198.18.12.9"})
+        around = await api.get("/topology", params={"focus": "198.18.9.20"})
+    assert [item["mac"] for item in macs.json()["items"]] == ["0200.0000.0022", "0200.0000.0023"]
+    assert [item["prefix"] for item in routes.json()["items"]] == ["198.18.12.0/24"]
+    assert {node["id"] for node in around.json()["nodes"]} == {"198.18.9.20", "core1.example.net"}
+    check("Topology", around.json())
 
 
 @pytest.mark.anyio

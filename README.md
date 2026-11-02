@@ -15,21 +15,38 @@ The tools return typed records grouped by network layer (LLDP adjacencies, MAC t
 | `show`           | The text output of one read-only CLI command on one device.                             |
 | `lldp_neighbors` | LLDP adjacencies across many devices.                                                   |
 | `interfaces`     | Each logical interface's network instance, whether it routes or bridges, its addresses, and its state. |
-| `mac_table`      | Layer 2 forwarding entries across many devices.                                         |
-| `arp_table`      | ARP bindings across many devices.                                                       |
-| `routes`         | The routing table of a network instance (VRF) across many devices: IPv4, and IPv6 where the platform reads it. |
+| `mac_table`      | Layer 2 forwarding entries across many devices, or those for a MAC, a VLAN, or a port.  |
+| `arp_table`      | ARP bindings across many devices, or those for an address, a network, a MAC, or a port. |
+| `routes`         | The routing table of a network instance (VRF) across many devices: IPv4, and IPv6 where the platform reads it. Or each device's route for a destination, and the routes inside it. |
 | `bgp_sessions`   | Each device's BGP sessions: the peer and local addresses and AS numbers, the state, the last error, the address families, and the prefixes received. |
 | `ospf_neighbors` | Each device's OSPF neighbors: the interface and area, the neighbor's router ID and address, and the adjacency's state. |
 | `ospf_interfaces`| The interfaces each device runs OSPF on: area and its type, network type, cost, passive or not, authentication, hello and dead intervals, MTU, and the DR and BDR. For each network two routers share, the settings their ends disagree on, and how the other interfaces are set. |
-| `topology`       | The network as one graph at layer 2, at layer 3, or as OSPF sees it, merged from every device's tables, with the evidence for each link. |
+| `topology`       | The network as one graph at layer 2, at layer 3, or as OSPF sees it, merged from every device's tables, with the evidence for each link. Or the part of it around a device, a host, a MAC, a network, or a link. |
 | `forwarding_path`| The path packets take from a source to a destination, hop by hop, read from each device's routing table. |
 | `ping`           | Replies to ICMP echo requests sent from a device, inside one of its network instances.  |
 | `ping_sweep`     | The addresses that answer ICMP in a network, pinged from a device (inside one of its network instances) or from the NetGPT host itself. |
 | `interface_traffic` | Each port's traffic in and out (Mbit/s, and percent of its speed), its average and busiest interval over the window, and the errors, discards, and link flaps counted, from counters NetGPT polls. |
 
-The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call.
+The multi-device tools query devices concurrently. A device that fails shows up as an error next to the other devices' results rather than failing the whole call. A device can be named without its domain (`core1` for `core1.example.net`) when only one device's name starts that way.
 
-`topology` draws the network at one of three layers. At layer 2 (the default) it is the cabling. Each cable is reconciled from both ends, and a link only one end reports is flagged. Each host hangs off the port it is plugged into: ARP says which port an address was heard on, and where a switch is in the way, the switch's MAC table says which of its ports the address is behind. If a switch has forgotten a MAC, the host is drawn behind the switch with no port, and the evidence says why. At layer 3 the graph is the routing in one network instance: routers, the networks their interfaces are on, and the hosts on those networks. Switches drop out, and a network between just two routers is drawn as a link between them. The OSPF view is the routing protocol: the routers that run it and the areas each is in, an adjacency for each pair of neighbors with each end's area, cost, and state, and the networks advertised from passive interfaces. Two OSPF interfaces on one network that aren't full neighbors are drawn as a link too, with what keeps them apart: areas, area types, timers, network types, authentication, or MTUs that differ, a passive end, or a router that doesn't run OSPF there. Where the setting is an interface's own, it says how the other interfaces have it, so the end set unlike the rest is named. Every layer keeps the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
+On a real network one table from every device can be more than a small model can read. Four Nexus switches' MAC tables are 1,348 entries and more than 64K tokens, and qwen3.8 on one 24 GB GPU has 64K of context. So the tables take filters, written as an engineer or a model would write them:
+
+- `mac`: any part of a MAC address, in any spelling (`0200.c0ff.ee01`, `02:00:C0:FF:EE:01`, or `c0ff`).
+- `interface`: a port, by its name or an abbreviation (`Eth1/9`, `Po2`, `Gi1/0/51`), with its subinterfaces.
+- `address`: an address or a network (`192.0.2.0/24`, or `192.0.2.0 255.255.255.0`). On `interfaces`, it matches the interfaces on it, so a host's address finds its gateway.
+- `vlan`.
+- `destination` on `routes`: each device's route for it (the longest match, or a default route), and every route inside it.
+- `protocol` on `routes`.
+
+`topology` takes `focus`: the devices, hosts (by address or MAC), networks, or links a question is about. Then it answers with those, every link that touches them, and the nodes at the far ends, without the far nodes' evidence.
+
+An answer bigger than the server allows (`--max-answer`, 20,000 tokens by default for `netgpt-mcp`, a quarter of the context for `netgpt-chat`) isn't sent. The tool refuses it with what it holds and how to ask for less:
+
+> The answer is about 78,169 tokens, more than the 16,384 one answer may have here, so none of it was sent. It holds 1,348 MAC entries: core1.example.net 440, core2.example.net 440, dc1.example.net 235, dc2.example.net 233; by VLAN, 30 136, 254 92, 252 64, 255 58, 80 56, 89 50, 1 46, 2500 36, and 79 others. Ask again for less, with mac (a MAC address or any part of one, in any spelling), vlan, interface, or fewer devices.
+
+Tokens are counted with each digit as one, since qwen's and gemma's tokenizers split numbers into digits and addresses are mostly digits. A table of addresses is 1.6 to 3 characters a token.
+
+`topology` draws the network at one of three layers. At layer 2 (the default) it is the cabling. Each cable is reconciled from both ends, and a link only one end reports is flagged. Each host hangs off the port it is plugged into: ARP says which port an address was heard on, and where a switch is in the way, the switch's MAC table says which of its ports the address is behind. If a switch has forgotten a MAC, the host is drawn behind the switch with no port, and the evidence says why. At layer 3 the graph is the routing in one network instance: routers, the networks their interfaces are on, and the hosts on those networks. Switches drop out, and a network between just two routers is drawn as a link between them. The OSPF view is the routing protocol: the routers that run it and the areas each is in, an adjacency for each pair of neighbors with each end's area, cost, and state, and the networks advertised from passive interfaces. Two OSPF interfaces on one network that aren't full neighbors are drawn as a link too, with what keeps them apart: areas, area types, timers, network types, authentication, or MTUs that differ, a passive end, or a router that doesn't run OSPF there. Two routers that are both passive on a network, such as a pair of gateways for its hosts, both advertise it and aren't meant to be neighbors, so it is drawn as a network they advertise. Where the setting is an interface's own, it says how the other interfaces have it, so the end set unlike the rest is named. Every layer keeps the management network apart from the data plane, and a port that hears several LLDP neighbors (such as a management bridge) becomes one shared segment instead of a mesh of links.
 
 `forwarding_path` walks the routing tables the way the devices do. At each hop it takes the longest matching route, resolves the route's next hop down to an interface (a static route's next hop is often just an address), and follows the cable on that interface to the next device, through any switches in the way. Between two hosts on the same network, no router is involved: the path goes straight across the switch. It reports where the path ends: delivered, or lost, with the reason (no route, a route that drops the packet, a loop, a next hop nothing answers ARP for, or a device it couldn't read). It sends nothing on the network.
 
@@ -38,7 +55,7 @@ The multi-device tools query devices concurrently. A device that fails shows up 
 ## Safety model
 
 - **Inventory only.** Tools take device names from the inventory. The model cannot point NetGPT at any other host. `ping_sweep` only covers networks listed under `sweep_networks`, up to /22 from the NetGPT host and /24 from a device.
-- **Read-only CLI.** `show` accepts a command only if it starts with an allowed verb, every pipe leads to an allowed filter, and it contains no control characters or chaining syntax. On Cisco IOS this refuses `| redirect`, `| tee`, and `| append`. On SR Linux it refuses `>` redirection. On Junos it refuses `| save` and `| request`. Use a read-only account on the device as well; the policy is the second line of defence, not the first.
+- **Read-only CLI.** `show` accepts a command only if it starts with an allowed verb, every pipe leads to an allowed filter, and it contains no control characters or chaining syntax. On Cisco IOS this refuses `| redirect`, `| tee`, and `| append`. On SR Linux it refuses `>` redirection. On Junos it refuses `| save` and `| request`. On NX-OS it refuses `>` redirection, `;` between commands, and `| email`, `| tee`, and `| python`. Use a read-only account on the device as well; the policy is the second line of defence, not the first.
 - **Every way in has the same limits.** The tools, the page, and the API's commands all go through one engine, so the guard, the inventory, and the sweep limits are the same for an engineer at a frontend as for a model.
 - **Credentials stay on the server.** The inventory names an environment variable or a `chmod 600` file for each password, or a `chmod 600` SSH private key. Secrets never appear in tool arguments or results. Over SSH, NetGPT checks each device's host key against a `known_hosts` file and refuses to log in to one that doesn't match.
 
@@ -118,6 +135,8 @@ netgpt-chat --inventory lab/inventory.yml                               # intera
 netgpt-chat --inventory lab/inventory.yml "What is cabled to spine1?"   # one question per argument
 ```
 
+The chat counts the conversation against its context (`--context`, in tokens). One tool answer may have a quarter of it. If an answer would leave the model no room to reply, the chat drops it and tells the model to ask for less, rather than sending Ollama a conversation it would cut the question out of.
+
 The default model, `gemma4:e4b`, runs on CPU alone: about 14 tokens/s on 16 threads of a Xeon Gold 6242, using 10 GB of RAM at its full 128K context. `--model` picks any other model with tool support.
 
 The chat lets the model think before each reply when the model supports it. That is slow on CPU, but small models need it for anything multi-step. On the lab, gemma4:e4b answered "find the host behind leaf2 and check that leaf1 can reach it" and "trace the path from host1 to host2" correctly 4 times out of 4 with thinking, taking about 3 minutes per question, and 0 times out of 4 without, at about 25 seconds per question. `--no-think` is fine for single lookups such as "what is cabled to spine1?".
@@ -193,8 +212,11 @@ sweep_networks:
 |-----------------|---------------------|------------------------------------------------------------------------|
 | `nokia_srlinux` | JSON-RPC over HTTPS | All tools verified against SR Linux 25.10.5 in the lab. The tests replay responses recorded there. `bgp_sessions` isn't implemented yet; the OSPF tools are, against the WAN lab. |
 | `juniper_junos` | NETCONF over SSH    | Every tool but `ping`, `ping_sweep`, and the OSPF tools, verified against Junos 23.4R2 on a QFX5120 and two EX4400s. The tests replay replies recorded there, renamed. |
+| `cisco_nxos`    | CLI over SSH, `\| json` | Every tool but `ping`, `ping_sweep`, and `bgp_sessions`, verified against NX-OS 7.0(3)I7(7) on two Nexus 9396PXs and 7.3(8)N1(1) on two Nexus 5548UPs. The tests replay replies recorded there, trimmed and made anonymous. |
 
-Platform names match containerlab node kinds where there is one. `juniper_junos` is for Junos on hardware, which has none.
+Platform names match containerlab node kinds where there is one. `juniper_junos` and `cisco_nxos` are for hardware, which has none.
+
+NetGPT keeps no more than two SSH connections open to one device at a time, so a graph that asks every table of every device at once doesn't take a shared switch's VTY lines from the people who use it.
 
 On Junos, give NetGPT a user in the built-in `read-only` class, with an SSH key:
 
@@ -218,6 +240,28 @@ To record new fixtures from Junos devices, list them in an inventory, and list e
 
 ```bash
 python lab/record_junos.py --inventory my-junos.yml --rename my-renames.yml
+```
+
+On NX-OS, the built-in `network-operator` role reads everything but the configuration. To let NetGPT read that too, and to keep it from opening sessions to other hosts, give it a role of its own, with an SSH key (NX-OS checks the highest-numbered rule first):
+
+```
+role name netgpt-ro
+  rule 1 permit read
+  rule 2 permit command show running-config
+  rule 3 permit command show running-config *
+  rule 4 permit command show startup-config
+  rule 5 deny command telnet *
+  rule 6 deny command ssh *
+username netgpt role netgpt-ro
+username netgpt sshkey ssh-rsa AAAA... netgpt
+```
+
+The role refuses `ping` until a rule permits it, which is why `ping` isn't on NX-OS yet. NX-OS answers most show commands as JSON, and runs each command on an exec channel of its own, so nothing is scraped from a prompt. Some releases (7.0(3)I7 on a Nexus 9000) can't turn every reply into JSON, so NetGPT then asks for `| xml`, which the JSON is made from. NX-OS keeps its VLANs in the default network instance, so a switch port bridges there, and each MAC entry names its VLAN. A port in a port-channel names it (`aggregate`), and the topology follows a MAC table's port-channel to the cables of its members, where LLDP is heard.
+
+To record fixtures from NX-OS devices, list them in an inventory, and their names with stand-ins in a YAML file kept outside the repository. The network may be one other people use, so the recorder keeps a few rows of each kind in each table, moves every address into 198.18.0.0/15 and every MAC to a locally administered one, calls every other system neighbor-N, and blanks descriptions:
+
+```bash
+python lab/record_nxos.py --inventory my-nexus.yml --rename my-renames.yml
 ```
 
 ## The schema
@@ -246,10 +290,10 @@ netgpt-engine --inventory lab/wan/inventory.yml --listen 127.0.0.1:8081   # --st
 | Route | Answers with |
 |---|---|
 | `devices` | The inventory's devices. |
-| `topology?layer=l2\|l3\|ospf&plane=data\|management\|all&network_instance=default` | `Topology`: the network as one graph. |
+| `topology?layer=l2\|l3\|ospf&plane=data\|management\|all&network_instance=default&focus=…` | `Topology`: the network as one graph, or the part of it around the nodes in focus. |
 | `path?source=…&destination=…&network_instance=default` | `ForwardingPath`: the way packets go, read from the routing tables. |
 | `view?layer=…&focus=…&highlight=…&source=…&destination=…&title=…` | `View`: the graph with your focus and highlight (each repeated for several names), and a path if you give its two ends. |
-| `tables/<table>?device=…` | One table's rows from every device, or those named: `lldp_neighbors`, `interfaces`, `mac_table`, `arp_table`, `routes` (with `network_instance`), `bgp_sessions`, `ospf_neighbors`, or `ospf_interfaces`. |
+| `tables/<table>?device=…` | One table's rows from every device, or those named: `lldp_neighbors`, `interfaces`, `mac_table`, `arp_table`, `routes` (with `network_instance`), `bgp_sessions`, `ospf_neighbors`, or `ospf_interfaces`. Each takes its tool's filters, each repeated for several values: `mac_table?vlan=80&interface=Eth1/32`. |
 | `traffic?device=…&minutes=5` | `Traffic`: every polled port's latest rates and recent errors. |
 | `chart?port=…&metric=traffic\|percent\|errors&minutes=15` | `Chart`: ports' rates over the window, with links named `device--device`. |
 | `schema` | The schema itself. |

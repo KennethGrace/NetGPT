@@ -1,0 +1,30 @@
+{
+ "TABLE_vrf": {
+  "ROW_vrf": {
+   "vrf-name-out": "all",
+   "cnt-total": 17,
+   "TABLE_adj": {
+    "ROW_adj": [
+     {
+      "intf-out": "Vlan255",
+      "ip-addr-out": "198.18.3.1",
+      "time-stamp": "00:03:52",
+      "mac": "0000.5e00.01ff"
+     },
+     {
+      "intf-out": "Vlan255",
+      "ip-addr-out": "198.18.3.2",
+      "time-stamp": "00:04:00",
+      "mac": "0200.0000.0013"
+     },
+     {
+      "intf-out": "mgmt0",
+      "ip-addr-out": "198.18.1.2",
+      "time-stamp": "00:02:37",
+      "mac": "0200.0000.002a"
+     }
+    ]
+   }
+  }
+ }
+}
