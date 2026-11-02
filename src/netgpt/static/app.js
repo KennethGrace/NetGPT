@@ -279,7 +279,8 @@ function toolCard(name, args) {
   head.append(node("span", `glyph glyph-${name}`), node("span", "verb", (TOOLS[name] || [name, name])[1]));
   head.append(argumentChips(name, args), node("span", "meta", "…"));
   card.append(head);
-  netthreads.mark(head.querySelector(".args"));
+  // Only the names the call gives are marked, each on its own: a filter's port belongs to no device in particular.
+  for (const who of head.querySelectorAll(".args .who")) netthreads.mark(who);
   card.touches = touched(name, args);
   card.addEventListener("pointerenter", () => {
     netmap.spotlight(card.touches);
@@ -365,14 +366,17 @@ function handle(event, live) {
       break;
     }
     case "content": {
+      // The reply as it streams, formatted as it grows; its names are marked once it is the answer.
       closeThinking();
       let block = lastBlock("draft");
       if (!block) {
-        block = node("div", "draft");
+        block = node("div", "answer draft");
         block.dataset.kind = "draft";
+        block.source = "";
         reply().append(block);
       }
-      block.textContent += event.text;
+      block.source += event.text;
+      block.innerHTML = renderMarkdown(block.source);
       break;
     }
     case "calling": {
@@ -426,6 +430,12 @@ function handle(event, live) {
     case "error": {
       closeThinking();
       narrated();
+      // A call under way when the answer failed never reports back.
+      for (const card of reply().querySelectorAll("details.tool.live")) {
+        card.classList.remove("live");
+        card.classList.add("failed");
+        card.querySelector(".meta").textContent = "stopped";
+      }
       reply().append(node("div", "error", event.text));
       netmap.reading(null);
       turn = null;
@@ -441,6 +451,7 @@ function narrated() {
   if (draft) {
     draft.dataset.kind = "note";
     draft.className = "note";
+    draft.textContent = draft.source ?? draft.textContent;
     netthreads.mark(draft);
   }
 }

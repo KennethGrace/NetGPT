@@ -45,7 +45,7 @@
   --card: #fffaf1;
   --ink: #2b241c;
   --ink-2: #5d5244;
-  --muted: #85786a;
+  --muted: #6b5f51; /* 4.8:1 on the table, 5.6:1 on the sheet: small text stays readable */
   --hairline: #e1d4bf;
   --wire: #9c8b73;
   --pencil: #7b4e27;
@@ -394,7 +394,7 @@ details.tool.failed .meta { color: var(--warn); margin-left: 0; flex-basis: 100%
 details.tool pre.raw { margin: 0 10px 10px; max-height: 340px; }
 
 .note { color: var(--ink-2); font-size: 14.5px; font-style: italic; white-space: pre-wrap; margin: 8px 0; }
-.draft { white-space: pre-wrap; }
+.answer.draft { opacity: 0.92; }
 .error { color: var(--critical); background: var(--critical-bg); border-radius: 10px; padding: 9px 13px; font-size: 14.5px; }
 
 .answer { margin-top: 10px; font-size: 16px; }

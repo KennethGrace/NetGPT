@@ -195,8 +195,9 @@ const netthreads = (() => {
   function point(mention) {
     const target = targetOf(mention);
     held = null;
+    // Something the map isn't drawing now is marked so; choosing it draws a layer that has it.
+    mention.classList.toggle("absent", !netmap.shows(target.id));
     if (!netmap.shows(target.id)) {
-      mention.classList.add("absent");
       drawAll([]);
       return;
     }

@@ -259,6 +259,7 @@ const netmap = (() => {
       shape("text", { class: "rate" }),
       shape("text", { class: "rate" }),
       shape("text", { class: "note" }),
+      shape("title"),
     );
     linkLayer.append(group);
     return group;
@@ -526,7 +527,7 @@ const netmap = (() => {
           .filter(Boolean)
           .join(" "),
       );
-      link.element.querySelector(".note").textContent = link.emphasis === "context" ? "" : link.note;
+      link.element.querySelector("title").textContent = link.note;
     }
     svg.classList.toggle("spotlit", spotted.size > 0);
     svg.classList.toggle("crowded", crowded());
@@ -554,7 +555,12 @@ const netmap = (() => {
       nearA.setAttribute("y", ay.toFixed(1));
       nearB.setAttribute("x", bx.toFixed(1));
       nearB.setAttribute("y", by.toFixed(1));
+      // A note longer than its link would cover its neighbors' names: it folds to a mark, and the
+      // inspector and the link's tooltip have it whole.
       const note = element.querySelector(".note");
+      const told = link.emphasis === "context" ? "" : link.note;
+      const shown = told && told.length * CHAR_WIDTH * 0.9 > length * 0.85 ? "✎" : told;
+      if (note.textContent !== shown) note.textContent = shown;
       note.setAttribute("x", ((a.x + b.x) / 2).toFixed(1));
       note.setAttribute("y", ((a.y + b.y) / 2 - 8).toFixed(1));
       // A network's prefix sits beside its link, off the line and clear of the ends' addresses.
