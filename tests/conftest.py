@@ -15,7 +15,7 @@ from netgpt.engine import Engine
 from netgpt.inventory import Inventory
 from netgpt.server import build_server
 
-from fakes import FakePlatform
+from fakes import FakePlatform, RecordedNexus
 
 
 @pytest.fixture
@@ -40,6 +40,24 @@ def inventory(tmp_path: Path) -> Inventory:
             "sweep_networks": ["192.0.2.0/24", "198.18.0.0/15"],
         }
     )
+
+
+@pytest.fixture
+def nexus(tmp_path: Path) -> Engine:
+    """An engine on the two recorded Nexus switches, a 9396PX core and a 5548UP, named as their fixtures are."""
+    password_file = tmp_path / "password"
+    password_file.write_text("NotARealPassword\n")
+    password_file.chmod(0o600)
+    inventory = Inventory.model_validate(
+        {
+            "credentials": {"lab": {"username": "netgpt", "password_file": str(password_file)}},
+            "devices": [
+                {"name": name, "host": host, "platform": "cisco_nxos", "credentials": "lab"}
+                for name, host in (("core1.example.net", "192.0.2.2"), ("dc1.example.net", "192.0.2.102"))
+            ],
+        }
+    )
+    return Engine(inventory, platforms={"cisco_nxos": RecordedNexus})
 
 
 @pytest.fixture

@@ -30,7 +30,7 @@ from prompt_toolkit import PromptSession
 
 from netgpt.engine import Engine
 from netgpt.inventory import Inventory
-from netgpt.server import build_server
+from netgpt.server import build_server, tokens_in
 from netgpt.service import listen_address
 from netgpt.statistics import DEFAULT_INTERVAL, Poller
 from netgpt.store import STORE_HELP, StoreError, check_store, open_store
@@ -45,6 +45,23 @@ GRAY, YELLOW, RED = "90", "33", "31"
 
 # Ollama clamps the context to what the model supports, so asking for 128K is safe.
 DEFAULT_CONTEXT = 131072
+
+# One tool answer may have up to a quarter of the context, so a question has room for several and the reply.
+ANSWER_SHARE = 4
+# An eighth of the context is kept for the model's reply, its thinking included.
+REPLY_SHARE = 8
+
+# A tool answer that would leave the model no room to reply is dropped, and the model is told so.
+NO_ROOM = (
+    "This answer was about {tokens:,} tokens, and only about {room:,} tokens of this conversation's context are "
+    "left, so it was dropped. Ask for less: fewer devices, the tool's filters, or topology's focus."
+)
+# What Ollama says when a conversation outgrew the context: it trimmed messages from the front, the question among them.
+OVERFLOWED = "no user query found in messages"
+CONTEXT_FULL = (
+    "The conversation outgrew the model's context ({context} tokens), and Ollama dropped the question. "
+    "Start a new conversation, or ask about less at a time."
+)
 
 # Small models sometimes answer a tool result with nothing, or with a bare control
 # token such as <|tool_response>. Chat.ask avoids the common cause; for the rest, a
@@ -65,6 +82,11 @@ SEVERAL_CALLS = (
     "Each question allows {replies} replies that call tools. One reply can call several tools: when you need "
     "several things that don't depend on each other (tables, paths, pings), ask for them all in the same reply."
 )
+
+
+def answer_limit(context: int) -> int:
+    """The most tokens one tool answer may have in a conversation with this many tokens of context."""
+    return context // ANSWER_SHARE
 
 
 class ChatError(RuntimeError):
@@ -197,6 +219,7 @@ class Chat:
         self._http = http
         self._options = options
         self._max_rounds = max_rounds
+        self._context: int | None = options.get("num_ctx")
         self._tools: list[dict[str, Any]] = []
         self._instructions = ""
         self.messages: list[dict[str, Any]] = []
@@ -214,6 +237,24 @@ class Chat:
 
     def reset(self) -> None:
         self.messages = [{"role": "system", "content": self._instructions}]
+
+    def room(self) -> int | None:
+        """
+        About how many tokens of the context are left for tool answers, once the
+        conversation so far and the reply's share are counted, or None when the chat
+        doesn't know its context.
+        """
+        if not self._context:
+            return None
+        used = tokens_in(json.dumps(self._tools, ensure_ascii=False)) + sum(
+            tokens_in(json.dumps(for_ollama(message), ensure_ascii=False)) for message in self.messages
+        )
+        return self._context - self._context // REPLY_SHARE - used
+
+    def _failed(self, error: str) -> ChatError:
+        if OVERFLOWED in error:
+            return ChatError(CONTEXT_FULL.format(context=f"{self._context:,}" if self._context else "its"))
+        return ChatError(f"Ollama: {error}")
 
     async def ask(self, question: str, observer: ChatObserver | None = None) -> str:
         """Answer one question, calling tools as the model asks for them."""
@@ -272,13 +313,13 @@ class Chat:
             async with self._http.stream("POST", "/api/chat", json=request) as response:
                 if response.is_error:
                     await response.aread()
-                    raise ChatError(f"Ollama: {ollama_error(response)}")
+                    raise self._failed(ollama_error(response))
                 async for line in response.aiter_lines():
                     if not line.strip():
                         continue
                     chunk = json.loads(line)
                     if "error" in chunk:
-                        raise ChatError(f"Ollama: {chunk['error']}")
+                        raise self._failed(str(chunk["error"]))
                     delta = chunk.get("message", {})
                     if delta.get("thinking"):
                         thinking += delta["thinking"]
@@ -302,8 +343,12 @@ class Chat:
         arguments = call["function"].get("arguments") or {}
         # Unknown tools and invalid arguments come back as error results for the model to read.
         result = await self._client.call_tool(name, arguments)
-        text = result_text(result)
-        observer.tool_call(name, arguments, text, result.is_error, result.structured_content)
+        text, failed = result_text(result), result.is_error
+        room, tokens = self.room(), tokens_in(text)
+        if room is not None and tokens > room:
+            # Sent on, it would push the question out of the context, and Ollama would refuse the conversation.
+            text, failed = NO_ROOM.format(tokens=tokens, room=max(room, 0)), True
+        observer.tool_call(name, arguments, text, failed, result.structured_content)
         message = {"role": "tool", "tool_name": name, "content": text}
         if "id" in call:
             message["tool_call_id"] = call["id"]
@@ -385,7 +430,7 @@ async def run(args: argparse.Namespace) -> int:
     # Only the web page can show the map, so only it gets the tool that draws one.
     engine = Engine(inventory, statistics=statistics)
     async with (
-        Client(build_server(engine, display=args.web is not None)) as client,
+        Client(build_server(engine, display=args.web is not None, max_answer=answer_limit(args.context))) as client,
         httpx.AsyncClient(base_url=args.ollama, timeout=timeout) as http,
     ):
         try:

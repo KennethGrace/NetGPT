@@ -17,7 +17,7 @@ import httpx
 from netgpt.guard import NOKIA_SRLINUX
 from netgpt.platforms import Platform, PlatformError
 from netgpt.inventory import Credentials, Device
-from netgpt.platforms.nxos import Reply
+from netgpt.platforms.nxos import NxosPlatform, Reply
 from netgpt.platforms.srlinux import SRLinuxPlatform
 from netgpt.primitives import (
     ArpEntry,
@@ -74,6 +74,13 @@ class CommandReplay:
 
     async def close(self) -> None:
         pass
+
+
+class RecordedNexus(NxosPlatform):
+    """An NX-OS switch that answers from its recorded replies, for an engine to read."""
+
+    def __init__(self, device: Device, credentials: Credentials, session: Any = None) -> None:
+        super().__init__(device, credentials, session=session or CommandReplay(device.name))
 
 
 class NetconfReplay:

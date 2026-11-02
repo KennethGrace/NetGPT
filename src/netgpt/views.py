@@ -10,21 +10,26 @@ every name is checked against the graph before anything is drawn.
 
 from __future__ import annotations
 
+import ipaddress
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from netgpt.filters import MAC_SPELLING
 from netgpt.forwarding import ForwardingPath
 from netgpt.primitives import DeviceError
-from netgpt.topology import Layer, LinkEnd, PlaneChoice, Topology, TopologyLink, TopologyNode, port_of
+from netgpt.topology import Layer, LinkEnd, PlaneChoice, Topology, TopologyLink, TopologyNode, mac_key, port_of
 
 Emphasis = Literal["focus", "near", "context"]
 
 # The ways a view may name a link by its two nodes: leaf1--spine1, leaf1 <-> spine1, leaf1 → spine1.
 LINK_SEPARATOR = re.compile(r"\s*(?:<-+>|-{2,}>?|->|↔|→|—|–)\s*")
+
+# A graph with more nodes than this is too big to list every one in a refusal: its hosts and networks are counted.
+LISTED_NODES = 40
 
 
 class ViewError(ValueError):
@@ -62,10 +67,53 @@ class _Resolver:
         for node in graph.nodes:
             for address in node.addresses:
                 self.nodes.setdefault(address.lower(), node.id)
+        # A device or neighbor by its name without the domain (core1 for core1.example.net), when only one has it.
+        short: dict[str, list[str]] = defaultdict(list)
+        for node in graph.nodes:
+            first = node.id.split(".")[0].lower()
+            if node.kind in ("device", "neighbor") and first != node.id.lower() and not MAC_SPELLING.match(first):
+                short[first].append(node.id)
+        for first, ids in short.items():
+            if len(ids) == 1:
+                self.nodes.setdefault(first, ids[0])
+        self.macs: dict[str, str] = {}
+        for node in graph.nodes:
+            for mac in node.macs:
+                self.macs.setdefault(mac_key(mac), node.id)
         self.links = {link.id.lower(): link.id for link in graph.links}
 
     def node(self, name: str) -> str | None:
-        return self.nodes.get(name.strip().lower())
+        """A node by its name, one of its addresses, or one of its MACs in any spelling."""
+        if (found := self.nodes.get(name.strip().lower())) is not None:
+            return found
+        if MAC_SPELLING.match(name.strip()) and len(mac := mac_key(name)) == 12:
+            return self.macs.get(mac)
+        return None
+
+    def within(self, name: str) -> set[str]:
+        """The hosts, neighbors, and networks inside a network the graph has no node for."""
+        try:
+            network = ipaddress.ip_network(name.strip(), strict=False) if "/" in name else None
+        except ValueError:
+            return set()
+        if network is None:
+            return set()
+        found = set()
+        for node in self.graph.nodes:
+            if node.kind == "subnet":
+                try:
+                    if ipaddress.ip_network(node.id).subnet_of(network):  # type: ignore[arg-type]
+                        found.add(node.id)
+                except (ValueError, TypeError):
+                    continue
+            elif node.kind in ("host", "neighbor"):
+                for address in node.addresses:
+                    try:
+                        if ipaddress.ip_address(address) in network:
+                            found.add(node.id)
+                    except ValueError:
+                        continue
+        return found
 
     def end(self, name: str) -> tuple[str, str | None] | None:
         """A node, or one end of a link written node:interface, as (node, port)."""
@@ -105,8 +153,24 @@ class _Resolver:
             at = {link.id for link in self.graph.links if self.touches(link.a, port) or self.touches(link.b, port)}
             if at:
                 return set(), at
+        if inside := self.within(name):
+            return inside, set()
         self.unknown.append(repr(name))
         return set(), set()
+
+    def refusal(self, plane: PlaneChoice) -> ViewError:
+        """The error for the names it couldn't find, with the names there are."""
+        graph = self.graph
+        listed = [node for node in graph.nodes if len(graph.nodes) <= LISTED_NODES or node.kind in ("device", "neighbor")]
+        counted = Counter(node.kind for node in graph.nodes if node not in listed)
+        kinds = {"host": "hosts", "segment": "shared segments", "subnet": "networks"}
+        rest = ", ".join(f"{count} {kinds[kind]}" for kind, count in counted.items())
+        named = ", ".join(node.id for node in listed) + (f", and {rest}, named by address" if rest else "")
+        return ViewError(
+            f"There is nothing on the {plane} plane {LAYER_NAMES[graph.layer]} called {', '.join(self.unknown)}. "
+            f"Its nodes are: {named}. Name a host by its address or MAC, the hosts on a network by the network, "
+            "and a link by its two nodes (a--b) or by one end (device:interface)."
+        )
 
     def find_all(self, names: Iterable[str]) -> tuple[set[str], set[str]]:
         nodes: set[str] = set()
@@ -194,12 +258,7 @@ def make_view(
         for element in found_nodes | found_links:
             noted[element] = note
     if resolver.unknown:
-        named = ", ".join(node.id for node in graph.nodes)
-        raise ViewError(
-            f"There is nothing on the {plane} plane {LAYER_NAMES[graph.layer]} "
-            f"called {', '.join(resolver.unknown)}. "
-            f"Its nodes are: {named}. Name a link by its two nodes (a--b) or by one end (device:interface)."
-        )
+        raise resolver.refusal(plane)
 
     by_id = {link.id: link for link in graph.links}
 
@@ -254,6 +313,29 @@ def make_view(
         path=path,
         trouble=trouble,
         errors=graph.errors,
+    )
+
+
+def focused(topology: Topology, names: list[str], plane: PlaneChoice = "data") -> Topology:
+    """
+    The part of a graph a question is about: the nodes and links named, every link
+    that touches one of those nodes, and the nodes at those links' far ends, without
+    their evidence (focus on one to have it). Names are those a view takes. Raises
+    ViewError for a name the graph doesn't have.
+    """
+    resolver = _Resolver(topology)
+    nodes, links = resolver.find_all(names)
+    if resolver.unknown:
+        raise resolver.refusal(plane)
+    nodes |= {end.node for link in topology.links if link.id in links for end in (link.a, link.b)}
+    touching = links | {link.id for link in topology.links if link.a.node in nodes or link.b.node in nodes}
+    near = {end.node for link in topology.links if link.id in touching for end in (link.a, link.b)} - nodes
+    return Topology(
+        layer=topology.layer,
+        nodes=[node if node.id in nodes else node.model_copy(update={"evidence": []})
+               for node in topology.nodes if node.id in nodes | near],
+        links=[link for link in topology.links if link.id in touching],
+        errors=topology.errors,
     )
 
 

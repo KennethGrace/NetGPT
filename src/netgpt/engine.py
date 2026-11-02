@@ -29,6 +29,7 @@ from typing import Any, Literal, TypeVar
 
 import icmplib
 
+from netgpt import filters
 from netgpt.forwarding import ForwardingPath, trace_path
 from netgpt.guard import GuardError
 from netgpt.inventory import Inventory, InventoryError
@@ -46,6 +47,7 @@ from netgpt.primitives import (
     InterfaceTraffic,
     LldpNeighbor,
     MacEntry,
+    OspfInterface,
     OspfInterfaces,
     OspfNeighbor,
     PingResult,
@@ -53,7 +55,7 @@ from netgpt.primitives import (
 )
 from netgpt.statistics import Chart, ChartError, Metric, Poller
 from netgpt.topology import Layer, PlaneChoice, Topology, build_l3, build_ospf, build_topology, ospf_mismatches, port_of
-from netgpt.views import View, make_view
+from netgpt.views import View, focused, make_view
 
 logger = logging.getLogger("netgpt")
 
@@ -61,6 +63,8 @@ logger = logging.getLogger("netgpt")
 EXPECTED_ERRORS = (InventoryError, GuardError, PlatformError)
 
 MAX_SWEEP_ADDRESSES = 1024
+# How much of a command's output show returns, unless a face asks for less.
+MAX_SHOW_CHARACTERS = 50_000
 # From a device, each ping is a command on the device: a /24 takes the better part of a minute.
 MAX_DEVICE_SWEEP_ADDRESSES = 256
 
@@ -188,7 +192,10 @@ class Engine:
         one's failure as its error. optional: a platform that can't read the table yet
         answers with no rows and no error, for the graphs that can do without it.
         """
-        names = devices or [device.name for device in self.inventory.devices]
+        # A name the inventory takes in another form (core1 for core1.example.net) is read, and shared, under its own.
+        names = list(dict.fromkeys(self.inventory.name_of(name) for name in devices)) if devices else [
+            device.name for device in self.inventory.devices
+        ]
         items: list[Any] = []
         errors: list[DeviceError] = []
         for name, answer in zip(names, await asyncio.gather(*(self.ask(name, table, *args) for name in names))):
@@ -198,27 +205,66 @@ class Engine:
                 errors.append(DeviceError(device=name, error=str(answer)))
         return items, errors
 
-    # The tables, from every device named, or every device.
+    # The tables, from every device named, or every device, narrowed by the filters given (netgpt.filters). Each
+    # filter is checked before any device is asked, and raises FilterError.
 
-    async def lldp_neighbors(self, devices: list[str] | None = None) -> Collection[LldpNeighbor]:
+    async def lldp_neighbors(
+        self, devices: list[str] | None = None, interface: list[str] | None = None
+    ) -> Collection[LldpNeighbor]:
+        ports = filters.ports(interface)
         items, errors = await self.collect(devices, "lldp_neighbors")
-        return Collection[LldpNeighbor](items=items, errors=errors)
+        return Collection[LldpNeighbor](items=[item for item in items if filters.on_port(ports, item.interface)], errors=errors)
 
-    async def interfaces(self, devices: list[str] | None = None) -> Collection[Interface]:
+    async def interfaces(
+        self, devices: list[str] | None = None, interface: list[str] | None = None, address: list[str] | None = None
+    ) -> Collection[Interface]:
+        ports, networks = filters.ports(interface), filters.networks(address)
         items, errors = await self.collect(devices, "interfaces")
-        return Collection[Interface](items=items, errors=errors)
+        kept = [item for item in items if filters.on_port(ports, item.name) and filters.on_networks(networks, item.addresses)]
+        return Collection[Interface](items=kept, errors=errors)
 
-    async def mac_table(self, devices: list[str] | None = None) -> Collection[MacEntry]:
+    async def mac_table(
+        self,
+        devices: list[str] | None = None,
+        mac: list[str] | None = None,
+        vlan: list[int] | None = None,
+        interface: list[str] | None = None,
+    ) -> Collection[MacEntry]:
+        parts, ports = filters.mac_parts(mac), filters.ports(interface)
         items, errors = await self.collect(devices, "mac_table")
-        return Collection[MacEntry](items=items, errors=errors)
+        kept = [
+            item for item in items
+            if filters.has_mac(parts, item.mac) and (not vlan or item.vlan in vlan) and filters.on_port(ports, item.interface)
+        ]
+        return Collection[MacEntry](items=kept, errors=errors)
 
-    async def arp_table(self, devices: list[str] | None = None) -> Collection[ArpEntry]:
+    async def arp_table(
+        self,
+        devices: list[str] | None = None,
+        address: list[str] | None = None,
+        mac: list[str] | None = None,
+        interface: list[str] | None = None,
+    ) -> Collection[ArpEntry]:
+        networks, parts, ports = filters.networks(address), filters.mac_parts(mac), filters.ports(interface)
         items, errors = await self.collect(devices, "arp_table")
-        return Collection[ArpEntry](items=items, errors=errors)
+        kept = [
+            item for item in items
+            if filters.in_networks(networks, item.ip_address) and filters.has_mac(parts, item.mac)
+            and filters.on_port(ports, item.interface)
+        ]
+        return Collection[ArpEntry](items=kept, errors=errors)
 
-    async def routes(self, devices: list[str] | None = None, network_instance: str = "default") -> Collection[Route]:
+    async def routes(
+        self,
+        devices: list[str] | None = None,
+        network_instance: str = "default",
+        destination: list[str] | None = None,
+        protocol: list[str] | None = None,
+    ) -> Collection[Route]:
+        destinations = filters.networks(destination)
         items, errors = await self.collect(devices, "routes", network_instance)
-        return Collection[Route](items=items, errors=errors)
+        kept = filters.forwarding([item for item in items if filters.of_protocol(protocol, item.protocol)], destinations)
+        return Collection[Route](items=kept, errors=errors)
 
     async def bgp_sessions(self, devices: list[str] | None = None) -> Collection[BgpSession]:
         items, errors = await self.collect(devices, "bgp_sessions")
@@ -228,13 +274,25 @@ class Engine:
         items, errors = await self.collect(devices, "ospf_neighbors")
         return Collection[OspfNeighbor](items=items, errors=errors)
 
-    async def ospf_interfaces(self, devices: list[str] | None = None) -> OspfInterfaces:
-        """The OSPF interfaces, and the settings that keep routers sharing a network from being neighbors."""
+    async def ospf_interfaces(self, devices: list[str] | None = None, interface: list[str] | None = None) -> OspfInterfaces:
+        """
+        The OSPF interfaces, and the settings that keep routers sharing a network from
+        being neighbors: on the networks of the interfaces asked for, if any are.
+        """
+        ports = filters.ports(interface)
         (items, ospf_errors), (found, interface_errors) = await asyncio.gather(
             self.collect(devices, "ospf_interfaces"),
             self.collect(devices, "interfaces", optional=True),
         )
-        return OspfInterfaces(items=items, errors=once(ospf_errors + interface_errors), mismatches=ospf_mismatches(found, items))
+
+        def asked(item: OspfInterface) -> bool:
+            return filters.on_port(ports, item.interface)
+
+        return OspfInterfaces(
+            items=[item for item in items if asked(item)],
+            errors=once(ospf_errors + interface_errors),
+            mismatches=ospf_mismatches(found, items, about=asked),
+        )
 
     # The graphs, and the paths through them.
 
@@ -262,9 +320,16 @@ class Engine:
         errors = once(topology.errors + interface_errors + neighbor_errors)
         return build_ospf(self.devices(), found, ospf, heard, errors, network_instance)
 
-    async def topology(self, plane: PlaneChoice = "data", layer: Layer = "l2", network_instance: str = "default") -> Topology:
-        """The network as one graph at a layer, on a plane."""
-        return (await self.at_layer(*await self.layer2(), layer, network_instance)).on_plane(plane)
+    async def topology(
+        self, plane: PlaneChoice = "data", layer: Layer = "l2", network_instance: str = "default", focus: list[str] | None = None
+    ) -> Topology:
+        """
+        The network as one graph at a layer, on a plane, or the part of it around the
+        nodes and links named in focus (views.focused). Raises ViewError for a name
+        the graph doesn't have.
+        """
+        graph = (await self.at_layer(*await self.layer2(), layer, network_instance)).on_plane(plane)
+        return focused(graph, focus, plane) if focus else graph
 
     async def trace(
         self, source: str, destination: str, network_instance: str
@@ -319,10 +384,15 @@ class Engine:
             raise RequestError("NetGPT isn't polling interface counters.")
         return self.statistics
 
-    async def traffic(self, devices: list[str] | None = None, minutes: float = 15) -> Collection[InterfaceTraffic]:
-        """Each port's traffic and errors over the window. Raises StoreError if the store fails."""
-        items, errors = await self.poller().traffic(devices, minutes)
-        return Collection[InterfaceTraffic](items=items, errors=errors)
+    async def traffic(
+        self, devices: list[str] | None = None, minutes: float = 15, interface: list[str] | None = None
+    ) -> Collection[InterfaceTraffic]:
+        """Each port's traffic and errors over the window, on the ports asked for. Raises StoreError if the store fails."""
+        ports = filters.ports(interface)
+        names = [self.inventory.name_of(name) for name in devices] if devices else None
+        items, errors = await self.poller().traffic(names, minutes)
+        kept = [item for item in items if filters.on_port(ports, item.interface)]
+        return Collection[InterfaceTraffic](items=kept, errors=errors)
 
     async def link_port(self, name: str) -> str:
         """A link named device--device, as the first device's port on it (from LLDP); any other name as it is."""
@@ -345,12 +415,15 @@ class Engine:
 
     # Commands, each run when asked: read-only, on inventory devices, within the inventory's limits.
 
-    async def show(self, device: str, command: str) -> CommandOutput:
-        """One read-only CLI command's output. Raises GuardError, InventoryError, and PlatformError."""
+    async def show(self, device: str, command: str, max_chars: int = MAX_SHOW_CHARACTERS) -> CommandOutput:
+        """
+        One read-only CLI command's output, cut off after max_chars. Raises GuardError,
+        InventoryError, and PlatformError.
+        """
         # Refuse a command before resolving credentials or opening a connection.
         platform_for(self.inventory, device, self.platforms).policy.check(command)
         async with connect_to(self.inventory, device, self.platforms) as platform:
-            return await platform.show(command)
+            return await platform.show(command, max_chars)
 
     async def ping(self, device: str, destination: str, count: int = 3, network_instance: str = "default") -> PingResult:
         """Echo requests from a device, in one of its network instances. Raises InventoryError and PlatformError."""

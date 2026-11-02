@@ -59,6 +59,7 @@ from netgpt.chat import (
     OUT_OF_TOOLS,
     ChatError,
     TerminalObserver,
+    answer_limit,
     for_ollama,
     ollama_post,
     supports_thinking,
@@ -358,7 +359,7 @@ async def play(args: argparse.Namespace) -> None:
     random.shuffle(breaks)
     version = netgpt_version()
     async with (
-        Client(build_server(Engine(inventory))) as client,
+        Client(build_server(Engine(inventory), max_answer=answer_limit(args.context))) as client,
         httpx.AsyncClient(base_url=args.ollama, timeout=httpx.Timeout(args.timeout, connect=10.0)) as http,
     ):
         think = args.think if args.think is not None else await supports_thinking(http, args.model)

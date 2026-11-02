@@ -18,8 +18,10 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import sys
-from collections.abc import AsyncIterator, Iterator
+from collections import Counter
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -29,7 +31,8 @@ from mcp_types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, BeforeValidator, Field
 
 from netgpt import __version__
-from netgpt.engine import Engine, RequestError
+from netgpt.engine import MAX_SHOW_CHARACTERS, Engine, RequestError
+from netgpt.filters import FilterError
 from netgpt.forwarding import ForwardingPath, TraceError
 from netgpt.guard import GuardError
 from netgpt.inventory import Inventory, InventoryError
@@ -54,7 +57,7 @@ from netgpt.statistics import (
 )
 from netgpt.store import STORE_HELP, StoreError, check_store, open_store
 from netgpt.topology import Layer, PlaneChoice, Topology
-from netgpt.views import View, ViewError, describe
+from netgpt.views import LAYER_NAMES, View, ViewError, describe
 
 logger = logging.getLogger("netgpt")
 
@@ -100,7 +103,29 @@ READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_worl
 
 # What the engine refuses, and a device's failure, which the model reads as the tool's error. Anything else is a bug,
 # and propagates as a crash.
-ANTICIPATED = (InventoryError, GuardError, PlatformError, RequestError, TraceError, ViewError, ChartError, StoreError)
+ANTICIPATED = (
+    InventoryError, GuardError, PlatformError, RequestError, FilterError, TraceError, ViewError, ChartError, StoreError,
+)
+
+# The most tokens netgpt-mcp sends in one answer unless told otherwise, under what MCP clients take (Claude Code's
+# limit is 25,000).
+DEFAULT_MAX_ANSWER = 20_000
+
+# Apart from digits, compact JSON is about 3 characters a token.
+CHARACTERS_PER_TOKEN = 3
+
+
+def tokens_in(text: str) -> int:
+    """
+    About how many tokens a model reads text as. A digit is a token of its own to
+    qwen's and gemma's tokenizers, and addresses are mostly digits, so a table of
+    them is far more tokens than its length suggests: the focused layer 2 graph of
+    a /24 on the Nexus switches was 1.6 characters a token. Against qwen3.8's own
+    count of the Nexus switches' answers, this is from 11% under (the topology's
+    evidence) to 26% over (prose).
+    """
+    digits = len(text) - len(re.sub(r"\d", "", text))
+    return digits + (len(text) - digits) // CHARACTERS_PER_TOKEN
 
 
 @contextlib.contextmanager
@@ -126,9 +151,36 @@ def as_names(value: object) -> object:
 
 
 Names = Annotated[list[str] | None, BeforeValidator(as_names)]
+
 # Small models ask one device at a time, a reply each, unless told plainly that one call covers them all.
 DeviceNames = Annotated[
     Names, Field(description="The devices to query, from list_devices, all in this one call. Leave it out to query every device.")
+]
+
+
+def as_filter(value: object) -> object:
+    """A filter's values: one value as a list of one, and blank values (models fill in every parameter) left out."""
+    if isinstance(value, str | int | float):
+        value = [value]
+    elif isinstance(value, dict):
+        value = list(value)
+    if isinstance(value, list):
+        value = [item for item in value if item is not None and str(item).strip()]
+        return value or None
+    return value
+
+
+Ports = Annotated[
+    list[str] | None,
+    BeforeValidator(as_filter),
+    Field(description="Only these ports: a name or an abbreviation (Ethernet1/9 or Eth1/9, port-channel2 or Po2, Vlan80). "
+          "A port includes its subinterfaces."),
+]
+Macs = Annotated[
+    list[str] | None,
+    BeforeValidator(as_filter),
+    Field(description="Only entries whose MAC holds one of these: a MAC address or any part of one, in any spelling "
+          "(0200.c0ff.ee01, 02:00:c0:ff:ee:01, or c0ff)."),
 ]
 
 
@@ -140,6 +192,31 @@ ChartPorts = Annotated[
     BeforeValidator(as_names),
     Field(description="Ports as device:port (leaf1:ethernet-1/49), links as device--device, or devices for all their ports."),
 ]
+
+
+def tally(values: Iterable[object], most: int = 8) -> str:
+    """How many of each value, the commonest first: "Vlan80 95, Vlan254 60, and 12 others"."""
+    counts = Counter(str(value) for value in values)
+    shown = ", ".join(f"{value} {count:,}" for value, count in counts.most_common(most))
+    others = len(counts) - most
+    return shown + (f", and {others:,} others" if others > 0 else "")
+
+
+def fitted(answer: Any, limit: int | None, summary: Callable[[], str]) -> Any:
+    """
+    The answer, if it fits in limit tokens as the model reads it (compact JSON). If
+    not, the error says how big it is, what it holds (summary), and how to ask for
+    less, so the model's next call can, rather than filling its context.
+    """
+    if limit is None:
+        return answer
+    size = tokens_in(answer.model_dump_json())
+    if size <= limit:
+        return answer
+    raise ToolError(
+        f"The answer is about {size:,} tokens, more than the {limit:,} one answer may have here, so none of it was sent. "
+        f"{summary()}"
+    )
 
 
 class PathEnds(BaseModel):
@@ -156,13 +233,20 @@ def as_path_ends(value: object) -> object:
     return value
 
 
-def build_server(engine: Engine, display: bool = False) -> MCPServer:
+def build_server(engine: Engine, display: bool = False, max_answer: int | None = None) -> MCPServer:
     """
     Build the MCP server on an engine. display adds the tool that draws the network;
     only offer it to a client that can show the drawing. If the engine polls, the
     server keeps it polling while a client is connected, and offers interface_traffic
-    to read the counters.
+    to read the counters. max_answer is the most tokens one answer may have (as
+    tokens_in counts them): a table or graph bigger than that is refused with what it
+    holds and how to narrow it, and show's output is cut off there.
     """
+
+
+    def by_device(items: list[Any]) -> str:
+        return tally((item.device for item in items), most=len(engine.inventory.devices))
+
     statistics = engine.statistics
     instructions = (
         INSTRUCTIONS
@@ -193,49 +277,130 @@ def build_server(engine: Engine, display: bool = False) -> MCPServer:
         files, or chain several commands together are refused, with the reason.
         """
         with answered():
-            return await engine.show(device, command)
+            limit = MAX_SHOW_CHARACTERS if max_answer is None else min(MAX_SHOW_CHARACTERS, max_answer * CHARACTERS_PER_TOKEN)
+            return await engine.show(device, command, limit)
 
     @server.tool(annotations=READ_ONLY)
-    async def lldp_neighbors(devices: DeviceNames = None) -> Collection[LldpNeighbor]:
+    async def lldp_neighbors(devices: DeviceNames = None, interface: Ports = None) -> Collection[LldpNeighbor]:
         """
         Return every device's LLDP adjacencies: which interface is cabled to which remote system and port.
         One call covers every device; name devices only to leave the others out.
         """
-        return await engine.lldp_neighbors(devices)
+        with answered():
+            found = await engine.lldp_neighbors(devices, interface)
+            return fitted(found, max_answer, lambda: (
+                f"It holds {len(found.items):,} LLDP neighbors: {by_device(found.items)}. "
+                "Ask again for less, with interface or fewer devices."
+            ))
 
     @server.tool(annotations=READ_ONLY)
-    async def interfaces(devices: DeviceNames = None) -> Collection[Interface]:
+    async def interfaces(
+        devices: DeviceNames = None,
+        interface: Ports = None,
+        address: Annotated[
+            list[str] | None,
+            BeforeValidator(as_filter),
+            Field(description="Only the interfaces on these: an address (the interface whose network holds it, "
+                  "such as a host's gateway) or a network (192.0.2.0/24)."),
+        ] = None,
+    ) -> Collection[Interface]:
         """
         Return each device's logical interfaces: the network instance (VRF or bridge) each is in,
-        whether it routes or bridges, its IPv4 and IPv6 addresses, and whether it is up. network_instance is null for
-        a subinterface in no network instance: nothing passes through it, whether it is up or not.
+        whether it routes or bridges, its IPv4 and IPv6 addresses, whether it is up, and the aggregate
+        (port-channel) a port is a member of. network_instance is null for a subinterface in no network
+        instance: nothing passes through it, whether it is up or not.
         One call covers every device; name devices only to leave the others out.
         """
-        return await engine.interfaces(devices)
+        with answered():
+            found = await engine.interfaces(devices, interface, address)
+            return fitted(found, max_answer, lambda: (
+                f"It holds {len(found.items):,} interfaces: {by_device(found.items)}; by network instance, "
+                f"{tally(item.network_instance for item in found.items)}. Ask again for less, with interface (a name or "
+                "an abbreviation), address (an address or a network: the interfaces on it), or fewer devices."
+            ))
 
     @server.tool(annotations=READ_ONLY)
-    async def mac_table(devices: DeviceNames = None) -> Collection[MacEntry]:
+    async def mac_table(
+        devices: DeviceNames = None,
+        mac: Macs = None,
+        vlan: Annotated[
+            list[int] | None,
+            BeforeValidator(as_filter),
+            Field(description="Only entries in these VLANs, on platforms that keep a MAC table per VLAN."),
+        ] = None,
+        interface: Ports = None,
+    ) -> Collection[MacEntry]:
         """
-        Return every device's layer 2 forwarding (MAC table) entries, per network instance.
+        Return every device's layer 2 forwarding (MAC table) entries, per network instance: which port each MAC
+        address is behind, in which VLAN.
         One call covers every device; name devices only to leave the others out.
         """
-        return await engine.mac_table(devices)
+
+        def summary() -> str:
+            vlans = [item.vlan for item in found.items if item.vlan is not None]
+            instances = (item.network_instance for item in found.items)
+            groups = f"by VLAN, {tally(vlans)}" if vlans else f"by network instance, {tally(instances)}"
+            return (
+                f"It holds {len(found.items):,} MAC entries: {by_device(found.items)}; {groups}. Ask again for less, "
+                "with mac (a MAC address or any part of one, in any spelling), vlan, interface, or fewer devices."
+            )
+
+        with answered():
+            found = await engine.mac_table(devices, mac, vlan, interface)
+            return fitted(found, max_answer, summary)
 
     @server.tool(annotations=READ_ONLY)
-    async def arp_table(devices: DeviceNames = None) -> Collection[ArpEntry]:
+    async def arp_table(
+        devices: DeviceNames = None,
+        address: Annotated[
+            list[str] | None,
+            BeforeValidator(as_filter),
+            Field(description="Only addresses in these: an address, or a network (192.0.2.0/24)."),
+        ] = None,
+        mac: Macs = None,
+        interface: Ports = None,
+    ) -> Collection[ArpEntry]:
         """
-        Return every device's ARP bindings of IPv4 addresses to MAC addresses.
+        Return every device's ARP bindings of IPv4 addresses to MAC addresses, and the interface each was heard on.
         One call covers every device; name devices only to leave the others out.
         """
-        return await engine.arp_table(devices)
+        with answered():
+            found = await engine.arp_table(devices, address, mac, interface)
+            return fitted(found, max_answer, lambda: (
+                f"It holds {len(found.items):,} ARP entries: {by_device(found.items)}; by interface, "
+                f"{tally(item.interface for item in found.items)}. Ask again for less, with address (an address or a "
+                "network), mac, interface, or fewer devices."
+            ))
 
     @server.tool(annotations=READ_ONLY)
-    async def routes(devices: DeviceNames = None, network_instance: str = "default") -> Collection[Route]:
+    async def routes(
+        devices: DeviceNames = None,
+        network_instance: str = "default",
+        destination: Annotated[
+            list[str] | None,
+            BeforeValidator(as_filter),
+            Field(description="Only the routes for these: an address or a network. For each, the route every device "
+                  "forwards it by (the longest match, or a default route), and every route inside it."),
+        ] = None,
+        protocol: Annotated[
+            list[str] | None,
+            BeforeValidator(as_filter),
+            Field(description="Only routes from these protocols, as the device names them or by their start: ospf, "
+                  "bgp, static, direct, local."),
+        ] = None,
+    ) -> Collection[Route]:
         """
         Return every device's routes in one network instance (VRF): IPv4, and IPv6 where the platform reads it.
+        To see how a device reaches an address or network, give it as destination.
         One call covers every device; name devices only to leave the others out.
         """
-        return await engine.routes(devices, network_instance)
+        with answered():
+            found = await engine.routes(devices, network_instance, destination, protocol)
+            return fitted(found, max_answer, lambda: (
+                f"It holds {len(found.items):,} routes in {network_instance}: {by_device(found.items)}; by protocol, "
+                f"{tally(item.protocol for item in found.items)}. Ask again for less, with destination (an address or a "
+                "network: the route each device forwards it by, and the routes inside it), protocol, or fewer devices."
+            ))
 
     @server.tool(annotations=READ_ONLY)
     async def bgp_sessions(devices: DeviceNames = None) -> Collection[BgpSession]:
@@ -245,7 +410,10 @@ def build_server(engine: Engine, display: bool = False) -> MCPServer:
         how many prefixes it received. Only an Established session exchanges routes; Active means it is
         trying to connect and failing. One call covers every device; name devices only to leave the others out.
         """
-        return await engine.bgp_sessions(devices)
+        found = await engine.bgp_sessions(devices)
+        return fitted(found, max_answer, lambda: (
+            f"It holds {len(found.items):,} BGP sessions: {by_device(found.items)}. Ask again for fewer devices."
+        ))
 
     @server.tool(annotations=READ_ONLY)
     async def ospf_neighbors(devices: DeviceNames = None) -> Collection[OspfNeighbor]:
@@ -255,10 +423,13 @@ def build_server(engine: Engine, display: bool = False) -> MCPServer:
         there and isn't sends no hellos this router accepts: compare both ends with ospf_interfaces.
         One call covers every device; name devices only to leave the others out.
         """
-        return await engine.ospf_neighbors(devices)
+        found = await engine.ospf_neighbors(devices)
+        return fitted(found, max_answer, lambda: (
+            f"It holds {len(found.items):,} OSPF neighbors: {by_device(found.items)}. Ask again for fewer devices."
+        ))
 
     @server.tool(annotations=READ_ONLY)
-    async def ospf_interfaces(devices: DeviceNames = None) -> OspfInterfaces:
+    async def ospf_interfaces(devices: DeviceNames = None, interface: Ports = None) -> OspfInterfaces:
         """
         Return the interfaces each device runs OSPF on: the area and its type (normal, stub, or nssa), network
         type, cost, whether it is passive, its authentication (none, or the algorithm, such as md5, and the
@@ -271,7 +442,13 @@ def build_server(engine: Engine, display: bool = False) -> MCPServer:
         Each end's cost is its own direction's.
         One call covers every device; name devices only to leave the others out.
         """
-        return await engine.ospf_interfaces(devices)
+        with answered():
+            found = await engine.ospf_interfaces(devices, interface)
+            return fitted(found, max_answer, lambda: (
+                f"It holds {len(found.items):,} OSPF interfaces, {sum(item.passive for item in found.items):,} of them "
+                f"passive, and {len(found.mismatches):,} mismatches: {by_device(found.items)}. Ask again for less, with "
+                "interface or fewer devices."
+            ))
 
     if statistics is not None:
 
@@ -286,12 +463,29 @@ def build_server(engine: Engine, display: bool = False) -> MCPServer:
                 "device; name devices only to leave the others out."
             ),
         )
-        async def interface_traffic(devices: DeviceNames = None, minutes: Minutes = 15) -> Collection[InterfaceTraffic]:
+        async def interface_traffic(
+            devices: DeviceNames = None, minutes: Minutes = 15, interface: Ports = None
+        ) -> Collection[InterfaceTraffic]:
             with answered():
-                return await engine.traffic(devices, minutes)
+                found = await engine.traffic(devices, minutes, interface)
+                return fitted(found, max_answer, lambda: (
+                    f"It holds {len(found.items):,} ports: {by_device(found.items)}. Ask again for less, with interface "
+                    "or fewer devices."
+                ))
 
     @server.tool(annotations=READ_ONLY)
-    async def topology(plane: PlaneChoice = "data", layer: Layer = "l2", network_instance: str = "default") -> Topology:
+    async def topology(
+        plane: PlaneChoice = "data",
+        layer: Layer = "l2",
+        network_instance: str = "default",
+        focus: Annotated[
+            list[str] | None,
+            BeforeValidator(as_filter),
+            Field(description="The nodes the question is about: devices, hosts by address or MAC, networks (the hosts "
+                  "on them), or links (a--b, or device:interface). The answer is then those, every link that touches "
+                  "them, and the nodes at those links' far ends, without their evidence. Leave it out for the whole graph."),
+        ] = None,
+    ) -> Topology:
         """
         Return the network as a graph merged from every device's LLDP, ARP, and MAC tables and
         interfaces, with the evidence for every node and link. layer l2 (the default) is the
@@ -303,9 +497,28 @@ def build_server(engine: Engine, display: bool = False) -> MCPServer:
         of neighbors with each end's area, cost, and state, and the networks advertised from passive
         interfaces. Two OSPF interfaces on one network that aren't full neighbors are a link too, and
         its problems say what keeps them apart. The data plane is the default; the management network
-        rarely matters to a question.
+        rarely matters to a question. To find where a host is plugged in, focus on it.
         """
-        return await engine.topology(plane, layer, network_instance)
+
+        def summary() -> str:
+            kinds = {"device": "devices", "neighbor": "LLDP neighbors", "host": "hosts", "segment": "shared segments",
+                     "subnet": "networks"}
+            counts = Counter(node.kind for node in graph.nodes)
+            held = ", ".join(f"{counts[kind]:,} {name}" for kind, name in kinds.items() if counts[kind])
+            if focus:
+                return (
+                    f"Around that focus, it holds {held}, and {len(graph.links):,} links. Focus on fewer nodes, or on a "
+                    "host or link rather than a switch."
+                )
+            return (
+                f"The graph {LAYER_NAMES[layer]} holds {held}, and {len(graph.links):,} links. Ask again with focus: the "
+                "devices, hosts (by address or MAC), networks, or links the question is about. The answer then holds "
+                "those, every link that touches them, and what is at the far ends."
+            )
+
+        with answered():
+            graph = await engine.topology(plane, layer, network_instance, focus)
+            return fitted(graph, max_answer, summary)
 
     @server.tool(annotations=READ_ONLY)
     async def forwarding_path(source: str, destination: str, network_instance: str = "default") -> ForwardingPath:
@@ -435,6 +648,13 @@ def main() -> None:
         "0 turns polling, and the tool, off (default: %(default)g).",
     )
     parser.add_argument("--store", metavar="memory|URL", help=STORE_HELP)
+    parser.add_argument(
+        "--max-answer",
+        type=int,
+        default=DEFAULT_MAX_ANSWER,
+        help="The most tokens one tool answer may have, counting each digit as one. A bigger table or graph is refused "
+        "with what it holds and the filters that narrow it. 0 for no limit (default: %(default)s).",
+    )
     parser.add_argument("--log-level", default="INFO", help="Logging level, written to stderr.")
     args = parser.parse_args()
     if args.inventory is None:
@@ -454,5 +674,5 @@ def main() -> None:
         except StoreError as error:
             parser.error(str(error))
         statistics = Poller(inventory, interval=args.poll_interval, store=store)
-    server = build_server(Engine(inventory, statistics=statistics))
+    server = build_server(Engine(inventory, statistics=statistics), max_answer=args.max_answer or None)
     server.run("stdio")

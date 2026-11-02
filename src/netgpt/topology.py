@@ -90,6 +90,9 @@ class TopologyNode(BaseModel):
     role: str | None = None
     platform: str | None = None
     addresses: list[str] = Field(default_factory=list)
+    macs: list[str] = Field(
+        default_factory=list, description="The MAC addresses ARP found its addresses at, for a host or an LLDP neighbor."
+    )
     error: str | None = Field(None, description="Why the device could not be fully queried.")
     router_id: str | None = Field(None, description="In the OSPF view, the router's OSPF router ID.")
     areas: list[str] = Field(
@@ -448,11 +451,15 @@ def build_topology(
             node = graph.nodes[owner]
             if entry.ip_address not in node.addresses:
                 node.addresses.append(entry.ip_address)
+            if entry.mac and node.kind != "device" and entry.mac not in node.macs:
+                node.macs.append(entry.mac)
             node.evidence.append(f"{said}, the LLDP neighbor on that port." if not trail else f"{said}: {owner}'s address.")
             continue
         host = graph.node(entry.ip_address, kind="host", plane=plane, addresses=[entry.ip_address])
         if plane == "data":
             host.plane = "data"  # Seen on the data plane anywhere puts a host on it.
+        if entry.mac and entry.mac not in host.macs:
+            host.macs.append(entry.mac)
         host.evidence.append(f"{said}.")
         graph.link(attach, LinkEnd(node=entry.ip_address), plane, f"{said}.", entry.device)
 
@@ -663,11 +670,18 @@ def _ospf_networks(
     return dict(sorted(members.items(), key=lambda item: (item[0].network_address, item[0].prefixlen)))
 
 
-def ospf_mismatches(interfaces: Iterable[Interface], ospf_interfaces: Iterable[OspfInterface]) -> list[str]:
+def ospf_mismatches(
+    interfaces: Iterable[Interface],
+    ospf_interfaces: Iterable[OspfInterface],
+    about: Callable[[OspfInterface], bool] | None = None,
+) -> list[str]:
     """
     What keeps routers that share a network from becoming neighbors, from their
     settings alone: for each network with two routers' OSPF interfaces on it, in each
-    network instance, what the two ends disagree on (ospf_disagreements), after the network.
+    network instance, what the two ends disagree on (ospf_disagreements), after the
+    network. Two passive ends aren't meant to be neighbors: each advertises the
+    network, as a pair of gateways does. about: only the networks with an end it
+    accepts, though every interface still counts in how the others are set.
     """
     ospf_interfaces = list(ospf_interfaces)
     prefixes = _addresses(interfaces)
@@ -675,7 +689,9 @@ def ospf_mismatches(interfaces: Iterable[Interface], ospf_interfaces: Iterable[O
     for instance in sorted({interface.network_instance for interface in ospf_interfaces}):
         mine = [interface for interface in ospf_interfaces if interface.network_instance == instance]
         for network, ends in _ospf_networks(mine, prefixes).items():
-            if len(ends) == 2 and ends[0].device != ends[1].device:
+            if about is not None and not any(about(end) for end in ends):
+                continue
+            if len(ends) == 2 and ends[0].device != ends[1].device and not all(end.passive for end in ends):
                 where = f"{network}" if instance == "default" else f"{network} in {instance}"
                 mismatches += [f"{where}: {line}" for line in ospf_disagreements(ends, _others(ends, mine))]
     return mismatches
@@ -758,7 +774,7 @@ def build_ospf(
     for network, ends in _ospf_networks(mine, prefixes).items():
         routers = {end.device for end in ends}
         evidence = [_ospf_says(end) for end in ends]
-        if len(ends) == 2 and len(routers) == 2:
+        if len(ends) == 2 and len(routers) == 2 and not all(end.passive for end in ends):
             states = {end.device: state_of(end.device, end.interface, other.device) for end, other in (ends, ends[::-1])}
             a, b = (
                 LinkEnd(node=end.device, interface=end.interface, address=str(prefix), area=end.area, cost=end.cost,
@@ -795,7 +811,8 @@ def build_ospf(
             ]
             paired.add((end.device, end.interface))
             continue
-        # A network with one OSPF router on it (a LAN it advertises) or several (a shared segment): a node.
+        # A network with one OSPF router on it (a LAN it advertises), two passive ones (gateways that both advertise
+        # it), or several (a shared segment): a node.
         areas = sorted({end.area for end in ends})
         subnet = graph.node(str(network), kind="subnet", plane="data", areas=areas, evidence=evidence)
         for end in ends:

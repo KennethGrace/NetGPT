@@ -272,3 +272,55 @@ async def test_display_traces_a_path_and_marks_where_it_is_lost(inventory: Inven
     assert listed.structured_content["path"] == view["path"]
     assert lopsided.is_error and "path" in lopsided.content[0].text
 
+
+
+@pytest.mark.anyio
+async def test_a_table_too_big_for_one_answer_is_refused_with_what_it_holds_and_how_to_ask_for_less(nexus: Engine) -> None:
+    async with Client(build_server(nexus, max_answer=500)) as client:
+        refused = await client.call_tool("mac_table", {})
+        narrowed = await client.call_tool("mac_table", {"mac": "0200.0000.0043"})
+    assert refused.is_error
+    text = refused.content[0].text
+    assert "tokens, more than the 500 one answer may have here, so none of it was sent." in text
+    assert "It holds 16 MAC entries: core1.example.net 10, dc1.example.net 6; by VLAN, 80 3, 1 2, 511 2, 2502 2" in text
+    assert "Ask again for less, with mac (a MAC address or any part of one, in any spelling), vlan, interface" in text
+    assert not narrowed.is_error and len(narrowed.structured_content["items"]) == 1
+
+
+@pytest.mark.anyio
+async def test_filters_take_one_value_for_a_list_and_ignore_blank_ones(nexus: Engine) -> None:
+    async with Client(build_server(nexus)) as client:
+        result = await client.call_tool("mac_table", {"mac": "", "vlan": 80, "interface": " "})
+    assert not result.is_error
+    assert [item["mac"] for item in result.structured_content["items"]] == ["0200.0000.0022", "0200.0000.0023", "0200.0000.0024"]
+
+
+@pytest.mark.anyio
+async def test_a_filter_that_cant_match_anything_says_how_to_write_one(nexus: Engine) -> None:
+    async with Client(build_server(nexus)) as client:
+        result = await client.call_tool("arp_table", {"address": "core1"})
+    assert result.is_error and "isn't an IP address or network" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_a_graph_too_big_for_one_answer_asks_for_a_focus_which_fits(nexus: Engine) -> None:
+    async with Client(build_server(nexus, max_answer=2_000)) as client:
+        refused = await client.call_tool("topology", {})
+        host = await client.call_tool("topology", {"focus": "02-00-00-00-00-26"})
+    assert refused.is_error
+    assert "The graph at layer 2 holds 2 devices," in refused.content[0].text
+    assert "Ask again with focus: the devices, hosts (by address or MAC), networks, or links" in refused.content[0].text
+    assert not host.is_error
+    nodes = {node["id"]: node for node in host.structured_content["nodes"]}
+    assert set(nodes) == {"198.18.9.20", "core1.example.net"}
+    # The switch at the far end comes without its evidence: focus on it for that.
+    assert nodes["198.18.9.20"]["evidence"] and nodes["core1.example.net"]["evidence"] == []
+
+
+@pytest.mark.anyio
+async def test_show_output_is_cut_off_where_an_answer_would_be_too_big(inventory: Inventory) -> None:
+    async with Client(build_server(Engine(inventory, platforms={"fake": FakePlatform}), max_answer=4)) as client:
+        result = await client.call_tool("show", {"device": "leaf1", "command": "show version"})
+    assert result.structured_content["truncated"] is True
+    # About 3 characters a token.
+    assert result.structured_content["output"].startswith("leaf1: ran s\n... [truncated at 12 characters]")

@@ -1571,6 +1571,13 @@
           },
           "type": "array"
         },
+        "macs": {
+          "description": "The MAC addresses ARP found its addresses at, for a host or an LLDP neighbor.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "error": {
           "anyOf": [
             {
@@ -1617,6 +1624,7 @@
         "role",
         "platform",
         "addresses",
+        "macs",
         "error",
         "router_id",
         "areas",

@@ -12,8 +12,8 @@ import re
 import pytest
 
 from netgpt.primitives import ArpEntry, DeviceError, DeviceInfo, Interface, LldpNeighbor, MacEntry
-from netgpt.topology import Topology, build_l3, build_topology
-from netgpt.views import ViewError, describe, make_view
+from netgpt.topology import Topology, TopologyNode, build_l3, build_topology
+from netgpt.views import ViewError, describe, focused, make_view
 
 from fakes import LAB, RecordedLab, SwitchedNetwork, recorded_lab
 
@@ -371,3 +371,46 @@ def test_a_layer_3_view_names_networks_and_says_which_layer_it_is() -> None:
     assert "at layer 3 (routers and the networks between them)" in describe(view)
     with pytest.raises(ViewError, match="nothing on the data plane at layer 3 called 'sw1'"):
         make_view(l3, "", ["sw1"], [], {})
+
+
+def test_a_host_s_node_has_the_mac_arp_found_it_at_and_a_device_s_has_none() -> None:
+    topology = SwitchedNetwork().topology(is_management)
+    assert node(topology, "10.1.0.2").macs == ["AA:00:00:00:00:02"]
+    assert all(not item.macs for item in topology.nodes if item.kind == "device")
+
+
+def test_focus_on_a_host_is_the_host_its_cable_and_the_switch_at_the_far_end_without_its_evidence() -> None:
+    around = focused(SwitchedNetwork().topology(is_management), ["10.1.0.2"])
+    assert [link.id for link in around.links] == ["10.1.0.2--sw1:ethernet-1/2"]
+    assert {item.id: bool(item.evidence) for item in around.nodes} == {"sw1": False, "10.1.0.2": True}
+
+
+@pytest.mark.parametrize("name", ["aa00.0000.0003", "aa-00-00-00-00-03", "AA:00:00:00:00:03"])
+def test_a_host_is_found_by_its_mac_in_any_spelling(name: str) -> None:
+    topology = SwitchedNetwork().topology(is_management)
+    assert [item.id for item in focused(topology, [name]).nodes if item.kind == "host"] == ["10.1.0.3"]
+    assert make_view(topology, "", [], [name], {}).highlight == ["10.1.0.3"]
+
+
+def test_a_network_with_no_node_of_its_own_names_the_hosts_on_it() -> None:
+    around = focused(SwitchedNetwork().topology(is_management), ["10.1.0.0/24"])
+    assert {item.id for item in around.nodes if item.kind == "host"} == {"10.1.0.2", "10.1.0.3"}
+
+
+def big_graph(hosts: int) -> Topology:
+    devices = [TopologyNode(id=name, kind="device", label=name) for name in ("core1.example.net", "core2.example.net")]
+    found = [TopologyNode(id=f"10.0.0.{index}", kind="host", label=f"10.0.0.{index}", addresses=[f"10.0.0.{index}"])
+             for index in range(1, hosts + 1)]
+    return Topology(nodes=devices + found)
+
+
+def test_a_device_is_found_by_its_name_without_the_domain() -> None:
+    assert [item.id for item in focused(big_graph(1), ["CORE1"]).nodes] == ["core1.example.net"]
+
+
+def test_a_name_on_a_big_graph_that_isnt_there_is_refused_with_its_devices_and_how_many_hosts() -> None:
+    with pytest.raises(ViewError) as refused:
+        focused(big_graph(50), ["core3"])
+    message = str(refused.value)
+    assert "Its nodes are: core1.example.net, core2.example.net, and 50 hosts, named by address." in message
+    assert "10.0.0.1" not in message
