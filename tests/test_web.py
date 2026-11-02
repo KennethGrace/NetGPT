@@ -34,6 +34,11 @@ def events(response: httpx.Response) -> list[dict[str, Any]]:
     return [json.loads(line) for line in response.text.splitlines() if line.strip()]
 
 
+def results(response: httpx.Response) -> list[dict[str, Any]]:
+    """The streamed events, without each tool call's start."""
+    return [event for event in events(response) if event["type"] != "calling"]
+
+
 @pytest.fixture
 async def browser(inventory: Inventory) -> AsyncIterator[Browser]:
     """
@@ -63,7 +68,7 @@ async def test_nothing_is_served_without_the_token(browser: Browser) -> None:
     page = await browser(ScriptedOllama(says("Never asked.")), signed_in=False)
     wrong = await page.get("/", params={"token": "guess"})
     assert wrong.status_code == 401 and "set-cookie" not in wrong.headers
-    paths = ["/", "/app.js", "/map.js", "/chart.js", "/d3-force.js", "/app.css", "/api/conversation"]
+    paths = ["/", "/app.js", "/map.js", "/chart.js", "/d3-force.js", "/app.css", "/fonts/fraunces.woff2", "/api/conversation"]
     paths += ["/api/v1/view", "/api/v1/devices"]
     posts = [("POST", "/api/ask"), ("POST", "/api/reset"), ("POST", "/api/v1/show")]
     for method, path in [("GET", path) for path in paths] + posts:
@@ -83,6 +88,10 @@ async def test_token_link_becomes_a_strict_cookie_and_a_clean_url(browser: Brows
     assert "script-src 'self'" in index.headers["content-security-policy"]
     for script in ("/app.js", "/map.js", "/d3-force.js"):
         assert (await page.get(script)).headers["content-type"].startswith("text/javascript")
+    # The page's fonts are its own: nothing loads from outside the server.
+    assert "font-src 'self'" in index.headers["content-security-policy"]
+    font = await page.get("/fonts/fraunces.woff2")
+    assert font.headers["content-type"] == "font/woff2" and font.content[:4] == b"wOF2"
 
 
 @pytest.mark.anyio
@@ -92,8 +101,10 @@ async def test_answer_streams_thinking_tool_calls_and_answer(browser: Browser) -
     response = await page.post("/api/ask", json={"question": "What is leaf1 cabled to?"})
     assert response.headers["content-type"].startswith("application/x-ndjson")
     streamed = events(response)
-    assert [event["type"] for event in streamed] == ["thinking", "tool", "content", "answer"]
-    tool = streamed[1]
+    assert [event["type"] for event in streamed] == ["thinking", "calling", "tool", "content", "answer"]
+    # The page hears of a call as it starts, so it can show which devices the model is asking.
+    assert (streamed[1]["name"], streamed[1]["arguments"]) == ("lldp_neighbors", {"devices": "leaf1"})
+    tool = streamed[2]
     assert (tool["name"], tool["arguments"], tool["is_error"]) == ("lldp_neighbors", {"devices": "leaf1"}, False)
     assert "spine1" in tool["result"]
     assert streamed[-1]["text"] == "leaf1 is cabled to spine1."
@@ -137,7 +148,7 @@ async def test_failures_arrive_as_error_events(browser: Browser) -> None:
 @pytest.mark.anyio
 async def test_a_displayed_view_reaches_the_map_and_survives_a_reload(browser: Browser) -> None:
     page = await browser(ScriptedOllama(calls("display", {"title": "leaf1's host", "focus": ["198.51.100.11"]}), says("See the map.")))
-    streamed = events(await page.post("/api/ask", json={"question": "Where is leaf1's host?"}))
+    streamed = results(await page.post("/api/ask", json={"question": "Where is leaf1's host?"}))
     tool = streamed[0]
     assert tool["result"].startswith('The user now sees "leaf1\'s host"')
     assert tool["view"]["emphasis"]["198.51.100.11"] == "focus"
@@ -148,7 +159,7 @@ async def test_a_displayed_view_reaches_the_map_and_survives_a_reload(browser: B
 @pytest.mark.anyio
 async def test_only_display_results_carry_a_view(browser: Browser) -> None:
     page = await browser(ScriptedOllama(calls("display", {"title": "Nope", "focus": ["leaf9"]}), calls("topology", {}), says("Hmm.")))
-    streamed = events(await page.post("/api/ask", json={"question": "Show leaf9."}))
+    streamed = results(await page.post("/api/ask", json={"question": "Show leaf9."}))
     refused, graph = streamed[0], streamed[1]
     assert refused["is_error"] and "view" not in refused
     assert graph["name"] == "topology" and "view" not in graph
@@ -164,7 +175,7 @@ async def test_a_chart_reaches_the_page_survives_a_reload_and_refreshes_with_new
     await poller.poll()
     now[0] += 30
     await poller.poll()
-    streamed = events(await page.post("/api/ask", json={"question": "How busy is leaf1?"}))
+    streamed = results(await page.post("/api/ask", json={"question": "How busy is leaf1?"}))
     chart = streamed[0]["chart"]
     assert (chart["ports"], chart["unit"], chart["interval"]) == (["leaf1:ethernet-1/1"], "Mbit/s", 30)
     assert [(line["direction"], [value for _, value in line["points"]]) for line in chart["lines"]] == [("in", [10.0]), ("out", [1.0])]

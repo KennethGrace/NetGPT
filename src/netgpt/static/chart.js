@@ -5,8 +5,11 @@
 // time for new samples, so it stays live while it is on the page. A chart of a long
 // window comes from rollups (chart.step seconds a point), and says so in its caption.
 //
-// Each port takes the next of six colors in a fixed order (--series-1 to -6 in
-// app.css), so a port keeps its color as the chart updates. In is a solid line and
+// A port's line wears the tone of the device at the far end of its link, when the
+// page knows it (registry.js): the port toward ops-core is ops-core's color, as
+// ops-core is on the map. When it doesn't, or two ports lead to the same device,
+// each port takes the next of six colors in a fixed order (--series-1 to -6 in
+// app.css). Either way a port keeps its color as the chart updates. In is a solid line and
 // out a dashed one. Hovering shows every line's value at the nearest poll, and a
 // table under the chart holds the same numbers, for anyone who can't hover or can't
 // tell the colors apart.
@@ -97,13 +100,22 @@ const netchart = (() => {
 
   // ---- Drawing
 
-  function slot(chart, port) {
-    return (chart.ports.indexOf(port) % SLOTS) + 1;
+  function paint(chart, port) {
+    // A port's color class: its far end's tone, or its slot in the chart.
+    return chart.paint?.get(port) || `s${(chart.ports.indexOf(port) % SLOTS) + 1}`;
+  }
+
+  function paints(chart, toneOf) {
+    // Tones for every port, if each port has one and no two share it.
+    if (!toneOf) return null;
+    const tones = chart.ports.map(toneOf);
+    if (!tones.every(Boolean) || new Set(tones).size !== tones.length) return null;
+    return new Map(chart.ports.map((port, index) => [port, `toned tone-${tones[index]}`]));
   }
 
   function lineKey(chart, line) {
     const key = shape("svg", "key", { viewBox: "0 0 18 6", width: "18", height: "6", "aria-hidden": "true" });
-    key.append(shape("line", `line s${slot(chart, line.port)} ${line.direction}`, { x1: "1", y1: "3", x2: "17", y2: "3" }));
+    key.append(shape("line", `line ${line.port ? paint(chart, line.port) : ""} ${line.direction}`, { x1: "1", y1: "3", x2: "17", y2: "3" }));
     return key;
   }
 
@@ -152,9 +164,9 @@ const netchart = (() => {
       const shown = line.points.filter(([time]) => time >= end - span);
       if (!shown.length) continue;
       const path = shown.map(([time, value], index) => `${index ? "L" : "M"}${x(time).toFixed(1)},${y(value).toFixed(1)}`);
-      marks.append(shape("path", `line s${slot(chart, line.port)} ${line.direction}`, { d: path.join("") }));
+      marks.append(shape("path", `line ${paint(chart, line.port)} ${line.direction}`, { d: path.join("") }));
       const [time, value] = shown[shown.length - 1];
-      marks.append(shape("circle", `end s${slot(chart, line.port)}`, { cx: String(x(time)), cy: String(y(value)), r: "4" }));
+      marks.append(shape("circle", `end ${paint(chart, line.port)}`, { cx: String(x(time)), cy: String(y(value)), r: "4" }));
     }
     svg.append(marks);
 
@@ -239,6 +251,7 @@ const netchart = (() => {
 
   function fill(entry, note) {
     const { figure, chart } = entry;
+    chart.paint = paints(chart, entry.toneOf);
     figure.querySelector(".chart-unit").textContent = chart.unit;
     figure.querySelector(".chart-legend").replaceWith(legend(chart));
     const open = figure.querySelector(".chart-data").open;
@@ -272,7 +285,7 @@ const netchart = (() => {
   }
 
   // Draw a chart into the conversation, or the map's inspector, and keep it live.
-  function add(parent, chart, { height = HEIGHT } = {}) {
+  function add(parent, chart, { height = HEIGHT, toneOf = null } = {}) {
     const figure = element("figure", "chart");
     const heading = element("figcaption", "chart-heading");
     heading.append(element("strong", "", chart.title), element("span", "chart-unit"));
@@ -281,7 +294,7 @@ const netchart = (() => {
     readout.hidden = true;
     figure.append(heading, plot, readout, element("div", "chart-legend"), element("details", "chart-data"), element("div", "chart-caption"));
     parent.append(figure);
-    const entry = { figure, chart, height, asked: 0 };
+    const entry = { figure, chart, height, toneOf, asked: 0 };
     live.add(entry);
     fill(entry, "Fetching the latest samples…");
     refresh(entry);

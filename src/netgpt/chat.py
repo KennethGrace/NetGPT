@@ -102,6 +102,9 @@ class ChatObserver:
     def content(self, text: str) -> None:
         """The next piece of the model's reply text."""
 
+    def tool_started(self, name: str, arguments: dict[str, Any]) -> None:
+        """A tool call the model made, as it starts: the page shows which devices it is asking."""
+
     def tool_call(
         self, name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None = None
     ) -> None:
@@ -341,6 +344,7 @@ class Chat:
         """Run one tool call and return the tool message that carries its result."""
         name = call["function"]["name"]
         arguments = call["function"].get("arguments") or {}
+        observer.tool_started(name, arguments)
         # Unknown tools and invalid arguments come back as error results for the model to read.
         result = await self._client.call_tool(name, arguments)
         text, failed = result_text(result), result.is_error
