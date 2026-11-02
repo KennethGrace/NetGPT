@@ -299,6 +299,9 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
     - 3d: snapshots of the tables the tools read (OSPF neighbors, LLDP, routes), kept when they change, so "what changed since" is answerable, OSPF state over time with it, and Phase 4's events have something to come from.
   - Phase 4, events: errors climbing, a link saturated or down, shown on the page and told to the agent.
   - Later: BGP state, and gNMI streaming in place of polling.
+- **Page redesign** (branch `feature/web-redesign`, Ken's overnight brief: tan with colorful objects, the chat merged with the views, relationships shown wildly, text linked to the map):
+  - Done: the table and the sheet, device tones, threads both ways with the rail, tool cards streamed as they start with the devices they read rippling, view cards in miniature, each answer's cast with a group focus, chart lines in far-end tones, highlighter and numbered hops, crowded maps quiet, and the camera fitting what nothing covers. Checked in puppeteer's Chrome on the WAN lab (scripted and with qwen3.8:27b) and the Nexus snapshot, wide and phone width, light and dark.
+  - Known: a port written after its device is that device's, by proximity, so "its access ports (ethernet-1/1)" after another device's name goes to the wrong one. Chrome reports some answer streams ERR_ABORTED as they end, on main's page too, with the answer whole.
 - **Frontends track:**
   - Phase 1: MCP over HTTP, behind a token, on `netgpt-engine` once Contract Phase 2 has built it.
   - Phase 2: one login for the page and the endpoint.
