@@ -315,6 +315,11 @@ function viewCard(view) {
   return card;
 }
 
+function remark() {
+  // Names a later view taught the registry (a network first drawn at layer 3, say) get marked in what came before.
+  for (const block of conversation.querySelectorAll(".answer:not(.draft), .message.user, .note, .thinking-text")) netthreads.mark(block);
+}
+
 function mentionedIn(element) {
   // The nodes an element's mentions name: a link's two ends, a port's device.
   return [...element.querySelectorAll(".mention")].flatMap((mention) => (mention.dataset.nodes ? mention.dataset.nodes.split(" ") : [mention.dataset.id]));
@@ -403,6 +408,7 @@ function handle(event, live) {
       if (event.chart) netchart.add(reply(), event.chart, { toneOf: netregistry.farTone });
       if (event.view) {
         netregistry.learn(event.view);
+        if (live) remark();
         const viewed = viewCard(event.view);
         reply().append(viewed);
         if (live) {
@@ -762,6 +768,7 @@ async function load() {
   turn = null;
   latest = null;
   for (const event of data.events) handle(event, false);
+  remark();
   if (!data.events.length) showIntro();
   if (latest) showView(...latest);
   conversation.scrollTop = conversation.scrollHeight;
