@@ -1,0 +1,106 @@
+{
+ "TABLE_mac_address": {
+  "ROW_mac_address": [
+   {
+    "disp_mac_addr": "0200.0000.001f",
+    "disp_type": "*",
+    "disp_vlan": "1",
+    "disp_is_static": "disabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "port-channel122"
+   },
+   {
+    "disp_mac_addr": "0200.0000.0020",
+    "disp_type": "*",
+    "disp_vlan": "1",
+    "disp_is_static": "disabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "port-channel122"
+   },
+   {
+    "disp_mac_addr": "0200.0000.0021",
+    "disp_type": "*",
+    "disp_vlan": "20",
+    "disp_is_static": "disabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "Ethernet1/23"
+   },
+   {
+    "disp_mac_addr": "0200.0000.0022",
+    "disp_type": "*",
+    "disp_vlan": "80",
+    "disp_is_static": "disabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "Ethernet1/32"
+   },
+   {
+    "disp_mac_addr": "0200.0000.0023",
+    "disp_type": null,
+    "disp_vlan": "80",
+    "disp_is_static": "disabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "Ethernet1/32"
+   },
+   {
+    "disp_mac_addr": "0200.0000.0024",
+    "disp_type": null,
+    "disp_vlan": "80",
+    "disp_is_static": "disabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "Ethernet1/31"
+   },
+   {
+    "disp_mac_addr": "0000.0c07.ac59",
+    "disp_type": "G",
+    "disp_vlan": "89",
+    "disp_is_static": "enabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "vPC Peer-Link(R)"
+   },
+   {
+    "disp_mac_addr": "0000.0c9f.f024",
+    "disp_type": "G",
+    "disp_vlan": "36",
+    "disp_is_static": "enabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "vPC Peer-Link(R)"
+   },
+   {
+    "disp_mac_addr": "0000.0c9f.fbb7",
+    "disp_type": "G",
+    "disp_vlan": "2999",
+    "disp_is_static": "enabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "sup-eth1(R)"
+   },
+   {
+    "disp_mac_addr": "0000.5e00.0105",
+    "disp_type": "G",
+    "disp_vlan": "5",
+    "disp_is_static": "enabled",
+    "disp_age": "0",
+    "disp_is_secure": "disabled",
+    "disp_is_ntfy": "disabled",
+    "disp_port": "sup-eth1(R)"
+   }
+  ]
+ }
+}

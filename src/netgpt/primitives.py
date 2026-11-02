@@ -82,6 +82,13 @@ class Interface(BaseModel):
         description="IPv4 and IPv6 addresses with prefix length, such as 192.168.12.1/24 or fd00::1/128. Link-local addresses are left out.",
     )
     oper_state: str | None = Field(None, description="For example up or down.")
+    aggregate: str | None = Field(
+        None,
+        description=(
+            "The aggregate (port-channel, LAG) this port is a member of, if any. Its MAC table entries and "
+            "traffic are the aggregate's; LLDP is heard on the members."
+        ),
+    )
 
 
 class InterfaceCounters(BaseModel):
@@ -142,7 +149,8 @@ class MacEntry(BaseModel):
     network_instance: str
     mac: str
     interface: str
-    entry_type: str | None = Field(None, description="For example learned, static, or irb-interface.")
+    entry_type: str | None = Field(None, description="For example learned, static, irb-interface, or gateway.")
+    vlan: int | None = Field(None, description="The VLAN, on platforms that keep a MAC table per VLAN.")
 
 
 # Internet: layer 3 addressing, routing, and reachability.

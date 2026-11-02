@@ -1,0 +1,57 @@
+{
+ "vpc-domain-id": "101",
+ "vpc-peer-status": "peer-ok",
+ "vpc-peer-status-reason": "SUCCESS",
+ "vpc-peer-keepalive-status": "peer-alive",
+ "vpc-peer-consistency": "consistent",
+ "vpc-per-vlan-peer-consistency": "consistent",
+ "vpc-peer-consistency-status": "SUCCESS",
+ "vpc-type-2-consistency": "inconsistent",
+ "vpc-type-2-consistency-status": "SYSERR_SVI_COMPAT_CHECK_FAILURE",
+ "vpc-role": "secondary-primary",
+ "num-of-vpcs": "12",
+ "peer-gateway": "disabled",
+ "dual-active-excluded-vlans": "-",
+ "vpc-graceful-consistency-check-status": "enabled",
+ "operational-l3-peer": "disabled",
+ "vpc-auto-recovery-status": "Enabled (timeout = 240 seconds)",
+ "vpc-peer-link-hdr": "Start of VPC peer-link table",
+ "TABLE_peerlink": {
+  "ROW_peerlink": {
+   "peer-link-id": 1,
+   "peerlink-ifindex": "Po1",
+   "peer-link-port-state": "enabled",
+   "peer-up-vlan-bitset": "1,20,30-31,40,50,60,77,80,88,90-91,99-103,105,114,118,130,144,193-196,199,211,214-215,246-248,251-255,311,488-489,500,511-512,599,810-814,820-825,888,999,1924,2048,2133,2146-2148,2197-2199,2418,2500-2502,2508,2700,2727,2730,2764-2766,2828,3001,3092"
+  }
+ },
+ "vpc-end": [
+  "End of table",
+  "End of table"
+ ],
+ "vpc-hdr": "Start of vPC table",
+ "vpc-not-es": "vPC complex",
+ "TABLE_vpc": {
+  "ROW_vpc": [
+   {
+    "vpc-id": 2,
+    "vpc-ifindex": "Po2",
+    "vpc-port-state": "enabled",
+    "vpc-thru-peerlink": "disabled",
+    "vpc-consistency": "consistent",
+    "vpc-consistency-status": "SUCCESS",
+    "up-vlan-bitset": "1,20,30-31,40,50,60,77,80,88,90-91,99-103,105,114,118,130,144,193-196,199,211,214-215,246-248,251-255,311,488-489,500,511-512,599,810-814,820-825,888,999,1924,2048,2133,2146-2148,2197-2199,2418,2500-2502,2508,2700,2727,2730,2764-2766,2828,3001,3092",
+    "es-attr": "unknown enum:<540689988>"
+   },
+   {
+    "vpc-id": 101,
+    "vpc-ifindex": "Po101",
+    "vpc-port-state": "disabled",
+    "vpc-thru-peerlink": "enabled",
+    "vpc-consistency": "consistent",
+    "vpc-consistency-status": "SUCCESS",
+    "up-vlan-bitset": "-",
+    "es-attr": "unknown enum:<540689988>"
+   }
+  ]
+ }
+}

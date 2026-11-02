@@ -74,6 +74,19 @@ JUNIPER_JUNOS = CliPolicy(
     pipe_filters=frozenset({"match", "except", "count", "last", "find", "display", "no-more", "trim"}),
 )
 
+CISCO_NXOS = CliPolicy(
+    verbs=frozenset({"show", "sho", "sh"}),
+    # `email`, `tee`, `diff`, and `python`, which send, write, or run something, are deliberately absent.
+    pipe_filters=frozenset(
+        {
+            "include", "inc", "i", "exclude", "exc", "ex", "begin", "b", "section", "sec", "count",
+            "egrep", "grep", "head", "last", "wc", "sort", "uniq", "no-more", "json", "json-pretty", "xml",
+        }
+    ),
+    # NX-OS redirects output to a file with > and >>, and runs several commands joined by ;.
+    forbidden=(">", "<", ";", "`", "$(", "&"),
+)
+
 CISCO_IOS = CliPolicy(
     verbs=frozenset({"show", "sho", "sh"}),
     # `redirect`, `append`, and `tee` write files, so they are deliberately absent.

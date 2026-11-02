@@ -1,0 +1,90 @@
+{
+ "TABLE_mac_address": {
+  "ROW_mac_address": [
+   {
+    "disp_mac_addr": "0000.5e00.013b",
+    "disp_vdc": 1,
+    "disp_vlan": 599,
+    "disp_is_static": 0,
+    "disp_is_secure": "Disabled",
+    "disp_is_ntfy": "Disabled",
+    "disp_age": 0,
+    "disp_port": "port-channel2",
+    "disp_type": "Primary_entry",
+    "disp_swid": 2750,
+    "disp_sswid": 0,
+    "disp_lid": 31
+   },
+   {
+    "disp_mac_addr": "0000.5e00.0134",
+    "disp_vdc": 1,
+    "disp_vlan": 512,
+    "disp_is_static": 0,
+    "disp_is_secure": "Disabled",
+    "disp_is_ntfy": "Disabled",
+    "disp_age": 0,
+    "disp_port": "port-channel2",
+    "disp_type": "Primary_entry",
+    "disp_swid": 2750,
+    "disp_sswid": 0,
+    "disp_lid": 31
+   },
+   {
+    "disp_mac_addr": "0200.0000.0042",
+    "disp_vdc": 1,
+    "disp_vlan": 511,
+    "disp_is_static": 1,
+    "disp_is_secure": "Disabled",
+    "disp_is_ntfy": "Disabled",
+    "disp_age": 0,
+    "disp_port": "port-channel1",
+    "disp_type": "Primary_entry",
+    "disp_swid": 2748,
+    "disp_sswid": 0,
+    "disp_lid": 0
+   },
+   {
+    "disp_mac_addr": "0200.0000.003e",
+    "disp_vdc": 1,
+    "disp_vlan": 511,
+    "disp_is_static": 1,
+    "disp_is_secure": "Disabled",
+    "disp_is_ntfy": "Disabled",
+    "disp_age": 0,
+    "disp_port": "port-channel127",
+    "disp_type": "Primary_entry",
+    "disp_swid": 2749,
+    "disp_sswid": 0,
+    "disp_lid": 17
+   },
+   {
+    "disp_mac_addr": "0200.0000.0043",
+    "disp_vdc": 1,
+    "disp_vlan": 2502,
+    "disp_is_static": 0,
+    "disp_is_secure": "Disabled",
+    "disp_is_ntfy": "Disabled",
+    "disp_age": 0,
+    "disp_port": "Ethernet1/9",
+    "disp_type": "Primary_entry",
+    "disp_swid": 2749,
+    "disp_sswid": 0,
+    "disp_lid": 5
+   },
+   {
+    "disp_mac_addr": "0200.0000.0044",
+    "disp_vdc": 1,
+    "disp_vlan": 2502,
+    "disp_is_static": 0,
+    "disp_is_secure": "Disabled",
+    "disp_is_ntfy": "Disabled",
+    "disp_age": 0,
+    "disp_port": "Ethernet1/10",
+    "disp_type": "Primary_entry",
+    "disp_swid": 2749,
+    "disp_sswid": 0,
+    "disp_lid": 7
+   }
+  ]
+ }
+}

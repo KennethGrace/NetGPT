@@ -1,0 +1,195 @@
+{
+ "TABLE_interface": {
+  "ROW_interface": [
+   {
+    "interface": "Ethernet1/1",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "down",
+    "state_rsn_desc": "SFP not inserted",
+    "speed": "10G",
+    "ratemode": "D",
+    "portchan": 101
+   },
+   {
+    "interface": "Ethernet1/2",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "access",
+    "state": "down",
+    "state_rsn_desc": "SFP not inserted",
+    "speed": "10G",
+    "ratemode": "D"
+   },
+   {
+    "interface": "Ethernet1/3",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "up",
+    "state_rsn_desc": "none",
+    "speed": "10G",
+    "ratemode": "D",
+    "portchan": 1121
+   },
+   {
+    "interface": "Ethernet1/4",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "access",
+    "state": "down",
+    "state_rsn_desc": "Administratively down",
+    "speed": "10G",
+    "ratemode": "D"
+   },
+   {
+    "interface": "Ethernet1/5",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "down",
+    "state_rsn_desc": "SFP not inserted",
+    "speed": "10G",
+    "ratemode": "D",
+    "portchan": 105
+   },
+   {
+    "interface": "Ethernet1/9",
+    "vlan": "811",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "up",
+    "state_rsn_desc": "none",
+    "speed": "10G",
+    "ratemode": "D"
+   },
+   {
+    "interface": "Ethernet1/10",
+    "vlan": "811",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "up",
+    "state_rsn_desc": "none",
+    "speed": "10G",
+    "ratemode": "D"
+   },
+   {
+    "interface": "Ethernet1/11",
+    "vlan": "811",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "down",
+    "state_rsn_desc": "Link not connected",
+    "speed": "10G",
+    "ratemode": "D"
+   },
+   {
+    "interface": "Ethernet1/12",
+    "vlan": "811",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "down",
+    "state_rsn_desc": "SFP not inserted",
+    "speed": "10G",
+    "ratemode": "D"
+   },
+   {
+    "interface": "Ethernet1/17",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "up",
+    "state_rsn_desc": "none",
+    "speed": "10G",
+    "ratemode": "D",
+    "portchan": 117
+   },
+   {
+    "interface": "Ethernet1/25",
+    "vlan": "--",
+    "type": "eth",
+    "portmode": "routed",
+    "state": "down",
+    "state_rsn_desc": "linkFlapErrDisabled",
+    "speed": "10G",
+    "ratemode": "D"
+   },
+   {
+    "interface": "port-channel1",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "up",
+    "state_rsn_desc": "none",
+    "speed": "a-10G",
+    "ratemode": "D",
+    "proto": "lacp"
+   },
+   {
+    "interface": "port-channel2",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "up",
+    "state_rsn_desc": "none",
+    "speed": "a-10G",
+    "ratemode": "D",
+    "proto": "lacp"
+   },
+   {
+    "interface": "port-channel101",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "down",
+    "state_rsn_desc": "Administratively down",
+    "speed": "10G",
+    "ratemode": "D",
+    "proto": "lacp"
+   },
+   {
+    "interface": "port-channel105",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "down",
+    "state_rsn_desc": "No operational members",
+    "speed": "10G",
+    "ratemode": "D",
+    "proto": "lacp"
+   },
+   {
+    "interface": "port-channel2121",
+    "vlan": "1",
+    "type": "eth",
+    "portmode": "trunk",
+    "state": "down",
+    "state_rsn_desc": "No operational members",
+    "speed": "1000",
+    "ratemode": "I",
+    "proto": "none"
+   },
+   {
+    "interface": "mgmt0",
+    "state": "up",
+    "ip_addr": "198.18.1.1",
+    "speed": "1000",
+    "mtu": 1500
+   },
+   {
+    "interface": "Vlan1",
+    "state": "down",
+    "state_rsn_desc": "Administratively down"
+   },
+   {
+    "interface": "Vlan30",
+    "state": "up"
+   },
+   {
+    "interface": "Vlan91",
+    "state": "up"
+   }
+  ]
+ }
+}

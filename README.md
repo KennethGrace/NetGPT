@@ -38,7 +38,7 @@ The multi-device tools query devices concurrently. A device that fails shows up 
 ## Safety model
 
 - **Inventory only.** Tools take device names from the inventory. The model cannot point NetGPT at any other host. `ping_sweep` only covers networks listed under `sweep_networks`, up to /22 from the NetGPT host and /24 from a device.
-- **Read-only CLI.** `show` accepts a command only if it starts with an allowed verb, every pipe leads to an allowed filter, and it contains no control characters or chaining syntax. On Cisco IOS this refuses `| redirect`, `| tee`, and `| append`. On SR Linux it refuses `>` redirection. On Junos it refuses `| save` and `| request`. Use a read-only account on the device as well; the policy is the second line of defence, not the first.
+- **Read-only CLI.** `show` accepts a command only if it starts with an allowed verb, every pipe leads to an allowed filter, and it contains no control characters or chaining syntax. On Cisco IOS this refuses `| redirect`, `| tee`, and `| append`. On SR Linux it refuses `>` redirection. On Junos it refuses `| save` and `| request`. On NX-OS it refuses `>` redirection, `;` between commands, and `| email`, `| tee`, and `| python`. Use a read-only account on the device as well; the policy is the second line of defence, not the first.
 - **Every way in has the same limits.** The tools, the page, and the API's commands all go through one engine, so the guard, the inventory, and the sweep limits are the same for an engineer at a frontend as for a model.
 - **Credentials stay on the server.** The inventory names an environment variable or a `chmod 600` file for each password, or a `chmod 600` SSH private key. Secrets never appear in tool arguments or results. Over SSH, NetGPT checks each device's host key against a `known_hosts` file and refuses to log in to one that doesn't match.
 
@@ -193,8 +193,11 @@ sweep_networks:
 |-----------------|---------------------|------------------------------------------------------------------------|
 | `nokia_srlinux` | JSON-RPC over HTTPS | All tools verified against SR Linux 25.10.5 in the lab. The tests replay responses recorded there. `bgp_sessions` isn't implemented yet; the OSPF tools are, against the WAN lab. |
 | `juniper_junos` | NETCONF over SSH    | Every tool but `ping`, `ping_sweep`, and the OSPF tools, verified against Junos 23.4R2 on a QFX5120 and two EX4400s. The tests replay replies recorded there, renamed. |
+| `cisco_nxos`    | CLI over SSH, `\| json` | Every tool but `ping`, `ping_sweep`, and `bgp_sessions`, verified against NX-OS 7.0(3)I7(7) on two Nexus 9396PXs and 7.3(8)N1(1) on two Nexus 5548UPs. The tests replay replies recorded there, trimmed and made anonymous. |
 
-Platform names match containerlab node kinds where there is one. `juniper_junos` is for Junos on hardware, which has none.
+Platform names match containerlab node kinds where there is one. `juniper_junos` and `cisco_nxos` are for hardware, which has none.
+
+NetGPT keeps no more than two SSH connections open to one device at a time, so a graph that asks every table of every device at once doesn't take a shared switch's VTY lines from the people who use it.
 
 On Junos, give NetGPT a user in the built-in `read-only` class, with an SSH key:
 
@@ -218,6 +221,28 @@ To record new fixtures from Junos devices, list them in an inventory, and list e
 
 ```bash
 python lab/record_junos.py --inventory my-junos.yml --rename my-renames.yml
+```
+
+On NX-OS, the built-in `network-operator` role reads everything but the configuration. To let NetGPT read that too, and to keep it from opening sessions to other hosts, give it a role of its own, with an SSH key (NX-OS checks the highest-numbered rule first):
+
+```
+role name netgpt-ro
+  rule 1 permit read
+  rule 2 permit command show running-config
+  rule 3 permit command show running-config *
+  rule 4 permit command show startup-config
+  rule 5 deny command telnet *
+  rule 6 deny command ssh *
+username netgpt role netgpt-ro
+username netgpt sshkey ssh-rsa AAAA... netgpt
+```
+
+The role refuses `ping` until a rule permits it, which is why `ping` isn't on NX-OS yet. NX-OS answers most show commands as JSON, and runs each command on an exec channel of its own, so nothing is scraped from a prompt. Some releases (7.0(3)I7 on a Nexus 9000) can't turn every reply into JSON, so NetGPT then asks for `| xml`, which the JSON is made from. NX-OS keeps its VLANs in the default network instance, so a switch port bridges there, and each MAC entry names its VLAN. A port in a port-channel names it (`aggregate`), and the topology follows a MAC table's port-channel to the cables of its members, where LLDP is heard.
+
+To record fixtures from NX-OS devices, list them in an inventory, and their names with stand-ins in a YAML file kept outside the repository. The network may be one other people use, so the recorder keeps a few rows of each kind in each table, moves every address into 198.18.0.0/15 and every MAC to a locally administered one, calls every other system neighbor-N, and blanks descriptions:
+
+```bash
+python lab/record_nxos.py --inventory my-nexus.yml --rename my-renames.yml
 ```
 
 ## The schema

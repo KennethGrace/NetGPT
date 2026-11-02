@@ -34,6 +34,7 @@ netgpt-engine --inventory lab/wan/inventory.yml --listen 127.0.0.1:8081   # the 
 netgpt-schema --out schema/netgpt.schema.json   # rewrite the contract after changing a record NetGPT sends
 python lab/record_fixtures.py           # re-record the lab's responses as test fixtures
 python lab/record_junos.py --inventory I --rename R   # record Junos devices' replies as renamed fixtures
+python lab/record_nxos.py --inventory I --rename R    # record NX-OS devices' replies, trimmed and anonymous
 python lab/gremlin.py break|reveal|repair|check   # break one thing in the lab on purpose, and put it back
 python lab/game.py --model M --ollama URL         # the gremlin's game: break, ask the model why, keep score
 python lab/game.py --lab wan --model M ...        # the same with OSPF faults, in the WAN lab
@@ -43,7 +44,7 @@ python lab/game.py --lab wan --anywhere ...       # each fault at a random one o
 ## Layout
 
 - `src/netgpt/primitives.py`: the typed records every tool returns, by layer. Each names the device that reported it.
-- `src/netgpt/platforms/`: one driver per platform (`srlinux.py` speaks SR Linux JSON-RPC, `junos.py` NETCONF over SSH). `base.py` is the interface, and `connect` opens an inventory device with its driver.
+- `src/netgpt/platforms/`: one driver per platform (`srlinux.py` speaks SR Linux JSON-RPC, `junos.py` NETCONF over SSH, `nxos.py` NX-OS's CLI over SSH with `| json`). `base.py` is the interface, and `connect` opens an inventory device with its driver. `ssh.py` logs in for every SSH platform, and keeps no more than two connections open to one device at a time.
 - `src/netgpt/guard.py`: the read-only CLI policy for `show`.
 - `src/netgpt/inventory.py`: devices, credentials (a password from an env var or `chmod 600` file, or a `chmod 600` SSH key), each device's `known_hosts`, and the networks `ping_sweep` may cover.
 - `src/netgpt/topology.py`: merges the tables into one graph: `build_topology` (layer 2), `build_l3` (layer 3).
@@ -76,7 +77,7 @@ python lab/game.py --lab wan --anywhere ...       # each fault at a random one o
 
 ## How it works, briefly
 
-- **Layer 2:** LLDP gives cables. A port hearing several LLDP neighbors is a shared segment. For each ARP entry, `locate` follows the address from the port it was heard on through switches' MAC tables to the port it is plugged into. A forgotten MAC leaves the host behind the switch with no port.
+- **Layer 2:** LLDP gives cables. A port hearing several LLDP neighbors is a shared segment. For each ARP entry, `locate` follows the address from the port it was heard on through switches' MAC tables to the port it is plugged into. A forgotten MAC leaves the host behind the switch with no port. A MAC table names a port-channel, and LLDP is heard on its members (`aggregate`), so the walk goes on from the members' cables. An address at the switch's own MAC (an IRB's, or a gateway MAC it shares with a vPC peer) is its own.
 - **Layer 3:** routers, subnets (from routed interfaces), and the hosts on them. Switches drop out. A /30 or /31 between two routers becomes a link with `subnet` set.
 - **OSPF view** (`build_ospf`, layer `ospf`): OSPF interfaces are grouped by the network their addresses are on. Two routers on one network are a link whether or not they became neighbors, with each end's area, cost, and adjacency state, and `problems` naming what keeps them apart (settings that differ, area type and authentication among them, a passive end, how far each side got). For a setting an interface has of its own (not its area or area type), the problems say how the other OSPF interfaces that aren't passive have it, so the end set unlike the rest is named, and which end to change stays the model's call (`ospf_disagreements`). `ospf_interfaces` returns the same lines, after each network, as `mismatches`: models read it far more often than the view. A router on the network that doesn't run OSPF there is named too. A network with one OSPF router on it is a subnet node in its area. Router IDs map neighbors to devices; one outside the inventory is a `neighbor` node. `describe` gives the model every link's problems.
 - **Forwarding walk:** longest match, recursive next-hop resolution, then the cable. `beyond` crosses shared segments and bridged ports, and each switch crossed becomes a hop. Hosts on the same network reach each other without the router.
@@ -104,14 +105,17 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **After changing the lab,** re-record (`python lab/record_fixtures.py`) and read the diff. A redeploy changes MAC addresses, which some tests name, and timestamps change every time.
 - **Junos fixtures** (`tests/fixtures/junos/`) are real switches' replies: a QFX5120 core and two EX4400 office switches, recorded by `lab/record_junos.py` through the real driver. `replies.json` says which RPC each file answers, and `test_junos.Replay` replays them.
   - **The repository is public, and the switches are real.** The recorder replaces every name and address listed in a YAML file kept outside the repository, and blanks serial numbers. Audit the fixtures before committing: LLDP on a management port carries the neighbor's management address, model, and software version.
+- **NX-OS fixtures** (`tests/fixtures/nxos/`) are a Nexus 9396PX core's (7.0(3)I7(7)) and a 5548UP's (7.3(8)N1(1)) replies, recorded by `lab/record_nxos.py` through the real driver. `replies.json` says which command each file answers and its exit status, and `fakes.CommandReplay` replays them.
+  - **They come from a network other people use,** with many more names in it than the Juniper lab: partners' gear and colleagues' servers. So the recorder keeps a few rows of each kind per table, maps only the YAML file's whole names to stand-ins and calls every other system neighbor-N (renaming the domain alone left the hosts), moves every address into 198.18.0.0/15 a /24 at a time, makes every MAC but the protocols' locally administered, and blanks descriptions. Audit before committing: grep for the real domain and names, any address outside 198.18.0.0/15, and any MAC that isn't 0200.* or a protocol's.
 - **WAN fixtures** (`tests/fixtures/srlinux/wan/`) are the WAN lab's tables, OSPF included, and `fakes.recorded_wan()` parses them through the real driver. The OSPF view's failures (areas, MTUs, a passive or one-way end, and how the other interfaces are set) are tested on synthetic routers in `test_ospf.py`.
-- **The contract:** `tests/test_contract.py` keeps `schema/netgpt.schema.json` equal to what `netgpt-schema` writes, and checks what NetGPT sends against it: every tool's answer through MCP, the page's traffic and charts, views of both recorded labs, and the Juniper switches' tables. A tool that answers with a record the contract doesn't name fails it.
+- **The contract:** `tests/test_contract.py` keeps `schema/netgpt.schema.json` equal to what `netgpt-schema` writes, and checks what NetGPT sends against it: every tool's answer through MCP, the page's traffic and charts, views of both recorded labs, and the Juniper and Nexus switches' tables. A tool that answers with a record the contract doesn't name fails it.
   - After changing a record, rewrite the schema and read its diff: it is what the other repositories see change. A changed version in `pyproject.toml` reaches the schema only after `pip install -e`, since the version is read from the installed package.
 - **The API:** `tests/test_api.py` checks every route against the schema (through `tests/schemas.py`, which the contract's tests use too), the token, the refusals, and the shared reads. `FakePlatform.table_reads` (the `table_reads` fixture) lists the tables read, so a test can tell a shared read from a live one, and a `Clock` moves the shared reads' time.
 - **Synthetic networks:** `fakes.SwitchedNetwork` is a small routed network with a switch. `FakePlatform` backs the engine, server, chat, and web tests. `ScriptedOllama` stands in for the model.
 - **Stores:** `tests/test_store.py` holds what every store must do, and runs it against each kind, rollups included: `MemoryStore` rolls up in Python and TimescaleDB in SQL, to the same answers. The TimescaleDB store is tested only when `NETGPT_TEST_STORE` names a database the tests may write to; each test makes a schema of its own and drops it. Its rollups are read in real time, so a test sees rows TimescaleDB hasn't stored in them yet.
   - **The tests' samples are stamped from 2100** (`START`), where TimescaleDB's jobs never reach. Stamped from 1970, a fresh database's retention job dropped them mid-test, every time. The dev container's `netgpt_test` runs no job scheduler, so it never showed; CI's fresh database does.
 - **Polling:** `FakePlatform`'s counters grow the same amount on every read (`counter_reads` resets them), and the `Poller` takes a clock, so a test sets the time between polls and knows the rates exactly.
+- **The SSH session limit** (`tests/test_ssh.py`) stands in for `asyncssh.connect` and counts the connections open to each host.
 - **Check driver changes against the live lab** before calling them done. Recording the lab found that SR Linux spells a learned MAC `learnt`. SR Linux also reports an unanswered ping as either a result or an error.
 - **The page has no JS test suite.** Check it in headless Firefox:
   - Build a static copy of the page whose stub `fetch` replays real views, and screenshot it.
@@ -146,6 +150,15 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
   - Routes for an instance are in two tables, `<instance>.inet.0` and `<instance>.inet6.0`. A table that doesn't exist comes back empty.
   - BGP's `Active` state means trying and failing to connect, not up; the tool's description says so. An established session lists each VPN route in `bgp.evpn.0`, where it arrived, and again in every instance table that imports it (`Global.evpn.0`), so only the arrival tables are counted.
   - The built-in `read-only` class can't run `show configuration` (it lacks `view-configuration`). A class with `view` and `view-configuration` can; Junos hides secret statements from it, but not comments, and the Mist agent leaves its device secret in one.
+- **NX-OS details** (learned on Nexus 9396PXs, 7.0(3)I7(7), and 5548UPs, 7.3(8)N1(1)):
+  - Each command runs on an exec channel of its own, several over one connection, even two at once. A banner arrives before login (SSH's), not in the output. A failed command exits non-zero (16 for a syntax error, 30 for a role's refusal) with the message on stdout and `Cmd exec error.` after it.
+  - `| json` is a tree of TABLE_x and ROW_x, a lone row bare and several a list. Numbers are strings on the 9000 and numbers on the 5548. A command with no JSON, or routes for a VRF the switch lacks, prints nothing.
+  - The 9000's release sends the tail of its XML instead of JSON for `show ip ospf interface` and `show ip ospf`; `| xml` is whole, and `as_dict` reads it into the JSON's shape.
+  - `show ip interface vrf all` lists VRFs and interfaces in two tables in step. The 9000's `show interface brief` leaves out VLAN interfaces. LLDP's local ports and routes' interfaces are short (Eth1/1, Po1, Lo2); the driver writes them out. The 5548 sends its own port IDs short too (Eth1/30), so the topology names a far port as the far device does (`_named_as_their_own`).
+  - The MAC table names the vPC peer link `vPC Peer-Link(R)`; `show vpc brief` says which port-channel it is. G entries (on sup-eth1, or over the peer link) are the pair's gateway MACs, VRRP's among them, so an address at one is the switch's own.
+  - `show ip route` lists no ARP host routes (`am`), though `show ip route summary` counts them. Durations are ISO 8601, months included.
+  - `network-operator` can't read the configuration on these releases ("% Permission denied for the role"); a role with `permit read` and `show running-config` can, and that role refuses `ping` until a rule permits it.
+  - Now and then a switch drops a connection between commands, or never finishes a command that usually takes a second (2 in about 100). Show commands are safe to repeat, so the driver logs in again and runs it once more, after 30 seconds for a stall.
 - **The web page reads its assets and inventory at startup.** Restart it after changing `static/` or `lab/inventory.yml`.
 - **The gremlin** (`lab/gremlin.py`) is the one thing here that writes to devices. It is a lab tool outside `src/`, and the model never reaches it.
   - It knows two labs (`gremlin.LABS`): the fabric, with static-route faults, and the WAN, with OSPF faults (a cost, an area, an MTU, a passive interface, a hello interval, a static route that beats OSPF, an area range, a stub area, and authentication). Fault names don't repeat across labs, so `gremlin.FAULTS` finds any of them; `--lab` picks the lab.
@@ -194,7 +207,12 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
 - **Lab track:**
   - Phase 1 is done: a bridging switch, and layer 2 and layer 3 views.
   - Phase 2, a second vendor: Junos, over NETCONF with an SSH key, built against real switches (a QFX5120 and two EX4400s, Junos 23.4R2) rather than a virtual lab. Virtual Junos needs KVM, which this VM lacks, except cRPD, which is only the routing daemon. Cisco IOL is legitimately available through CML-Free.
-  - Mixing vendors on one cable will need port names normalized (`Gi1/0/45` and `GigabitEthernet1/0/45`), so both ends match.
+  - Mixing vendors on one cable will need port names normalized (`Gi1/0/45` and `GigabitEthernet1/0/45`), so both ends match. Done in the topology, from the far device's own interface names (Phase 3a).
+  - **Phase 3, Cisco** (branch `feature/cisco-drivers`), on Ken's real ARCTIQ lab (two Nexus 9396PX cores, two Nexus 5548UPs, three Catalyst ToRs), which colleagues use. The point is scale: the cores hold about 440 MACs, 250 to 300 ARP entries, and 250 routes each.
+    - 3a is done: the SSH login layer with its per-device limit (Junos moved onto it), the NX-OS driver, `aggregate` on interfaces and `vlan` on MAC entries, the topology following port-channels and naming far ports as their devices do, and fixtures. Checked live on all four Nexus switches: every query, the six cables between them one link each from both ends, and the hosts followed across the peer link and port-channels.
+    - **The deluge, measured** (the four Nexus switches, every device at once, about 3.2 characters a token): `mac_table` about 58K tokens, `routes` 36K, `ospf_interfaces` 26K, `arp_table` and `interfaces` 22K each, `topology` 51K at layer 2 and 80K at layer 3. One device's `mac_table` is about 20K. qwen3.8:27b on one P40 has 64K.
+    - 3b: the IOS driver (the Catalysts: 15.2(4)E, privilege 5 with `show running-config view full`). IOS hangs up after one exec command, so it needs a prompt-driven shell over one connection, and text parsing.
+    - 3d: the scaling experiment: qwen against the Nexus switches with the tools as they are, as a baseline, then the large-table refusal with forgiving filters (`vlan`, any part of a MAC in any spelling, an address or network, `destination` for routes), then again.
 - **OSPF track** (branch `feature/ospf`):
   - Phase 1 is done: the WAN lab. Every adjacency is Full, and the branch's traffic to Ops goes through HQ (cost 22) while its own 1G link to Ops sits idle.
   - Phase 2 is done: `ospf_neighbors` and `ospf_interfaces`, read from SR Linux in one `get` of narrow paths (the link-state database stays on the device), with fixtures recorded from the WAN lab (`tests/fixtures/srlinux/wan/`). Routes already carried `ospfv2`, metric, and preference.
@@ -304,6 +322,7 @@ The chat is tuned against small local models (gemma4 e4b on CPU, 26b on a GPU or
       - **Not seen drawn:** neither browser here renders WebGL. Firefox finds no GL driver without a display, and Chrome's SwiftShader GPU process segfaults (exit 139) on xspace's scene, untouched `main` included. Mesa's lavapipe won't bind a context. Look at it on a machine with a GPU.
 - **Known gaps:**
   - `topology` and the forwarding walk are IPv4 only. Junos's interfaces and routes include IPv6; SR Linux's don't yet.
-  - `bgp_sessions` is Junos only so far, the OSPF tools SR Linux only, and `ping` isn't on Junos yet.
+  - `bgp_sessions` is Junos only so far, the OSPF tools SR Linux and NX-OS, and `ping` isn't on Junos or NX-OS yet.
+  - A table tool's answer has no size limit: on a real network one call can fill a small model's context (Lab Phase 3d).
   - A path and its return path are separate views.
   - A sweep from the NetGPT host can't tell "unreachable" from "empty".

@@ -48,10 +48,13 @@ Layer = Literal["l2", "l3", "ospf"]
 
 # A subinterface (ethernet-1/1.0, GigabitEthernet0/0.100) belongs to the port before the dot.
 SUBINTERFACE = re.compile(r"^(?P<port>.+)\.\d+$")
+# A port's name is a word and a number. An abbreviation spells less of the word: Gi1/0/51 is
+# GigabitEthernet1/0/51, and Eth1/30 is Ethernet1/30.
+PORT_NAME = re.compile(r"^(?P<word>[A-Za-z][A-Za-z-]*?)(?P<number>\d[\d/.:]*)$")
 
-# MAC table entries for the switch's own addresses (its IRB interfaces, reserved MACs). Every other
-# kind (learnt, learned, dynamic, static, ...) says which port a MAC is behind.
-OWN_ENTRIES = {"irb-interface", "irb-interface-anycast", "reserved"}
+# MAC table entries for the switch's own addresses (its IRB interfaces, its gateway MACs, reserved MACs).
+# Every other kind (learnt, learned, dynamic, static, ...) says which port a MAC is behind.
+OWN_ENTRIES = {"irb-interface", "irb-interface-anycast", "reserved", "gateway"}
 
 # How far an address is followed from switch to switch before giving up.
 MAX_SWITCHES = 16
@@ -216,6 +219,36 @@ def _neighbor_id(record: LldpNeighbor) -> str:
     return record.neighbor or record.neighbor_chassis_id or f"unknown neighbor of {record.device} {record.interface}"
 
 
+def _named_as_their_own(neighbors: list[LldpNeighbor], interfaces: list[Interface]) -> list[LldpNeighbor]:
+    """
+    The neighbors, with each far port named as the far device names it, when that
+    device's interfaces were read. A device may send an abbreviation as its port ID
+    (Cisco's switches send Gi1/0/51 for GigabitEthernet1/0/51), and both ends of a
+    cable must name its ports alike to be one link. An abbreviation that could be
+    more than one of the device's ports is left as it was sent.
+    """
+    names: dict[str, set[str]] = defaultdict(set)
+    by_number: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for interface in interfaces:
+        names[interface.device].add(interface.name)
+        if (match := PORT_NAME.match(interface.name)) is not None:
+            by_number[(interface.device, match["number"])].append(interface.name)
+
+    def own(device: str, port: str | None) -> str | None:
+        if port is None or device not in names or port in names[device] or (match := PORT_NAME.match(port)) is None:
+            return port
+        word = match["word"].lower()
+        found = [
+            name for name in by_number.get((device, match["number"]), []) if PORT_NAME.match(name)["word"].lower().startswith(word)
+        ]
+        return found[0] if len(found) == 1 else port
+
+    return [
+        record.model_copy(update={"neighbor_interface": own(_neighbor_id(record), record.neighbor_interface)})
+        for record in neighbors
+    ]
+
+
 def _address_key(node: TopologyNode) -> tuple[int, ...]:
     """Hosts and networks in address order."""
     try:
@@ -251,6 +284,8 @@ def build_topology(
     into one graph of the network at layer 2.
     """
     graph = _Graph()
+    interfaces = list(interfaces)
+    neighbors = _named_as_their_own(neighbors, interfaces)
     inventory = {device.name: device for device in devices}
     failed: dict[str, list[str]] = defaultdict(list)
     for error in errors:
@@ -271,13 +306,19 @@ def build_topology(
         )
 
     # The bridges each port switches in, the addresses each device owns, and where switches have seen each MAC.
+    # A port in an aggregate is cabled on its own, but the MAC table names the aggregate.
     bridges_at: dict[Endpoint, set[str]] = defaultdict(set)
     owned: dict[str, str] = {}
+    aggregate_of: dict[Endpoint, str] = {}
+    members_of: dict[Endpoint, list[str]] = defaultdict(list)
     for interface in interfaces:
         if interface.mode == "bridged" and interface.network_instance:
             bridges_at[(interface.device, port_of(interface.name))].add(interface.network_instance)
         for address in interface.addresses:
             owned.setdefault(address.split("/")[0], interface.device)
+        if interface.aggregate:
+            aggregate_of[(interface.device, port_of(interface.name))] = interface.aggregate
+            members_of[(interface.device, interface.aggregate)].append(port_of(interface.name))
     learned: dict[tuple[str, str], list[MacEntry]] = defaultdict(list)
     for entry in macs:
         learned[(entry.device, mac_key(entry.mac))].append(entry)
@@ -335,6 +376,16 @@ def build_topology(
                     device,
                 )
 
+    def heard_on(device: str, port: str) -> list[LldpNeighbor]:
+        """What LLDP hears on a port, or on an aggregate's members, which go where the aggregate goes."""
+        return seen.get((device, port)) or [
+            record for member in members_of.get((device, port), []) for record in seen.get((device, member), [])
+        ]
+
+    def same_port(device: str, one: str, other: str) -> bool:
+        """Whether two of a device's interfaces are on one port, an aggregate and its members being one."""
+        return len({aggregate_of.get((device, port_of(name)), port_of(name)) for name in (one, other)}) == 1
+
     def forwarding(device: str, mac: str, bridges: set[str] | None) -> MacEntry | None:
         """Where a switch's MAC table says a MAC is, in one of the given bridges (or any)."""
         for entry in learned.get((device, mac), []):
@@ -357,11 +408,14 @@ def build_topology(
         if (node, port) not in seen and mac and (found := forwarding(node, mac, None)) is not None:
             # Heard on a VLAN interface (IRB, SVI): the bridge's own MAC table says which port.
             trail.append(f"MAC table on {node} ({found.network_instance}): {entry.mac} on {found.interface}")
+            if (found.entry_type or "").lower() in OWN_ENTRIES:
+                # The switch's own MAC, such as a gateway address it shares with a peer: the address is its own too.
+                return node, None, trail
             port = port_of(found.interface)
         for _ in range(MAX_SWITCHES):
             if (segment := segment_of.get((node, port))) is not None:
                 return None, LinkEnd(node=segment), trail
-            heard = seen.get((node, port), [])
+            heard = heard_on(node, port)
             if not heard:
                 return None, LinkEnd(node=node, interface=port, bridges=sorted(bridges_at.get((node, port), ()))), trail
             far, far_port = _neighbor_id(heard[0]), heard[0].neighbor_interface
@@ -374,7 +428,7 @@ def build_topology(
                 trail.append(f"{far} bridges {far_port}, but its MAC table doesn't list {entry.mac or 'the MAC'} (aged out?)")
                 return None, LinkEnd(node=far, bridges=sorted(bridges)), trail
             trail.append(f"MAC table on {far} ({found.network_instance}): {entry.mac} on {found.interface}")
-            if (found.entry_type or "").lower() in OWN_ENTRIES or port_of(found.interface) == port_of(far_port):
+            if (found.entry_type or "").lower() in OWN_ENTRIES or same_port(far, found.interface, far_port):
                 return far, None, trail
             node, port = far, port_of(found.interface)
         return None, LinkEnd(node=node, interface=port), trail

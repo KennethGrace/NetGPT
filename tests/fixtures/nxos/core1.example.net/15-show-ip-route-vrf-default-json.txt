@@ -1,0 +1,272 @@
+{
+ "TABLE_vrf": {
+  "ROW_vrf": {
+   "vrf-name-out": "default",
+   "TABLE_addrf": {
+    "ROW_addrf": {
+     "addrf": "ipv4",
+     "TABLE_prefix": {
+      "ROW_prefix": [
+       {
+        "ipprefix": "0.0.0.0/0",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "false",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.5.1",
+          "ifname": "Eth1/17.1",
+          "uptime": "P4M25DT9H44M2S",
+          "pref": "110",
+          "metric": "1",
+          "clientname": "ospf-1",
+          "type": "type-2",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.12.0/24",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.12.2",
+          "ifname": "Vlan5",
+          "uptime": "P4M25DT9H44M36S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "direct",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.12.1/32",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.12.1",
+          "ifname": "Vlan5",
+          "uptime": "P4M25DT9H44M32S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "vrrp_engine",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.12.2/32",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.12.2",
+          "ifname": "Vlan5",
+          "uptime": "P4M25DT9H44M36S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "local",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.27.0/24",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.27.2",
+          "ifname": "Vlan36",
+          "uptime": "P4M25DT9H44M35S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "direct",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.27.1/32",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.27.1",
+          "ifname": "Vlan36",
+          "uptime": "P4M25DT9H43M54S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "hsrp",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.27.2/32",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.27.2",
+          "ifname": "Vlan36",
+          "uptime": "P4M25DT9H44M35S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "local",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.28.0/24",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "false",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.29.1",
+          "uptime": "P4M25DT9H44M35S",
+          "pref": "1",
+          "metric": "0",
+          "clientname": "static",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.30.1/32",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.30.1",
+          "ifname": "Vlan246",
+          "uptime": "P4M25DT9H44M32S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "vrrp_engine",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.31.1/32",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.31.1",
+          "ifname": "Vlan2418",
+          "uptime": "P4M25DT9H43M54S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "hsrp",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.32.0/24",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "false",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.5.1",
+          "ifname": "Eth1/17.1",
+          "uptime": "P1M12DT17H45M51S",
+          "pref": "110",
+          "metric": "20",
+          "clientname": "ospf-1",
+          "type": "type-2",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.25.0/16",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "false",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.25.241",
+          "uptime": "P4M25DT9H44M35S",
+          "pref": "1",
+          "metric": "0",
+          "clientname": "static",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.7.2/31",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "false",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.5.254",
+          "ifname": "Vlan3090",
+          "uptime": "P4M25DT9H43M54S",
+          "pref": "110",
+          "metric": "80",
+          "clientname": "ospf-1",
+          "type": "intra",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.5.0/30",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.5.2",
+          "ifname": "Eth1/17.1",
+          "uptime": "P4M25DT9H44M53S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "direct",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.5.2/32",
+        "ucast-nhops": "1",
+        "mcast-nhops": "0",
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.5.2",
+          "ifname": "Eth1/17.1",
+          "uptime": "P4M25DT9H44M53S",
+          "pref": "0",
+          "metric": "0",
+          "clientname": "local",
+          "ubest": "true"
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ }
+}

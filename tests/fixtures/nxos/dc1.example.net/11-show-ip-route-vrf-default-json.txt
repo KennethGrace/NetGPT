@@ -1,0 +1,155 @@
+{
+ "TABLE_vrf": {
+  "ROW_vrf": {
+   "vrf-name-out": "default",
+   "TABLE_addrf": {
+    "ROW_addrf": {
+     "addrf": "ipv4",
+     "TABLE_prefix": {
+      "ROW_prefix": [
+       {
+        "ipprefix": "0.0.0.0/0",
+        "ucast-nhops": 2,
+        "mcast-nhops": 0,
+        "attached": "false",
+        "TABLE_path": {
+         "ROW_path": [
+          {
+           "ipnexthop": "198.18.3.1",
+           "uptime": "P4M25DT9H48M45S",
+           "pref": 1,
+           "metric": 0,
+           "clientname": "static",
+           "stale": "false",
+           "unres": "false",
+           "hidden": "false",
+           "stale-label": "false",
+           "ubest": "true"
+          },
+          {
+           "ipnexthop": "198.18.4.1",
+           "uptime": "P4M25DT9H48M45S",
+           "pref": 1,
+           "metric": 0,
+           "clientname": "static",
+           "stale": "false",
+           "unres": "false",
+           "hidden": "false",
+           "stale-label": "false",
+           "ubest": "true"
+          }
+         ]
+        }
+       },
+       {
+        "ipprefix": "198.18.36.0/24",
+        "ucast-nhops": 1,
+        "mcast-nhops": 0,
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.36.4",
+          "ifname": "Vlan2500",
+          "uptime": "P7M8DT3H30M49S",
+          "pref": 0,
+          "metric": 0,
+          "clientname": "direct",
+          "stale": "false",
+          "unres": "false",
+          "hidden": "false",
+          "stale-label": "false",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.36.4/32",
+        "ucast-nhops": 1,
+        "mcast-nhops": 0,
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.36.4",
+          "ifname": "Vlan2500",
+          "uptime": "P7M8DT3H30M49S",
+          "pref": 0,
+          "metric": 0,
+          "clientname": "local",
+          "stale": "false",
+          "unres": "false",
+          "hidden": "false",
+          "stale-label": "false",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.37.0/24",
+        "ucast-nhops": 1,
+        "mcast-nhops": 0,
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.37.4",
+          "ifname": "Vlan511",
+          "uptime": "P23DT5H47M58S",
+          "pref": 0,
+          "metric": 0,
+          "clientname": "direct",
+          "stale": "false",
+          "unres": "false",
+          "hidden": "false",
+          "stale-label": "false",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.37.4/32",
+        "ucast-nhops": 1,
+        "mcast-nhops": 0,
+        "attached": "true",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.37.4",
+          "ifname": "Vlan511",
+          "uptime": "P23DT5H47M58S",
+          "pref": 0,
+          "metric": 0,
+          "clientname": "local",
+          "stale": "false",
+          "unres": "false",
+          "hidden": "false",
+          "stale-label": "false",
+          "ubest": "true"
+         }
+        }
+       },
+       {
+        "ipprefix": "198.18.35.1/32",
+        "ucast-nhops": 1,
+        "mcast-nhops": 0,
+        "attached": "false",
+        "TABLE_path": {
+         "ROW_path": {
+          "ipnexthop": "198.18.35.1",
+          "ifname": "Vlan91",
+          "uptime": "P7M8DT3H30M46S",
+          "pref": 0,
+          "metric": 0,
+          "clientname": "vrrp_engine",
+          "stale": "false",
+          "unres": "false",
+          "hidden": "false",
+          "stale-label": "false",
+          "ubest": "true"
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ }
+}

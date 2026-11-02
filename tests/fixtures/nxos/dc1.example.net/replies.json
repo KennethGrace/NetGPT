@@ -1,0 +1,62 @@
+{
+ "show lldp neighbors detail | json": {
+  "file": "01-show-lldp-neighbors-detail-json.txt",
+  "status": 0
+ },
+ "show interface | json": {
+  "file": "02-show-interface-json.txt",
+  "status": 0
+ },
+ "show vpc brief | json": {
+  "file": "03-show-vpc-brief-json.txt",
+  "status": 0
+ },
+ "show mac address-table | json": {
+  "file": "04-show-mac-address-table-json.txt",
+  "status": 0
+ },
+ "show ip arp vrf all | json": {
+  "file": "05-show-ip-arp-vrf-all-json.txt",
+  "status": 0
+ },
+ "show ip ospf vrf all | json": {
+  "file": "06-show-ip-ospf-vrf-all-json.txt",
+  "status": 0
+ },
+ "show ip ospf interface vrf all | json": {
+  "file": "07-show-ip-ospf-interface-vrf-all-json.txt",
+  "status": 0
+ },
+ "show ip ospf neighbors detail vrf all | json": {
+  "file": "08-show-ip-ospf-neighbors-detail-vrf-all-json.txt",
+  "status": 0
+ },
+ "show interface brief | json": {
+  "file": "09-show-interface-brief-json.txt",
+  "status": 0
+ },
+ "show ip interface vrf all | json": {
+  "file": "10-show-ip-interface-vrf-all-json.txt",
+  "status": 0
+ },
+ "show ip route vrf default | json": {
+  "file": "11-show-ip-route-vrf-default-json.txt",
+  "status": 0
+ },
+ "show ip route vrf management | json": {
+  "file": "12-show-ip-route-vrf-management-json.txt",
+  "status": 0
+ },
+ "show ip route vrf nosuchvrf | json": {
+  "file": "13-show-ip-route-vrf-nosuchvrf-json.txt",
+  "status": 0
+ },
+ "show vrf | include Up": {
+  "file": "14-show-vrf-include-up.txt",
+  "status": 0
+ },
+ "show bogus": {
+  "file": "15-show-bogus.txt",
+  "status": 16
+ }
+}

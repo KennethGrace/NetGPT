@@ -244,6 +244,94 @@ def test_an_address_on_the_switchs_own_mac_is_the_switchs() -> None:
     assert "10.1.0.254" not in {n.id for n in topology.nodes}
 
 
+def port_channel_network() -> tuple[list[DeviceInfo], list[LldpNeighbor], list[Interface]]:
+    """
+    A core and an access switch joined by a port-channel of two cables. Each end's
+    LLDP is heard on the members, and each sends its ports' short names: the core
+    sends Eth1/1, and the access switch Gi1/0/51.
+    """
+    devices = [
+        DeviceInfo(name="core", platform="cisco_nxos", host="172.20.20.60", role="core"),
+        DeviceInfo(name="access", platform="cisco_ios", host="172.20.20.61", role="access"),
+    ]
+    neighbors = [
+        LldpNeighbor(device="core", interface="Ethernet1/1", neighbor="access", neighbor_interface="Gi1/0/51"),
+        LldpNeighbor(device="core", interface="Ethernet1/2", neighbor="access", neighbor_interface="Gi1/0/52"),
+        LldpNeighbor(device="access", interface="GigabitEthernet1/0/51", neighbor="core", neighbor_interface="Eth1/1"),
+        LldpNeighbor(device="access", interface="GigabitEthernet1/0/52", neighbor="core", neighbor_interface="Eth1/2"),
+    ]
+    interfaces = [
+        Interface(device="core", name="Vlan10", network_instance="default", mode="routed", addresses=["10.3.0.1/24"]),
+        Interface(device="core", name="Ethernet1/1", network_instance="default", mode="bridged", aggregate="port-channel10"),
+        Interface(device="core", name="Ethernet1/2", network_instance="default", mode="bridged", aggregate="port-channel10"),
+        Interface(device="core", name="port-channel10", network_instance="default", mode="bridged"),
+        Interface(device="access", name="GigabitEthernet1/0/51", network_instance="default", mode="bridged", aggregate="Port-channel1"),
+        Interface(device="access", name="GigabitEthernet1/0/52", network_instance="default", mode="bridged", aggregate="Port-channel1"),
+        Interface(device="access", name="Port-channel1", network_instance="default", mode="bridged"),
+        Interface(device="access", name="GigabitEthernet1/0/10", network_instance="default", mode="bridged"),
+    ]
+    return devices, neighbors, interfaces
+
+
+def test_both_ends_of_a_cable_are_one_link_when_each_sends_a_short_name_for_its_port() -> None:
+    devices, neighbors, interfaces = port_channel_network()
+    topology = build_topology(devices, neighbors, [], [], is_management, [], interfaces)
+    assert sorted(link.id for link in topology.links) == [
+        "access:GigabitEthernet1/0/51--core:Ethernet1/1", "access:GigabitEthernet1/0/52--core:Ethernet1/2",
+    ]
+    assert not any(link.one_sided for link in topology.links)
+
+
+def test_a_short_name_that_could_be_two_ports_is_left_as_it_was_sent() -> None:
+    devices = [DeviceInfo(name="core", platform="cisco_nxos", host="172.20.20.60"), DeviceInfo(name="access", platform="cisco_ios", host="172.20.20.61")]
+    neighbors = [LldpNeighbor(device="core", interface="Ethernet1/1", neighbor="access", neighbor_interface="Tw1/0/1")]
+    interfaces = [
+        Interface(device="access", name="TwoGigabitEthernet1/0/1", mode="bridged"),
+        Interface(device="access", name="TwentyFiveGigE1/0/1", mode="bridged"),
+    ]
+    topology = build_topology(devices, neighbors, [], [], is_management, [], interfaces)
+    assert [link.id for link in topology.links] == ["access:Tw1/0/1--core:Ethernet1/1"]
+
+
+def test_a_host_behind_a_port_channel_is_followed_to_the_switch_its_members_are_cabled_to() -> None:
+    devices, neighbors, interfaces = port_channel_network()
+    arp = [ArpEntry(device="core", interface="Vlan10", ip_address="10.3.0.20", mac="0200.0000.0020")]
+    macs = [
+        # The MAC tables name the port-channels, not the cables LLDP is heard on.
+        MacEntry(device="core", network_instance="default", mac="0200.0000.0020", interface="port-channel10", vlan=10),
+        MacEntry(device="access", network_instance="default", mac="0200.0000.0020", interface="GigabitEthernet1/0/10", vlan=10),
+    ]
+    topology = build_topology(devices, neighbors, arp, [], is_management, macs, interfaces)
+    host = next(link for link in topology.links if "10.3.0.20" in link.id)
+    assert host.id == "10.3.0.20--access:GigabitEthernet1/0/10"
+    assert host.evidence == [
+        "ARP on core Vlan10: 10.3.0.20 is at 0200.0000.0020; MAC table on core (default): 0200.0000.0020 on port-channel10; "
+        "MAC table on access (default): 0200.0000.0020 on GigabitEthernet1/0/10."
+    ]
+
+
+def test_a_mac_the_far_switch_has_on_its_port_channel_back_is_the_far_switch_s() -> None:
+    devices, neighbors, interfaces = port_channel_network()
+    arp = [ArpEntry(device="core", interface="Vlan10", ip_address="10.3.0.2", mac="0200.0000.0002")]
+    macs = [
+        MacEntry(device="core", network_instance="default", mac="0200.0000.0002", interface="port-channel10", vlan=10),
+        MacEntry(device="access", network_instance="default", mac="0200.0000.0002", interface="Port-channel1", vlan=10),
+    ]
+    topology = build_topology(devices, neighbors, arp, [], is_management, macs, interfaces)
+    assert "10.3.0.2" in node(topology, "access").addresses
+    assert "10.3.0.2" not in {n.id for n in topology.nodes}
+
+
+def test_an_address_at_the_switch_s_own_gateway_mac_is_the_switch_s() -> None:
+    # A gateway address the core shares with its vPC peer by VRRP: its own MAC table says the MAC is its own.
+    devices, neighbors, interfaces = port_channel_network()
+    arp = [ArpEntry(device="core", interface="Vlan10", ip_address="10.3.0.254", mac="0000.5e00.010a")]
+    macs = [MacEntry(device="core", network_instance="default", mac="0000.5e00.010a", interface="sup-eth1", entry_type="gateway", vlan=10)]
+    topology = build_topology(devices, neighbors, arp, [], is_management, macs, interfaces)
+    assert "10.3.0.254" in node(topology, "core").addresses
+    assert "10.3.0.254" not in {n.id for n in topology.nodes}
+
+
 def test_layer_3_is_the_routers_and_the_networks_between_them() -> None:
     network = SwitchedNetwork()
     l3 = build_l3(network.devices, network.topology(is_management), network.interfaces, is_management)

@@ -543,6 +543,18 @@
           ],
           "default": null,
           "description": "For example up or down."
+        },
+        "aggregate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The aggregate (port-channel, LAG) this port is a member of, if any. Its MAC table entries and traffic are the aggregate's; LLDP is heard on the members."
         }
       },
       "required": [
@@ -551,7 +563,8 @@
         "network_instance",
         "mode",
         "addresses",
-        "oper_state"
+        "oper_state",
+        "aggregate"
       ],
       "title": "Interface",
       "type": "object"
@@ -857,7 +870,19 @@
             }
           ],
           "default": null,
-          "description": "For example learned, static, or irb-interface."
+          "description": "For example learned, static, irb-interface, or gateway."
+        },
+        "vlan": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The VLAN, on platforms that keep a MAC table per VLAN."
         }
       },
       "required": [
@@ -865,7 +890,8 @@
         "network_instance",
         "mac",
         "interface",
-        "entry_type"
+        "entry_type",
+        "vlan"
       ],
       "title": "MacEntry",
       "type": "object"

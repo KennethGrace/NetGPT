@@ -2,7 +2,7 @@
 The platforms package maps platform names to the classes that drive them.
 
 Platform names match containerlab's node kinds, so a lab's inventory can use the
-kind directly. juniper_junos is for Junos on hardware, which has no kind.
+kind directly. juniper_junos and cisco_nxos are for hardware, which has no kind.
 """
 
 from __future__ import annotations
@@ -10,9 +10,11 @@ from __future__ import annotations
 from netgpt.inventory import Inventory, InventoryError
 from netgpt.platforms.base import Platform, PlatformError, UnsupportedError
 from netgpt.platforms.junos import JunosPlatform
+from netgpt.platforms.nxos import NxosPlatform
 from netgpt.platforms.srlinux import SRLinuxPlatform
 
 PLATFORMS: dict[str, type[Platform]] = {
+    "cisco_nxos": NxosPlatform,
     "juniper_junos": JunosPlatform,
     "nokia_srlinux": SRLinuxPlatform,
 }
