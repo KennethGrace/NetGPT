@@ -70,7 +70,8 @@ NEIGHBOR_STATES = {"2way": "2-way"}
 CLI_HINT = (
     "This device runs Cisco NX-OS. For example: show interface brief, show ip interface brief vrf all, "
     "show ip route vrf all, show ip arp vrf all, show mac address-table, show lldp neighbors, show vpc brief, "
-    "show port-channel summary, show ip ospf neighbors vrf all, show running-config interface Ethernet1/1. "
+    "show port-channel summary, show ip ospf neighbors vrf all, show vrrp, show hsrp brief, "
+    "show running-config interface Ethernet1/1. "
     "The typed tools (interfaces, arp_table, mac_table, routes, lldp_neighbors, ospf_interfaces, ospf_neighbors) "
     "return the same records from every platform."
 )
