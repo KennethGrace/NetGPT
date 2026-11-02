@@ -64,9 +64,12 @@ class _Resolver:
         self.graph = graph
         self.unknown: list[str] = []
         self.nodes = {node.id.lower(): node.id for node in graph.nodes}
+        # An address more than one node holds, such as a gateway address a pair of switches share, names them all.
+        self.holders: dict[str, set[str]] = defaultdict(set)
         for node in graph.nodes:
             for address in node.addresses:
                 self.nodes.setdefault(address.lower(), node.id)
+                self.holders[address.lower()].add(node.id)
         # A device or neighbor by its name without the domain (core1 for core1.example.net), when only one has it.
         short: dict[str, list[str]] = defaultdict(list)
         for node in graph.nodes:
@@ -132,7 +135,9 @@ class _Resolver:
     def find(self, name: str) -> tuple[set[str], set[str]]:
         """The nodes and links one name refers to; records the name as unknown if nothing."""
         if (node := self.node(name)) is not None:
-            return {node}, set()
+            # A node's own ID names it alone; an address names every node that holds it.
+            key = name.strip().lower()
+            return ({node} if key == node.lower() else {node} | self.holders.get(key, set())), set()
         if (link := self.links.get(name.strip().lower())) is not None:
             return set(), {link}
         parts = LINK_SEPARATOR.split(name.strip())
@@ -314,6 +319,16 @@ def make_view(
         trouble=trouble,
         errors=graph.errors,
     )
+
+
+def named(topology: Topology, names: Iterable[str]) -> dict[str, set[str]]:
+    """The nodes each name stands for (a link's, its two ends), to say what a focus came to."""
+    resolver = _Resolver(topology)
+    found: dict[str, set[str]] = {}
+    for name in names:
+        nodes, links = resolver.find(name)
+        found[name] = nodes | {end.node for link in topology.links if link.id in links for end in (link.a, link.b)}
+    return found
 
 
 def focused(topology: Topology, names: list[str], plane: PlaneChoice = "data") -> Topology:

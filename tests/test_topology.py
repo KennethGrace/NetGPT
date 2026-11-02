@@ -13,7 +13,7 @@ import pytest
 
 from netgpt.primitives import ArpEntry, DeviceError, DeviceInfo, Interface, LldpNeighbor, MacEntry
 from netgpt.topology import Topology, TopologyNode, build_l3, build_topology
-from netgpt.views import ViewError, describe, focused, make_view
+from netgpt.views import ViewError, describe, focused, make_view, named
 
 from fakes import LAB, RecordedLab, SwitchedNetwork, recorded_lab
 
@@ -457,3 +457,14 @@ def test_a_name_on_a_big_graph_that_isnt_there_is_refused_with_its_devices_and_h
     message = str(refused.value)
     assert "Its nodes are: core1.example.net, core2.example.net, and 50 hosts, named by address." in message
     assert "10.0.0.1" not in message
+
+
+def test_an_address_two_nodes_hold_names_them_both() -> None:
+    # A gateway address a pair of switches share.
+    graph = big_graph(1)
+    for device in graph.nodes[:2]:
+        device.addresses.append("10.0.0.254")
+    assert {item.id for item in focused(graph, ["10.0.0.254"]).nodes} == {"core1.example.net", "core2.example.net"}
+    assert named(graph, ["10.0.0.254", "10.0.0.1"]) == {
+        "10.0.0.254": {"core1.example.net", "core2.example.net"}, "10.0.0.1": {"10.0.0.1"},
+    }

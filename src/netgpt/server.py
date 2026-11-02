@@ -57,7 +57,7 @@ from netgpt.statistics import (
 )
 from netgpt.store import STORE_HELP, StoreError, check_store, open_store
 from netgpt.topology import Layer, PlaneChoice, Topology
-from netgpt.views import LAYER_NAMES, View, ViewError, describe
+from netgpt.views import LAYER_NAMES, View, ViewError, describe, named
 
 logger = logging.getLogger("netgpt")
 
@@ -506,9 +506,14 @@ def build_server(engine: Engine, display: bool = False, max_answer: int | None =
             counts = Counter(node.kind for node in graph.nodes)
             held = ", ".join(f"{counts[kind]:,} {name}" for kind, name in kinds.items() if counts[kind])
             if focus:
+                # An address can be a switch's own, and then the focus is the whole switch: say so.
+                came_to = [
+                    f"{name} is {' and '.join(sorted(nodes))}" for name, nodes in named(graph, focus).items() if nodes != {name}
+                ]
+                stood = f" In it, {'; '.join(came_to)}." if came_to else ""
                 return (
-                    f"Around that focus, it holds {held}, and {len(graph.links):,} links. Focus on fewer nodes, or on a "
-                    "host or link rather than a switch."
+                    f"Around that focus, it holds {held}, and {len(graph.links):,} links.{stood} Focus on fewer nodes, or "
+                    "on a host or link rather than a switch."
                 )
             return (
                 f"The graph {LAYER_NAMES[layer]} holds {held}, and {len(graph.links):,} links. Ask again with focus: the "
