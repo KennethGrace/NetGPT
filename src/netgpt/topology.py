@@ -53,8 +53,10 @@ SUBINTERFACE = re.compile(r"^(?P<port>.+)\.\d+$")
 PORT_NAME = re.compile(r"^(?P<word>[A-Za-z][A-Za-z-]*?)(?P<number>\d[\d/.:]*)$")
 
 # MAC table entries for the switch's own addresses (its IRB interfaces, its gateway MACs, reserved MACs).
-# Every other kind (learnt, learned, dynamic, static, ...) says which port a MAC is behind.
+# Every other kind (learnt, learned, dynamic, static, ...) says which port a MAC is behind, but a secondary one.
 OWN_ENTRIES = {"irb-interface", "irb-interface-anycast", "reserved", "gateway"}
+# An entry the switch didn't learn itself (NX-OS's without its * mark): it says nothing about where the MAC is.
+SECONDARY_ENTRIES = {"secondary"}
 
 # How far an address is followed from switch to switch before giving up.
 MAX_SWITCHES = 16
@@ -325,6 +327,7 @@ def build_topology(
     learned: dict[tuple[str, str], list[MacEntry]] = defaultdict(list)
     for entry in macs:
         learned[(entry.device, mac_key(entry.mac))].append(entry)
+    down = {(interface.device, interface.name) for interface in interfaces if (interface.oper_state or "").lower() == "down"}
 
     def management(endpoint: Endpoint) -> bool:
         node, interface = endpoint
@@ -389,12 +392,27 @@ def build_topology(
         """Whether two of a device's interfaces are on one port, an aggregate and its members being one."""
         return len({aggregate_of.get((device, port_of(name)), port_of(name)) for name in (one, other)}) == 1
 
+    def unusable(entry: MacEntry) -> str | None:
+        """Why a MAC table entry says nothing about where its MAC is, if it doesn't."""
+        if (entry.entry_type or "").lower() in SECONDARY_ENTRIES:
+            return "an entry it didn't learn itself"
+        if (entry.device, entry.interface) in down:
+            return "a port that is down"
+        return None
+
     def forwarding(device: str, mac: str, bridges: set[str] | None) -> MacEntry | None:
         """Where a switch's MAC table says a MAC is, in one of the given bridges (or any)."""
         for entry in learned.get((device, mac), []):
-            if bridges is None or entry.network_instance in bridges:
+            if unusable(entry) is None and (bridges is None or entry.network_instance in bridges):
                 return entry
         return None
+
+    def passed_over(device: str, mac: str) -> list[str]:
+        """The entries forwarding passes over, and why, for the evidence."""
+        return [
+            f"MAC table on {device} ({entry.network_instance}): {entry.mac} on {entry.interface}, {why}"
+            for entry in learned.get((device, mac), []) if (why := unusable(entry)) is not None
+        ]
 
     def locate(entry: ArpEntry) -> tuple[str | None, LinkEnd | None, list[str]]:
         """
@@ -415,6 +433,8 @@ def build_topology(
                 # The switch's own MAC, such as a gateway address it shares with a peer: the address is its own too.
                 return node, None, trail
             port = port_of(found.interface)
+        elif (node, port) not in seen and mac:
+            trail += passed_over(node, mac)
         for _ in range(MAX_SWITCHES):
             if (segment := segment_of.get((node, port))) is not None:
                 return None, LinkEnd(node=segment), trail
@@ -428,6 +448,7 @@ def build_topology(
                 return far, None, trail
             found = forwarding(far, mac, bridges) if mac else None
             if found is None:
+                trail += passed_over(far, mac) if mac else []
                 trail.append(f"{far} bridges {far_port}, but its MAC table doesn't list {entry.mac or 'the MAC'} (aged out?)")
                 return None, LinkEnd(node=far, bridges=sorted(bridges)), trail
             trail.append(f"MAC table on {far} ({found.network_instance}): {entry.mac} on {found.interface}")
@@ -436,32 +457,51 @@ def build_topology(
             node, port = far, port_of(found.interface)
         return None, LinkEnd(node=node, interface=port), trail
 
+    # Where each address is, by every ARP entry for it: several devices can ARP for one address (a pair of gateways
+    # does), and their walks can end in different places.
     managed_at = {device.host: device.name for device in devices}
+    placed: dict[str, list[tuple[int, ArpEntry, str | None, LinkEnd | None, list[str], str, Plane]]] = defaultdict(list)
     for entry in arp:
         endpoint: Endpoint = (entry.device, port_of(entry.interface))
-        plane = "management" if management(endpoint) else "data"
+        plane: Plane = "management" if management(endpoint) else "data"
         evidence = f"ARP on {entry.device} {entry.interface}: {entry.ip_address} is at {entry.mac or 'an unknown MAC'}"
         if entry.ip_address in managed_at:
             continue  # An inventory device's own management address; nothing new.
         if entry.ip_address in owned:
             continue  # An address an inventory device reports on its own interfaces.
         owner, attach, trail = locate(entry)
-        said = "; ".join([evidence, *trail])
-        if owner is not None:
-            node = graph.nodes[owner]
-            if entry.ip_address not in node.addresses:
-                node.addresses.append(entry.ip_address)
-            if entry.mac and node.kind != "device" and entry.mac not in node.macs:
-                node.macs.append(entry.mac)
-            node.evidence.append(f"{said}, the LLDP neighbor on that port." if not trail else f"{said}: {owner}'s address.")
-            continue
-        host = graph.node(entry.ip_address, kind="host", plane=plane, addresses=[entry.ip_address])
-        if plane == "data":
-            host.plane = "data"  # Seen on the data plane anywhere puts a host on it.
-        if entry.mac and entry.mac not in host.macs:
-            host.macs.append(entry.mac)
-        host.evidence.append(f"{said}.")
-        graph.link(attach, LinkEnd(node=entry.ip_address), plane, f"{said}.", entry.device)
+        # A node that owns the address is the most a walk can find; a walk that went past the interface ARP heard it
+        # on, through a MAC table or a cable, found more than one that stayed there.
+        moved = attach is not None and (attach.node, attach.interface) != endpoint
+        rank = 2 if owner is not None else 1 if moved else 0
+        placed[entry.ip_address].append((rank, entry, owner, attach, trail, "; ".join([evidence, *trail]), plane))
+
+    passed: list[tuple[str, str]] = []
+    for address, placements in placed.items():
+        best = max(placement[0] for placement in placements)
+        for rank, entry, owner, attach, trail, said, plane in placements:
+            if rank < best:
+                passed.append((address, f"{said}."))  # Another walk found more; what this one saw is evidence for it.
+                continue
+            if owner is not None:
+                node = graph.nodes[owner]
+                if address not in node.addresses:
+                    node.addresses.append(address)
+                if entry.mac and node.kind != "device" and entry.mac not in node.macs:
+                    node.macs.append(entry.mac)
+                node.evidence.append(f"{said}, the LLDP neighbor on that port." if not trail else f"{said}: {owner}'s address.")
+                continue
+            host = graph.node(address, kind="host", plane=plane, addresses=[address])
+            if plane == "data":
+                host.plane = "data"  # Seen on the data plane anywhere puts a host on it.
+            if entry.mac and entry.mac not in host.macs:
+                host.macs.append(entry.mac)
+            host.evidence.append(f"{said}.")
+            graph.link(attach, LinkEnd(node=address), plane, f"{said}.", entry.device)
+    for address, said in passed:
+        for node in graph.nodes.values():
+            if address in node.addresses and node.kind != "device" and said not in node.evidence:
+                node.evidence.append(said)
 
     for link in graph.links.values():
         for end in (link.a, link.b):

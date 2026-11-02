@@ -387,7 +387,10 @@ class NxosPlatform(Platform):
             if port == "vPC Peer-Link" and peer_link:
                 port = peer_link  # The MAC table names the peer link by its role; the cables are its port-channel's.
             static = (text(row, "disp_is_static") or "").lower() in ("enabled", "1", "true")
-            kind = "gateway" if text(row, "disp_type") == "G" else "static" if static else "dynamic"
+            flag = text(row, "disp_type")
+            # NX-OS marks an entry the switch learned itself as primary (* or +; Primary_entry on the 5548). One without
+            # a mark it didn't: on the 9000s, its vPC peer's MACs, on the switch's own port of that number, often down.
+            kind = "gateway" if flag == "G" else "static" if static else "dynamic" if flag else "secondary"
             vlan = text(row, "disp_vlan")
             found.append(
                 MacEntry(

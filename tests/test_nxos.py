@@ -123,6 +123,8 @@ async def test_mac_entries_keep_their_vlan_and_the_switch_s_own_are_gateways() -
     assert (learned.interface, learned.entry_type, learned.vlan) == ("Ethernet1/23", "dynamic", 20)
     # The vPC peer's gateway MACs arrive over the peer link, which NX-OS names by its role: it is port-channel1.
     assert (by_mac["0000.0c07.ac59"].interface, by_mac["0000.0c07.ac59"].entry_type) == ("port-channel1", "gateway")
+    # Without its * mark, an entry is one the switch didn't learn itself, though it names one of its ports.
+    assert (by_mac["0200.0000.0024"].interface, by_mac["0200.0000.0024"].entry_type) == ("Ethernet1/31", "secondary")
     platform, _ = nxos(DC)
     assert {entry.entry_type for entry in await platform.mac_table()} == {"dynamic", "static"}
 

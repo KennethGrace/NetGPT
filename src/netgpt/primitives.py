@@ -149,7 +149,11 @@ class MacEntry(BaseModel):
     network_instance: str
     mac: str
     interface: str
-    entry_type: str | None = Field(None, description="For example learned, static, irb-interface, or gateway.")
+    entry_type: str | None = Field(
+        None,
+        description="For example learned, static, irb-interface, gateway, or secondary: an entry the switch didn't learn "
+        "itself, which says nothing about where the MAC is.",
+    )
     vlan: int | None = Field(None, description="The VLAN, on platforms that keep a MAC table per VLAN.")
 
 

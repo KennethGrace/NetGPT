@@ -332,6 +332,49 @@ def test_an_address_at_the_switch_s_own_gateway_mac_is_the_switch_s() -> None:
     assert "10.3.0.254" not in {n.id for n in topology.nodes}
 
 
+def vpc_pair(entry_type: str, oper_state: str, lldp: bool = True) -> Topology:
+    """
+    Two gateways that both ARP for a host, which is cabled to core2 alone: core1's MAC table names its own port of
+    the same number, as NX-OS does with its vPC peer's MACs, and that port has no cable.
+    """
+    devices = [DeviceInfo(name=name, platform="cisco_nxos", host=f"192.0.2.{index}")
+               for index, name in enumerate(("core1", "core2"), start=1)]
+    mac = "0200.0000.00ea"
+    neighbors = [LldpNeighbor(device="core2", interface="Ethernet1/24", neighbor="server1", neighbor_interface="eth0",
+                              neighbor_chassis_id=mac)] if lldp else []
+    interfaces = [Interface(device=device, name="Ethernet1/24", network_instance="default", mode="bridged",
+                            oper_state=oper_state if device == "core1" else "up") for device in ("core1", "core2")]
+    interfaces += [Interface(device=device, name="Vlan254", network_instance="default", mode="routed",
+                             addresses=[f"198.51.100.{index}/24"]) for index, device in enumerate(("core1", "core2"), start=2)]
+    arp = [ArpEntry(device=device, interface="Vlan254", ip_address="198.51.100.234", mac=mac) for device in ("core1", "core2")]
+    macs = [MacEntry(device="core1", network_instance="default", mac=mac, interface="Ethernet1/24", entry_type=entry_type, vlan=254),
+            MacEntry(device="core2", network_instance="default", mac=mac, interface="Ethernet1/24", entry_type="dynamic", vlan=254)]
+    return build_topology(devices, neighbors, arp, [], is_management, macs, interfaces)
+
+
+@pytest.mark.parametrize(("entry_type", "oper_state"), [("secondary", "up"), ("dynamic", "down")])
+def test_a_mac_entry_the_switch_didn_t_learn_or_on_a_port_that_is_down_doesn_t_place_a_host(
+    entry_type: str, oper_state: str
+) -> None:
+    topology = vpc_pair(entry_type, oper_state)
+    # Placed once, where core2's walk ended: the LLDP neighbor that is the host, not a phantom on core1's port.
+    assert "198.51.100.234" not in {item.id for item in topology.nodes}
+    server = node(topology, "server1")
+    assert server.addresses == ["198.51.100.234"] and server.macs == ["0200.0000.00ea"]
+    why = "an entry it didn't learn itself" if entry_type == "secondary" else "a port that is down"
+    # What core1 saw stays as evidence, with why its MAC table entry wasn't followed.
+    assert f"ARP on core1 Vlan254: 198.51.100.234 is at 0200.0000.00ea; MAC table on core1 (default): 0200.0000.00ea " \
+           f"on Ethernet1/24, {why}." in server.evidence
+
+
+def test_two_walks_that_end_at_ports_both_place_the_host() -> None:
+    # A host with a NIC on each gateway, and no LLDP: both walks found a port, so both are kept.
+    topology = vpc_pair("dynamic", "up", lldp=False)
+    assert {link.id for link in topology.links if "198.51.100.234" in link.id} == {
+        "198.51.100.234--core1:Ethernet1/24", "198.51.100.234--core2:Ethernet1/24",
+    }
+
+
 def test_layer_3_is_the_routers_and_the_networks_between_them() -> None:
     network = SwitchedNetwork()
     l3 = build_l3(network.devices, network.topology(is_management), network.interfaces, is_management)

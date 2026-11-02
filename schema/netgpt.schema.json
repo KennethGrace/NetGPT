@@ -870,7 +870,7 @@
             }
           ],
           "default": null,
-          "description": "For example learned, static, irb-interface, or gateway."
+          "description": "For example learned, static, irb-interface, gateway, or secondary: an entry the switch didn't learn itself, which says nothing about where the MAC is."
         },
         "vlan": {
           "anyOf": [
