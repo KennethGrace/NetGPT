@@ -28,6 +28,7 @@ from mcp import Client
 from mcp_types import CallToolResult, Tool
 from prompt_toolkit import PromptSession
 
+from netgpt import REPOSITORY, __version__
 from netgpt.engine import Engine
 from netgpt.inventory import Inventory
 from netgpt.server import build_server, tokens_in
@@ -76,6 +77,17 @@ OUT_OF_TOOLS = (
     "and say what you could not check."
 )
 
+# First in the system prompt, so the model can say what it is and what it runs in when asked. Told only
+# that, qwen3.8 said it was NetGPT's assistant, with neither the version nor its own name; the example
+# sentence gets both.
+IDENTITY = (
+    "You are {model}, the model that powers the AI features of NetGPT {version}, an open-source, AI-enabled "
+    "network engineering platform ({repository}). NetGPT gives you read-only access to the network's devices "
+    "through its tools. When someone asks what this is or who you are, name the version and yourself, like this: "
+    '"This is NetGPT {version}, an open-source, AI-enabled network engineering platform, and I am {model}, the '
+    "model powering NetGPT's AI features.\""
+)
+
 # Added to the server's instructions. Small models make one tool call per reply, a reply each time, unless
 # told that one reply can make several; and the budget is counted in replies.
 SEVERAL_CALLS = (
@@ -101,6 +113,9 @@ class ChatObserver:
 
     def content(self, text: str) -> None:
         """The next piece of the model's reply text."""
+
+    def tool_started(self, name: str, arguments: dict[str, Any]) -> None:
+        """A tool call the model made, as it starts: the page shows which devices it is asking."""
 
     def tool_call(
         self, name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None = None
@@ -225,6 +240,16 @@ class Chat:
         self.messages: list[dict[str, Any]] = []
 
     @property
+    def context(self) -> int | None:
+        """How many tokens of context the model has, when the chat was told."""
+        return self._context
+
+    @property
+    def replies(self) -> int:
+        """How many replies to a question may call tools."""
+        return self._max_rounds
+
+    @property
     def tools(self) -> list[dict[str, Any]]:
         """The tools as Ollama is offered them, once start has fetched them."""
         return self._tools
@@ -232,7 +257,8 @@ class Chat:
     async def start(self) -> None:
         """Fetch the server's tools and instructions and begin an empty conversation."""
         self._tools = ollama_tools((await self._client.list_tools()).tools)
-        self._instructions = f"{self._client.instructions or ''}\n{SEVERAL_CALLS.format(replies=self._max_rounds)}"
+        identity = IDENTITY.format(model=self.model, version=__version__, repository=REPOSITORY)
+        self._instructions = f"{identity}\n{self._client.instructions or ''}\n{SEVERAL_CALLS.format(replies=self._max_rounds)}"
         self.reset()
 
     def reset(self) -> None:
@@ -341,6 +367,7 @@ class Chat:
         """Run one tool call and return the tool message that carries its result."""
         name = call["function"]["name"]
         arguments = call["function"].get("arguments") or {}
+        observer.tool_started(name, arguments)
         # Unknown tools and invalid arguments come back as error results for the model to read.
         result = await self._client.call_tool(name, arguments)
         text, failed = result_text(result), result.is_error
@@ -390,7 +417,7 @@ async def interactive(chat: Chat, observer: ChatObserver) -> None:
     """Read questions from the terminal until Ctrl-D or /quit."""
     session: PromptSession[str] = PromptSession()
     thinking = "thinking" if chat.think else "not thinking"
-    print(f"NetGPT chat with {chat.model} ({thinking}). /reset clears the conversation; Ctrl-D quits.")
+    print(f"NetGPT {__version__} chat with {chat.model} ({thinking}). /reset clears the conversation; Ctrl-D quits.")
     while True:
         try:
             line = (await session.prompt_async("netgpt> ")).strip()

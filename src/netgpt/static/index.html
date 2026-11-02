@@ -4,37 +4,75 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NetGPT</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%233b82f6' stroke-width='2.5'%3E%3Ccircle cx='16' cy='6' r='3.5'/%3E%3Ccircle cx='6' cy='25' r='3.5'/%3E%3Ccircle cx='26' cy='25' r='3.5'/%3E%3Cpath d='M14 9 8 22M18 9l6 13M9.5 25h13'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ebe1cf'/%3E%3Cpath d='M16 8 9 22M16 8l7 14M9 22h14' stroke='%239c8b73' stroke-width='2'/%3E%3Ccircle cx='16' cy='8' r='4.5' fill='%232a78d6'/%3E%3Ccircle cx='9' cy='22' r='4.5' fill='%23eb6834'/%3E%3Ccircle cx='23' cy='22' r='4.5' fill='%231baf7a'/%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/atkinson.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="app.css">
   <script src="d3-force.js" defer></script>
+  <script src="registry.js" defer></script>
   <script src="map.js" defer></script>
   <script src="chart.js" defer></script>
+  <script src="threads.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
-  <div id="top">
-    <header>
+  <header id="masthead">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <h1>NetGPT</h1>
-      <span id="model" class="badge"></span>
-      <button id="map-toggle" type="button" aria-pressed="true" title="Show or hide the map" hidden>Map</button>
-      <button id="reset" type="button">New conversation</button>
-    </header>
-    <aside id="map" aria-label="Network map" hidden>
-      <div class="map-head">
+    </div>
+    <span id="model" class="badge"></span>
+    <button id="about-open" class="info" type="button" title="About NetGPT" aria-label="About NetGPT" aria-expanded="false" aria-controls="about">i</button>
+    <button id="map-toggle" type="button" title="Show or hide the map" hidden>Map</button>
+    <button id="reset" type="button">New conversation</button>
+    <section id="about" class="card" role="dialog" aria-labelledby="about-title" hidden>
+      <div class="head">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <h2 id="about-title">NetGPT <span id="about-version"></span></h2>
+        <button class="close" type="button" aria-label="Close">×</button>
+      </div>
+      <p class="lede">An open-source, AI-enabled network engineering platform. Language models get read-only access to the network's devices, and draw what they find on the map.</p>
+      <dl id="about-facts"></dl>
+      <p class="links">
+        <a id="about-source" target="_blank" rel="noopener">Source code</a>
+        <a id="about-issue" target="_blank" rel="noopener">Report an issue</a>
+      </p>
+      <p class="credits">MIT License. Set in Fraunces, Atkinson Hyperlegible Next, and JetBrains Mono, under the SIL Open Font License; laid out by <span class="whole">d3-force</span>.</p>
+    </section>
+  </header>
+
+  <div id="stage" hidden>
+    <svg id="map-graph" role="img" aria-labelledby="map-title"></svg>
+    <div id="map-head">
+      <div class="plaque">
+        <span id="map-source" class="eyebrow"></span>
         <h2 id="map-title"></h2>
+      </div>
+      <div class="controls">
+        <div id="map-layers" class="segmented" role="group" aria-label="Draw the whole network at a layer">
+          <button type="button" data-layer="l2" title="The cables, and the port each host is plugged into">Cabling</button>
+          <button type="button" data-layer="l3" title="The routers, and the networks between them">Routing</button>
+          <button type="button" data-layer="ospf" title="OSPF's adjacencies, areas, and costs">OSPF</button>
+        </div>
         <button id="map-traffic" type="button" aria-pressed="true" title="Show or hide each link's traffic" hidden>Traffic</button>
       </div>
-      <svg id="map-graph" role="img" aria-labelledby="map-title"></svg>
-      <div id="map-inspector"></div>
-    </aside>
-  </div>
-  <main id="conversation" aria-live="polite"></main>
-  <form id="composer">
-    <div id="status" role="status"></div>
-    <div class="row">
-      <textarea id="question" rows="1" placeholder="Ask about the network…" autofocus></textarea>
-      <button id="send" type="submit">Ask</button>
     </div>
-  </form>
+    <aside id="map-inspector" class="card" aria-label="Selected on the map" hidden></aside>
+    <p id="map-hint"></p>
+  </div>
+
+  <section id="sheet" aria-label="Conversation">
+    <main id="conversation" aria-live="polite"></main>
+    <div id="rail" aria-hidden="true"></div>
+    <form id="composer">
+      <div id="status" role="status"></div>
+      <div class="row">
+        <textarea id="question" rows="1" placeholder="Ask about the network…" autofocus></textarea>
+        <button id="send" type="submit">Ask</button>
+      </div>
+    </form>
+  </section>
+
+  <svg id="threads" aria-hidden="true"></svg>
 </body>
 </html>

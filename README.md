@@ -151,7 +151,7 @@ netgpt-chat --ollama http://127.0.0.1:11435 --threads 16 --inventory lab/invento
 
 ### In a browser
 
-`netgpt-chat --web [HOST:]PORT` serves the same chat as a web page. The model's thinking streams in as it happens, each tool call opens to show its result, and a reload picks the conversation back up. The page loads nothing from outside the server, so it works on an air-gapped network.
+`netgpt-chat --web [HOST:]PORT` serves the same chat as a web page. The page is a drafting table with the network laid out on it, and the conversation is a sheet of paper lying on the table's left. The model's thinking streams in as it happens, each tool call shows what it asked of which devices, and a reload picks the conversation back up. The page loads nothing from outside the server, fonts included, so it works on an air-gapped network.
 
 ```bash
 export NETGPT_WEB_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(24))')
@@ -160,13 +160,27 @@ netgpt-chat --inventory lab/inventory.yml --web 10.0.0.5:8080
 
 Anyone who can load the page can query the network, so every request needs a token: `$NETGPT_WEB_TOKEN` if set, otherwise a random one. At startup, netgpt-chat prints a link that carries the token. Opening it swaps the token for an HttpOnly cookie. The page is plain HTTP, so bind it to an address only trusted machines can reach, such as a VPN address or 127.0.0.1 behind an SSH tunnel. There is one conversation, and it answers one question at a time.
 
+The **(i)** beside the model's name says which NetGPT this is and what it runs: the version, the model and its context, and the devices by platform. Its **Report an issue** link opens a GitHub issue with those already filled in. The model knows too: ask it what this is, and it says which NetGPT and which model you are talking to.
+
+To work on the page without a model, `python lab/preview_page.py` serves it against a real inventory (the WAN lab's, by default) with a scripted model, whose canned answers call the real tools and stream at a reading pace.
+
+#### The map and the conversation, tied together
+
+Every device has a color: seven tones in a fixed order, from a palette checked for color-blind readers against both the light table and the dark one. Devices are colored tokens on the table, and what hangs off a device (its hosts, its LLDP neighbors, its networks) wears the device's color. Every node is labeled too, so color is never the only way to tell them apart.
+
+Wherever the conversation names something the map has (a device, a host's address, a network, a MAC address in any spelling, a port written after its device, or a link written `a--b`), the name wears its color. Point at the name and a thread runs across the page to the thing on the map, which lights up while the rest of the map steps back, its neighbors half lit. Click it to select it. Point at a node on the map and threads run the other way, to every mention of it in sight, and the rail beside the conversation marks where the rest are, a click away. The inspector says how often its subject came up, and offers to ask about it or to focus the map on it.
+
+While a tool call runs, the devices it is asking ripple on the map, and its card in the conversation says what it is doing.
+
 #### The map
 
-The page also has a map. When the page opens, before you ask anything, it shows the whole network at layer 2, read from [the API](#the-api) like any other frontend would. After that, the model draws on it, with a tool only the page offers: `display`. When a picture helps, such as for the topology, where a host is attached, or the path between two points, the model calls `display`. It draws the whole network from the devices' own tables, at layer 2 (cables, switches, and the port each host is on), at layer 3 (routers and the networks between them), or as OSPF sees it (each end of an adjacency labeled with its cost, each area but the backbone in its own color, and a link with a problem dashed in red), and it chooses which parts to focus on and highlight. Focused nodes move to the middle, and the rest of the network stays on the map, dimmed and pushed aside. The model can't draw anything the devices didn't report, and every name it uses is checked against the graph first. Click a node or link to see the evidence for it. Each view stays in the conversation as a button that brings it back.
+When the page opens, before you ask anything, the map shows the whole network, read from [the API](#the-api) like any other frontend would, at the layer you pick: **Cabling** (layer 2), **Routing** (layer 3), or **OSPF**. After that, the model draws on it, with a tool only the page offers: `display`. When a picture helps, such as for the topology, where a host is attached, or the path between two points, the model calls `display`. It draws the whole network from the devices' own tables, at layer 2 (cables, switches, and the port each host is on), at layer 3 (routers and the networks between them), or as OSPF sees it (each end of an adjacency labeled with its cost, each area but the backbone in its own color, and a link with a problem dashed in red), and it chooses which parts to focus on and highlight. Focused nodes move to the middle, and the rest of the network stays on the map, dimmed and pushed aside. What the model highlights is marked in highlighter. The model can't draw anything the devices didn't report, and every name it uses is checked against the graph first. Click a node or link to see the evidence for it, on a card edged in its color. Each view leaves a card in the conversation, with the view in miniature, that brings it back.
 
-On a wide screen the map sits beside the conversation. On a phone they take turns on the whole screen: the header's **Map** button switches to the map, and **Chat** switches back. A new view doesn't take over the screen while an answer is coming. A dot on the button says something new is on the other side.
+On a big network the map shows only the devices' names, and what is highlighted, pointed at, or selected; the rest are named when the pointer is on them, along with their neighbors.
 
-Given a path (a source and a destination), `display` traces it through the routing tables and highlights it hop by hop, with the route each device used. At layer 2 the path runs through the switches, out the port each one bridges it to. At layer 3 it crosses the networks instead. Where a path is lost, the device that loses it turns red, with the reason.
+On a wide screen the map is the table beside the conversation. On a phone they take turns on the whole screen: the header's **Map** button switches to the map, and **Chat** switches back. A new view doesn't take over the screen while an answer is coming. A dot on the button says something new is on the other side.
+
+Given a path (a source and a destination), `display` traces it through the routing tables and highlights it hop by hop, numbering the hops on the map, with the route each device used. At layer 2 the path runs through the switches, out the port each one bridges it to. At layer 3 it crosses the networks instead. Where a path is lost, the device that loses it turns red, with the reason.
 
 The layout is a force simulation ([d3-force](https://d3js.org/d3-force), included in the package): nodes repel each other and links act as springs. A view changes the forces, not the nodes, so moving from one view to the next glides the network into its new shape.
 
@@ -174,7 +188,7 @@ You can pin nodes to lay the map out your way: say, a border leaf on top with th
 
 #### Charts
 
-When NetGPT polls (it does unless `--poll-interval 0`), the page also offers `chart`. Asked how busy something is, the model charts ports' traffic, utilization, or errors over the last minutes, or days with TimescaleDB, right in the conversation. A chart of a long window plots averages (5-minute ones over 6 hours, 30-minute ones over a week), and its caption says which. It names ports as `device:port`, a link as `leaf1--spine1`, or a device for all its ports. Each port gets its own color, with in drawn solid and out dashed. A chart keeps updating with every poll while it is on the page. Hovering shows every line's value at one poll, and the Data table under each chart has the same numbers.
+When NetGPT polls (it does unless `--poll-interval 0`), the page also offers `chart`. Asked how busy something is, the model charts ports' traffic, utilization, or errors over the last minutes, or days with TimescaleDB, right in the conversation. A chart of a long window plots averages (5-minute ones over 6 hours, 30-minute ones over a week), and its caption says which. It names ports as `device:port`, a link as `leaf1--spine1`, or a device for all its ports. Each port's line wears the color of the device at the far end of its link, as that device is on the map (or, when two lead to one device, a color of its own), with in drawn solid and out dashed. A chart keeps updating with every poll while it is on the page. Hovering shows every line's value at one poll, and the Data table under each chart has the same numbers.
 
 #### Traffic on the map
 

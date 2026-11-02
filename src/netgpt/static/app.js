@@ -1,22 +1,27 @@
 "use strict";
 
 // The NetGPT chat page. The server streams each answer as newline-delimited JSON
-// events (thinking, content, tool, answer, error) and replays the same events
-// for the conversation so far when the page loads.
+// events (thinking, content, calling, tool, answer, error) and replays the same
+// events for the conversation so far when the page loads.
+//
+// The page is a table with the network laid out on it (map.js), and the conversation
+// a sheet of paper lying on the table's left. They speak one language of color: each
+// device has a tone (registry.js), and wherever the conversation names something,
+// the name wears its tone and a thread runs from it to the thing on the map
+// (threads.js). Tool calls are cards that name what they asked of which devices,
+// and while a call runs, the devices it is reading ripple on the map. Each view the
+// model draws leaves a card in the conversation, with the view in miniature, that
+// brings it back.
 //
 // Model output can echo device data, so it only ever reaches the page as text:
 // through textContent, or through renderMarkdown, which escapes before it formats.
 //
 // Until the model draws something, the map shows the whole network, read from the
-// engine's API (/api/v1/view) like any other frontend's. When the model calls
-// display, its tool event carries a view, which the map (map.js) draws. Each view
-// leaves a chip in the conversation that brings it back.
-// When it calls chart, the event carries a chart, drawn in the conversation (chart.js).
-//
-// A wide screen shows the map beside the conversation. A narrow one has no room for
-// both, so they take turns on the whole screen, and the header's button switches
-// between them. A new view doesn't take the screen in the middle of an answer:
-// the button is marked instead, and the view's chip opens it.
+// engine's API (/api/v1/view) like any other frontend's, at the layer the viewer
+// picks. A wide screen shows the map beside the conversation. A narrow one has no
+// room for both, so they take turns on the whole screen, and the masthead's button
+// switches between them. A new view doesn't take the screen in the middle of an
+// answer: the button is marked instead, and the view's card opens it.
 
 const conversation = document.getElementById("conversation");
 const composer = document.getElementById("composer");
@@ -26,20 +31,52 @@ const status = document.getElementById("status");
 const reset = document.getElementById("reset");
 const model = document.getElementById("model");
 const mapToggle = document.getElementById("map-toggle");
+const layerButtons = [...document.querySelectorAll("#map-layers button")];
 const narrow = matchMedia("(max-width: 999px)");
 
 const EXAMPLES = [
   "Show me the network.",
-  "How busy are the fabric links?",
-  "What is cabled to each device?",
+  "How busy are the links between the sites?",
+  "Is every OSPF adjacency up?",
 ];
+
+// What each tool does, said as done and as under way.
+const TOOLS = {
+  list_devices: ["Listed the devices", "Listing the devices"],
+  lldp_neighbors: ["Read LLDP neighbors", "Reading LLDP neighbors"],
+  interfaces: ["Read interfaces", "Reading interfaces"],
+  mac_table: ["Read MAC tables", "Reading MAC tables"],
+  arp_table: ["Read ARP tables", "Reading ARP tables"],
+  routes: ["Read routing tables", "Reading routing tables"],
+  bgp_sessions: ["Read BGP sessions", "Reading BGP sessions"],
+  ospf_neighbors: ["Read OSPF neighbors", "Reading OSPF neighbors"],
+  ospf_interfaces: ["Read OSPF interfaces", "Reading OSPF interfaces"],
+  interface_traffic: ["Read the traffic", "Reading the traffic"],
+  topology: ["Merged the topology", "Merging the topology"],
+  forwarding_path: ["Traced the path", "Tracing the path"],
+  display: ["Drew on the map", "Drawing on the map"],
+  chart: ["Charted", "Charting"],
+  show: ["Ran", "Running"],
+  ping: ["Pinged", "Pinging"],
+  ping_sweep: ["Swept", "Sweeping"],
+};
+// Tools that read every device when none are named.
+const EVERY_DEVICE = new Set([
+  "lldp_neighbors", "interfaces", "mac_table", "arp_table", "routes", "bgp_sessions", "ospf_neighbors",
+  "ospf_interfaces", "interface_traffic", "topology",
+]);
+// Arguments that name things, and arguments that are only how the call was asked.
+const NAMING = ["devices", "device", "source", "destination", "focus", "highlight", "ports", "path"];
+const QUIET = new Set(["title", "notes", "plane"]);
+const LAYERS = { l2: "Cabling", l3: "Routing", ospf: "OSPF" };
 
 let turn = null; // the reply being built, until its answer or error arrives
 let timer = null;
 let shown = ""; // the view on the map, as JSON, so a reload doesn't redraw it
-let latest = null; // the newest view replayed on load: [view, chip]
+let latest = null; // the newest view replayed on load: [view, card]
 let network = null; // the request for the whole network, until it is drawn or overtaken
 let showingNetwork = false; // the map shows the whole network, not a view from the model
+let layer = "l2"; // the layer the whole network is drawn at
 let left = { scroll: 0, atEnd: true }; // where the conversation was when the map took the screen
 
 function node(tag, className, text) {
@@ -137,6 +174,70 @@ function renderMarkdown(source) {
   return html.join("");
 }
 
+// ---- What a tool call asked of which devices
+
+function names(value) {
+  // The names an argument gives, whatever shape the model sent it in.
+  if (value == null) return [];
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(names);
+  if (typeof value === "object") return Object.values(value).flatMap(names);
+  return [];
+}
+
+function touched(name, args) {
+  // The nodes a tool call reads or names, as the registry knows them.
+  const found = new Set();
+  for (const key of NAMING) {
+    for (const written of names(args[key])) {
+      const id = netregistry.nodeNamed(written) || netregistry.nodeNamed(written.split(":")[0]);
+      if (id) found.add(id);
+    }
+  }
+  if (!found.size && EVERY_DEVICE.has(name)) for (const id of netregistry.deviceIds()) found.add(id);
+  return [...found];
+}
+
+function summary(event) {
+  // What came back, in a few words: rows, errors, or why it was refused.
+  if (event.is_error) return event.result.replace(/^Error executing tool \w+: /, "").split(/(?<=[.:])\s/)[0];
+  let body;
+  try {
+    body = JSON.parse(event.result);
+  } catch {
+    return ["display", "chart"].includes(event.name) ? "drawn" : "";
+  }
+  const plural = (count, word) => `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;
+  const parts = [];
+  if (Array.isArray(body.items)) parts.push(plural(body.items.length, "row"));
+  else if (Array.isArray(body.result)) parts.push(plural(body.result.length, "row"));
+  else if (Array.isArray(body.nodes)) parts.push(`${plural(body.nodes.length, "node")}, ${plural(body.links.length, "link")}`);
+  else if (body.outcome) parts.push(body.outcome);
+  else if (body.received !== undefined) parts.push(`${body.received} of ${body.sent} replies`);
+  else if (typeof body.output === "string") parts.push(plural(body.output.split("\n").length, "line"));
+  if (Array.isArray(body.errors) && body.errors.length) parts.push(plural(body.errors.length, "error"));
+  return parts.join(" · ");
+}
+
+function argumentChips(name, args) {
+  // How the call was asked, beyond which devices: the command, the filters, the layer.
+  const chips = node("span", "args");
+  if (name === "show" && args.command) {
+    chips.append(node("code", "command", args.command));
+    if (args.device) chips.append(" on ", args.device);
+    return chips;
+  }
+  const asked = names(args.devices).concat(names(args.device), names(args.source), names(args.destination), names(args.path));
+  for (const written of asked) chips.append(node("span", "who", written), " ");
+  for (const [key, value] of Object.entries(args)) {
+    if (NAMING.includes(key) || QUIET.has(key) || value === null || value === "" || (Array.isArray(value) && !value.length)) continue;
+    const shownValue = Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value);
+    chips.append(node("span", "filter", `${key} ${shownValue}`), " ");
+  }
+  for (const written of names(args.focus).concat(names(args.highlight), names(args.ports))) chips.append(node("span", "who", written), " ");
+  return chips;
+}
+
 // ---- Rendering events
 
 function reply() {
@@ -156,7 +257,9 @@ function closeThinking() {
   const block = lastBlock("thinking");
   if (block) {
     block.open = false;
-    block.querySelector("summary").textContent = "Thinking";
+    block.querySelector("summary").textContent = "Thought it through";
+    block.classList.remove("live");
+    netthreads.mark(block.querySelector(".thinking-text"));
   }
 }
 
@@ -168,65 +271,151 @@ function pretty(result) {
   }
 }
 
+function toolCard(name, args) {
+  const card = node("details", "tool live");
+  card.dataset.kind = "tool";
+  card.dataset.name = name;
+  const head = node("summary");
+  head.append(node("span", `glyph glyph-${name}`), node("span", "verb", (TOOLS[name] || [name, name])[1]));
+  head.append(argumentChips(name, args), node("span", "meta", "…"));
+  card.append(head);
+  // Only the names the call gives are marked, each on its own: a filter's port belongs to no device in particular.
+  for (const who of head.querySelectorAll(".args .who")) netthreads.mark(who);
+  card.touches = touched(name, args);
+  card.addEventListener("pointerenter", () => {
+    netmap.spotlight(card.touches);
+    const verb = card.querySelector(".verb");
+    netthreads.drawAll(card.touches.map((id) => [verb, { kind: "node", id }]));
+  });
+  card.addEventListener("pointerleave", () => {
+    netmap.spotlight(null);
+    netthreads.drawAll([]);
+  });
+  return card;
+}
+
+function finishCard(card, event) {
+  card.classList.remove("live");
+  card.classList.toggle("failed", event.is_error);
+  card.querySelector(".verb").textContent = (TOOLS[event.name] || [event.name])[0];
+  card.querySelector(".meta").textContent = summary(event) || "done";
+  card.append(node("pre", "raw", pretty(event.result)));
+}
+
+function viewCard(view) {
+  const card = node("button", "view-card");
+  card.type = "button";
+  const words = node("span", "words");
+  words.append(node("span", "eyebrow", `${LAYERS[view.layer] || view.layer} · the model's view`), node("strong", "", view.title));
+  card.append(netmap.thumbnail(view), words);
+  card.addEventListener("click", () => {
+    showView(view, card);
+    if (narrow.matches) setScreen(true);
+  });
+  return card;
+}
+
+function remark() {
+  // Names a later view taught the registry (a network first drawn at layer 3, say) get marked in what came before.
+  for (const block of conversation.querySelectorAll(".answer:not(.draft), .message.user, .note, .thinking-text")) netthreads.mark(block);
+}
+
+function mentionedIn(element) {
+  // The nodes an element's mentions name: a link's two ends, a port's device.
+  return [...element.querySelectorAll(".mention")].flatMap((mention) => (mention.dataset.nodes ? mention.dataset.nodes.split(" ") : [mention.dataset.id]));
+}
+
+function castOf(answer) {
+  // Under an answer, what it names, and a way to see just those on the map with the links between them.
+  const named = [...new Set(mentionedIn(answer))].filter((id) => netregistry.has(id));
+  if (named.length < 2) return;
+  const cast = node("div", "cast");
+  cast.append(node("span", "eyebrow", `Named here · ${named.length}`));
+  const list = node("span", "who");
+  for (const id of named) list.append(node("span", "", id), " ");
+  cast.append(list);
+  netthreads.mark(list);
+  const show = node("button", "", "Show these on the map");
+  show.type = "button";
+  show.addEventListener("click", () => {
+    if (narrow.matches) setScreen(true);
+    if (!netmap.focusOn(named, "Named in the answer")) return;
+    for (const other of conversation.querySelectorAll(".view-card.active")) other.classList.remove("active");
+  });
+  cast.append(show);
+  answer.after(cast);
+}
+
 function handle(event, live) {
   switch (event.type) {
-    case "user":
+    case "user": {
       conversation.querySelector(".intro")?.remove();
-      conversation.append(node("div", "message user", event.text));
+      const note = node("div", "message user", event.text);
+      conversation.append(note);
+      netthreads.mark(note);
       turn = null;
       break;
+    }
     case "thinking": {
       let block = lastBlock("thinking");
       if (!block) {
         block = node("details", "thinking");
         block.dataset.kind = "thinking";
         block.open = live;
-        block.append(node("summary", "", live ? "Thinking…" : "Thinking"), node("div", "thinking-text"));
+        if (live) block.classList.add("live");
+        block.append(node("summary", "", live ? "Thinking" : "Thought it through"), node("div", "thinking-text"));
         reply().append(block);
       }
       block.querySelector(".thinking-text").textContent += event.text;
+      if (!live) netthreads.mark(block.querySelector(".thinking-text"));
       break;
     }
     case "content": {
+      // The reply as it streams, formatted as it grows; its names are marked once it is the answer.
       closeThinking();
       let block = lastBlock("draft");
       if (!block) {
-        block = node("div", "draft");
+        block = node("div", "answer draft");
         block.dataset.kind = "draft";
+        block.source = "";
         reply().append(block);
       }
-      block.textContent += event.text;
+      block.source += event.text;
+      block.innerHTML = renderMarkdown(block.source);
+      break;
+    }
+    case "calling": {
+      closeThinking();
+      narrated();
+      const card = toolCard(event.name, event.arguments || {});
+      reply().append(card);
+      netmap.reading(card.touches.filter((id) => netregistry.node(id)?.data.kind === "device"));
+      setActivity((TOOLS[event.name] || [event.name, event.name])[1]);
       break;
     }
     case "tool": {
       closeThinking();
-      // Text the model wrote before calling a tool was narration, not the answer.
-      const draft = lastBlock("draft");
-      if (draft) {
-        draft.dataset.kind = "note";
-        draft.className = "note";
+      narrated();
+      // Live, the card went up when the call started; replayed, it goes up now.
+      let card = live ? [...reply().querySelectorAll("details.tool.live")].find((open) => open.dataset.name === event.name) : null;
+      if (!card) {
+        card = toolCard(event.name, event.arguments || {});
+        reply().append(card);
       }
-      const step = node("details", event.is_error ? "tool failed" : "tool");
-      step.dataset.kind = "tool";
-      const args = Object.entries(event.arguments || {})
-        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-        .join(", ");
-      step.append(node("summary", "", `${event.name}(${args})`), node("pre", "", pretty(event.result)));
-      reply().append(step);
-      if (event.chart) netchart.add(reply(), event.chart);
+      finishCard(card, event);
+      netmap.reading(null);
+      setActivity("");
+      if (event.chart) netchart.add(reply(), event.chart, { toneOf: netregistry.farTone });
       if (event.view) {
-        const chip = node("button", "view-chip", event.view.title);
-        chip.type = "button";
-        chip.addEventListener("click", () => {
-          showView(event.view, chip);
-          if (narrow.matches) setScreen(true);
-        });
-        reply().append(chip);
+        netregistry.learn(event.view);
+        if (live) remark();
+        const viewed = viewCard(event.view);
+        reply().append(viewed);
         if (live) {
-          showView(event.view, chip);
+          showView(event.view, viewed);
           if (!onMap()) markNew();
         } else {
-          latest = [event.view, chip];
+          latest = [event.view, viewed];
         }
       }
       break;
@@ -237,18 +426,24 @@ function handle(event, live) {
       block.className = "answer";
       block.dataset.kind = "answer";
       block.innerHTML = renderMarkdown(event.text);
+      netthreads.mark(block);
+      netmap.mention(mentionedIn(block));
+      castOf(block);
       turn = null;
       if (live && onMap()) markNew();
       break;
     }
     case "error": {
       closeThinking();
-      const draft = lastBlock("draft");
-      if (draft) {
-        draft.dataset.kind = "note";
-        draft.className = "note";
+      narrated();
+      // A call under way when the answer failed never reports back.
+      for (const card of reply().querySelectorAll("details.tool.live")) {
+        card.classList.remove("live");
+        card.classList.add("failed");
+        card.querySelector(".meta").textContent = "stopped";
       }
       reply().append(node("div", "error", event.text));
+      netmap.reading(null);
       turn = null;
       if (live && onMap()) markNew();
       break;
@@ -256,48 +451,78 @@ function handle(event, live) {
   }
 }
 
+function narrated() {
+  // Text the model wrote before calling a tool was narration, not the answer.
+  const draft = lastBlock("draft");
+  if (draft) {
+    draft.dataset.kind = "note";
+    draft.className = "note";
+    draft.textContent = draft.source ?? draft.textContent;
+    netthreads.mark(draft);
+  }
+}
+
 function following(render) {
   // Keep the newest output in view, unless the reader has scrolled up.
-  const atEnd = window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
+  const atEnd = conversation.scrollTop + conversation.clientHeight >= conversation.scrollHeight - 120;
   render();
-  if (atEnd) window.scrollTo(0, document.body.scrollHeight);
+  if (atEnd) conversation.scrollTop = conversation.scrollHeight;
 }
 
 // ---- The map
 
-function showView(view, chip) {
+function showView(view, card) {
   const key = JSON.stringify(view);
-  if (key !== shown) netmap.show(view);
+  if (key !== shown) netmap.show(view, "Drawn by the model");
   shown = key;
   showingNetwork = false;
-  for (const other of conversation.querySelectorAll(".view-chip.active")) other.classList.remove("active");
-  chip.classList.add("active");
+  for (const other of conversation.querySelectorAll(".view-card.active")) other.classList.remove("active");
+  card.classList.add("active");
   document.body.classList.remove("map-hidden");
   mapToggle.hidden = false;
+  pressLayer(null);
   labelToggle();
 }
 
-async function showNetwork() {
-  // Before the model draws anything, the whole network. A view from the model that lands first wins.
+async function showNetwork(at = layer) {
+  // The whole network at a layer: before the model draws anything, or when the viewer
+  // picks a layer. A view from the model that lands first wins.
   const asked = (network = {});
+  layer = at;
+  pressLayer(at);
   let view;
   try {
-    const response = await fetch("api/v1/view");
-    if (!response.ok) return; // The map stays empty until the model draws on it.
+    const query = new URLSearchParams({ layer: at, title: "The whole network" });
+    const response = await fetch(`api/v1/view?${query}`);
+    if (!response.ok) return; // The map stays as it is until the model draws on it.
     view = await response.json();
   } catch {
     return;
   }
-  if (network !== asked || shown) return;
-  netmap.show(view);
+  if (network !== asked) return;
+  netmap.show(view, "The whole network");
   shown = JSON.stringify(view);
   showingNetwork = true;
+  for (const other of conversation.querySelectorAll(".view-card.active")) other.classList.remove("active");
   mapToggle.hidden = false;
   labelToggle();
+  inventoryIntro();
+}
+
+function pressLayer(at) {
+  for (const button of layerButtons) button.setAttribute("aria-pressed", String(button.dataset.layer === at));
+}
+
+for (const button of layerButtons) {
+  button.addEventListener("click", () => {
+    network = null;
+    showNetwork(button.dataset.layer);
+  });
 }
 
 function clearMap() {
   netmap.clear();
+  netthreads.clear();
   shown = "";
   network = null;
   showingNetwork = false;
@@ -307,6 +532,53 @@ function clearMap() {
   document.body.classList.remove("map-hidden");
   labelToggle();
 }
+
+// A mention of something the map isn't drawing: draw the whole network at a layer that has it.
+netthreads.whenAbsent((target) => {
+  const known = netregistry.node(target.id);
+  if (!known) return false;
+  const at = ["l2", "l3", "ospf"].find((candidate) => known.layers.has(candidate));
+  if (!at) return false;
+  network = null;
+  showNetwork(at);
+  return true;
+});
+
+// What the inspector says about the conversation: how often a thing comes up, and a way to ask about it.
+netmap.on("inspect", (id, panel) => {
+  const box = node("div", "talk");
+  const count = netthreads.count(id);
+  const label = netregistry.label(id);
+  const isLink = !netregistry.has(id);
+  if (count) {
+    const where = node("button", "", `Mentioned ${count === 1 ? "once" : `${count} times`} · show`);
+    where.type = "button";
+    where.addEventListener("click", () => {
+      if (narrow.matches) setScreen(false);
+      netthreads.revealLast(id);
+    });
+    box.append(where);
+  }
+  const ask = node("button", "ask", isLink ? "Ask about this link" : `Ask about ${label}`);
+  ask.type = "button";
+  ask.addEventListener("click", () => {
+    const view = netmap.view();
+    const link = isLink && view && view.links.find((candidate) => candidate.id === id);
+    const about = link ? `the link between ${link.a.node} ${link.a.interface || ""} and ${link.b.node} ${link.b.interface || ""}` : label;
+    question.value = `Tell me about ${about.replace(/\s+/g, " ").trim()}.`;
+    if (narrow.matches) setScreen(false);
+    question.focus();
+    grow();
+  });
+  box.append(ask);
+  if (!isLink) {
+    const around = node("button", "", "Focus here");
+    around.type = "button";
+    around.addEventListener("click", () => netmap.focusOn([id]));
+    box.append(around);
+  }
+  panel.append(box);
+});
 
 const onMap = () => document.body.classList.contains("map-full");
 
@@ -332,11 +604,11 @@ function markNew() {
 function setScreen(map) {
   // On a narrow screen: give the whole screen to the map, or back to the conversation.
   if (map === onMap()) return;
-  if (map) left = { scroll: window.scrollY, atEnd: window.innerHeight + window.scrollY >= document.body.scrollHeight - 120 };
+  if (map) left = { scroll: conversation.scrollTop, atEnd: conversation.scrollTop + conversation.clientHeight >= conversation.scrollHeight - 120 };
   document.body.classList.toggle("map-full", map);
   mapToggle.classList.remove("fresh");
   labelToggle();
-  if (!map) window.scrollTo(0, left.atEnd ? document.body.scrollHeight : left.scroll);
+  if (!map) conversation.scrollTop = left.atEnd ? conversation.scrollHeight : left.scroll;
   // Charts drawn while out of sight had no width to fit; this redraws them.
   window.dispatchEvent(new Event("resize"));
 }
@@ -347,6 +619,7 @@ mapToggle.addEventListener("click", () => {
     return;
   }
   document.body.classList.toggle("map-hidden");
+  netthreads.drawAll([]);
   labelToggle();
 });
 
@@ -359,7 +632,18 @@ narrow.addEventListener("change", () => {
   labelToggle();
 });
 
+// On a narrow screen, choosing a mention in the conversation goes to the map to show it.
+netmap.on("select", (id) => {
+  if (id && narrow.matches && !onMap() && document.activeElement?.closest?.(".mention")) setScreen(true);
+});
+
 // ---- Status and controls
+
+let activity = "";
+
+function setActivity(text) {
+  activity = text;
+}
 
 function setBusy(busy, label = "Answering") {
   send.disabled = busy;
@@ -372,7 +656,8 @@ function setBusy(busy, label = "Answering") {
   const started = Date.now();
   const tick = () => {
     const seconds = Math.floor((Date.now() - started) / 1000);
-    status.textContent = `${label}… ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    status.textContent = activity ? `${activity}… ${clock}` : `${label}… ${clock}`;
   };
   tick();
   timer = setInterval(tick, 1000);
@@ -380,8 +665,12 @@ function setBusy(busy, label = "Answering") {
 
 function showIntro() {
   const intro = node("div", "intro");
-  intro.append(node("h2", "", "Ask about the network"));
-  intro.append(node("p", "", "Read-only access to the devices in the inventory."));
+  intro.append(node("p", "eyebrow", "Read-only, on every device in the inventory"));
+  intro.append(node("h2", "", "Ask the network."));
+  intro.append(
+    node("p", "lede", "Every name in the conversation is tied to the map: point at one to see where it is, and point at the map to see where it came up."),
+  );
+  intro.append(node("div", "table-of-contents"));
   const examples = node("div", "examples");
   for (const example of EXAMPLES) {
     const button = node("button", "", example);
@@ -395,6 +684,21 @@ function showIntro() {
   }
   intro.append(examples);
   conversation.append(intro);
+  inventoryIntro();
+}
+
+function inventoryIntro() {
+  // The devices on the table, each a mention of itself, so the threads work before any question.
+  const contents = conversation.querySelector(".intro .table-of-contents");
+  if (!contents) return;
+  const devices = netregistry.deviceIds();
+  contents.replaceChildren();
+  if (!devices.length) return;
+  contents.append(node("span", "eyebrow", "On the table"));
+  const list = node("p", "devices");
+  for (const id of devices) list.append(node("span", "", id), " ");
+  contents.append(list);
+  netthreads.mark(list);
 }
 
 function grow() {
@@ -444,10 +748,65 @@ async function ask(text) {
     finished = true;
   } finally {
     if (!finished) handle({ type: "error", text: "The answer stopped before it finished; the netgpt-chat log says why." }, true);
+    setActivity("");
     setBusy(false);
     question.focus();
   }
 }
+
+// ---- About: the (i) card, with the version and what a bug report would want.
+
+const aboutOpen = document.getElementById("about-open");
+const aboutCard = document.getElementById("about");
+const PLATFORMS = { cisco_nxos: "Cisco NX-OS", juniper_junos: "Juniper Junos", nokia_srlinux: "Nokia SR Linux" };
+
+function describeAbout(data) {
+  // The card's facts, as [label, value] pairs, which an issue's report repeats.
+  const about = data.about;
+  const devices = Object.entries(about.platforms)
+    .map(([platform, count]) => `${count} ${PLATFORMS[platform] || platform}`)
+    .join(", ");
+  const model = [data.model, data.think ? "thinking" : ""].filter(Boolean).join(", ");
+  const context = [about.context ? `${about.context.toLocaleString("en-US")} tokens` : "", `${about.replies} replies a question`];
+  return [
+    ["Version", about.version],
+    ["Model", model],
+    ["Context", context.filter(Boolean).join(" · ")],
+    ["Devices", devices || "none"],
+  ];
+}
+
+function fillAbout(data) {
+  const facts = describeAbout(data);
+  document.getElementById("about-version").textContent = data.about.version;
+  // The version is in the card's title; the report repeats it.
+  const shown = facts.filter(([label]) => label !== "Version");
+  document.getElementById("about-facts").replaceChildren(...shown.flatMap(([label, value]) => [node("dt", "eyebrow", label), node("dd", "", value)]));
+  document.getElementById("about-source").href = data.about.repository;
+  const report = ["", "", "---", ...facts.map(([label, value]) => `${label}: ${value}`), `Browser: ${navigator.userAgent}`];
+  document.getElementById("about-issue").href = `${data.about.repository}/issues/new?body=${encodeURIComponent(report.join("\n"))}`;
+}
+
+function showAbout(open) {
+  aboutCard.hidden = !open;
+  aboutOpen.setAttribute("aria-expanded", String(open));
+  if (open) aboutCard.querySelector(".close").focus();
+}
+
+aboutOpen.addEventListener("click", () => showAbout(aboutCard.hidden));
+aboutCard.querySelector(".close").addEventListener("click", () => {
+  showAbout(false);
+  aboutOpen.focus();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !aboutCard.hidden) {
+    showAbout(false);
+    aboutOpen.focus();
+  }
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!aboutCard.hidden && !aboutCard.contains(event.target) && !aboutOpen.contains(event.target)) showAbout(false);
+});
 
 async function load() {
   const response = await fetch("api/conversation");
@@ -457,17 +816,17 @@ async function load() {
   }
   const data = await response.json();
   model.textContent = data.think ? `${data.model} · thinking` : data.model;
+  fillAbout(data);
+  // The whole network first, so the conversation's names have something to be tied to.
+  if (!showingNetwork && !shown) await showNetwork(layer);
   conversation.replaceChildren();
   turn = null;
   latest = null;
   for (const event of data.events) handle(event, false);
+  remark();
   if (!data.events.length) showIntro();
   if (latest) showView(...latest);
-  else if (!showingNetwork) {
-    clearMap();
-    showNetwork();
-  }
-  window.scrollTo(0, document.body.scrollHeight);
+  conversation.scrollTop = conversation.scrollHeight;
   if (data.busy) {
     // Another page is waiting on an answer; show it when it lands.
     setBusy(true, "Answering a question from another page");
@@ -501,8 +860,8 @@ reset.addEventListener("click", async () => {
     conversation.replaceChildren();
     turn = null;
     clearMap();
-    showNetwork();
     showIntro();
+    showNetwork(layer);
     question.focus();
   } else {
     const body = await response.json().catch(() => ({}));

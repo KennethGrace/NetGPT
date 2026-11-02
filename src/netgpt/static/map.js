@@ -1,18 +1,27 @@
 "use strict";
 
-// The network map: draws the views the model makes with the display tool.
+// The network map: the table the conversation lies on. It draws the whole network,
+// or the views the model makes with the display tool.
 //
 // A view is the network graph, at layer 2 (cables and switches), at layer 3
 // (routers, and the networks between them, drawn as pills), or as OSPF sees it
 // (adjacencies labeled with each end's cost, each area but the backbone in a color
 // of its own, and a link with a problem dashed in red), plus the model's choices.
-// Every node and link is in focus, near the focus, or context, and some
-// are highlighted. The layout is a force simulation (d3-force): nodes push each
-// other apart like bubbles and links pull like springs. The view sets the forces. Focus is pulled to the middle in
-// tiers (spines above leaves above hosts), near nodes ring it, and context is
-// pushed out to the edge and dimmed. Showing another view changes the forces, not
-// the nodes, so the network glides into its new shape and every node stays the
-// node you were looking at.
+// Every node and link is in focus, near the focus, or context, and some are
+// highlighted: drawn over in highlighter, as on a paper map. A path's hops carry
+// their numbers. The layout is a force simulation (d3-force): nodes push each other
+// apart like bubbles and links pull like springs. The view sets the forces. Focus is
+// pulled to the middle in tiers (spines above leaves above hosts), near nodes ring
+// it, and context is pushed out to the edge and dimmed. Showing another view changes
+// the forces, not the nodes, so the network glides into its new shape and every node
+// stays the node you were looking at.
+//
+// Each node wears its tone from the registry (registry.js): an inventory device is a
+// colored token, and what hangs off it wears its color. The conversation names
+// things in the same colors, and threads (threads.js) tie the two together, so the
+// map tells the page where each node is (anchor), lights what the conversation
+// points at (spotlight), ripples the devices a tool call is reading (reading), and
+// says what the viewer hovers and selects (on).
 //
 // The viewer can pin nodes: a node dropped after a drag stays where it was put,
 // and the forces arrange everything else around it. Pins are the viewer's layout,
@@ -32,18 +41,22 @@
 
 const netmap = (() => {
   const SVG = "http://www.w3.org/2000/svg";
-  const panel = document.getElementById("map");
+  const stage = document.getElementById("stage");
   const svg = document.getElementById("map-graph");
   const heading = document.getElementById("map-title");
+  const source = document.getElementById("map-source");
   const inspector = document.getElementById("map-inspector");
+  const hint = document.getElementById("map-hint");
+  const mapHead = document.getElementById("map-head");
+  const narrowScreen = matchMedia("(max-width: 999px)");
   const trafficButton = document.getElementById("map-traffic");
   const still = matchMedia("(prefers-reduced-motion: reduce)");
 
-  // Layout units; the camera scales the drawing to fit the panel.
+  // Layout units; the camera scales the drawing to fit the table.
   const RADIUS = {
-    device: { focus: 20, near: 15, context: 11 },
-    neighbor: { focus: 16, near: 12, context: 9 },
-    host: { focus: 10, near: 8, context: 6 },
+    device: { focus: 21, near: 16, context: 11 },
+    neighbor: { focus: 15, near: 12, context: 9 },
+    host: { focus: 9, near: 7.5, context: 6 },
     segment: { focus: 9, near: 8, context: 6 },
     subnet: { focus: 12, near: 10, context: 7 },
   };
@@ -58,11 +71,15 @@ const netmap = (() => {
   const RING = { focus: 0, near: 0.06, context: 0.4 }; // toward a ring around the focus
   const CHARGE = { focus: -520, near: -360, context: -200 };
   const SPRING = { focus: 0.8, near: 0.4, context: 0.1 };
-  const LENGTH = { focus: 100, near: 120, context: 120 };
+  const LENGTH = { focus: 125, near: 130, context: 120 };
   const CHAR_WIDTH = 7; // roughly, for the 12–13px label and note text
   const BACKBONE = "0.0.0.0";
   const AREA_COLORS = 3; // --area-1 to -3 in app.css, used in turn
-  const LAYER_NAMES = { l2: "", l3: " · layer 3", ospf: " · OSPF" };
+  const LAYER_NAMES = { l2: "cabling", l3: "routing", ospf: "OSPF" };
+  const MAX_ZOOM = 1.15;
+  // Past this many nodes the map is crowded: only devices, and what is lit, pointed at, or
+  // selected, keep their names on the drawing; the rest show theirs when the pointer is on them.
+  const CROWDED = 24;
   const SNAP = 8; // screen pixels: a dragged node this close to a pinned node's row or column joins it
   const DOUBLE_TAP = 400; // milliseconds
   const PINS = "netgpt.map.pins";
@@ -78,20 +95,26 @@ const netmap = (() => {
     [/^FastEthernet/i, "Fa"], [/^HundredGigE/i, "Hu"], [/^Ethernet/i, "Eth"], [/^Port-channel/i, "Po"],
   ];
 
+  const defs = shape("defs");
+  const lift = shape("filter", { id: "lift", x: "-50%", y: "-50%", width: "200%", height: "200%" });
+  lift.append(shape("feDropShadow", { dx: "0", dy: "1.4", stdDeviation: "1.3" }));
+  defs.append(lift);
   const linkLayer = shape("g", { class: "links" });
   const guideLayer = shape("g", { class: "guides" });
   const nodeLayer = shape("g", { class: "nodes" });
-  svg.append(linkLayer, guideLayer, nodeLayer);
+  svg.append(defs, linkLayer, guideLayer, nodeLayer);
 
   const nodes = new Map(); // by ID, kept across views so each node keeps its place
   const linkShapes = new Map();
   const pins = loadPins(); // {plane: {node ID: [x, y]}}
+  const listeners = { hover: [], select: [], inspect: [] };
   let links = [];
   let current = null; // the view on the map
   let selected = null; // the ID of the node or link in the inspector
   let camera = null; // the viewBox, eased toward the drawing as it moves
   let dragging = null;
   let tapped = null; // the last node clicked without a drag, and when, to tell a double click
+  let hovered = null;
   let traffic = null; // the latest rates by device:port, from /api/v1/traffic
   let trafficShown = loadChoice();
   let polling = true; // until the server says NetGPT doesn't poll
@@ -99,6 +122,9 @@ const netmap = (() => {
   let errorMinutes = 5; // how far back the errors on the map go, as the server says
   let trafficAsked = 0;
   let trafficAt = 0;
+  let spotted = new Set(); // what the conversation points at
+  let read = new Set(); // the devices a tool call is reading
+  let mentioned = new Set(); // what the latest answer names
 
   function loadPins() {
     try {
@@ -150,6 +176,7 @@ const netmap = (() => {
     return element;
   }
 
+  const emit = (event, ...values) => listeners[event].forEach((listener) => listener(...values));
   const short = (name) => SHORT.reduce((text, [pattern, abbreviation]) => text.replace(pattern, abbreviation), name);
 
   function tiers(view) {
@@ -200,9 +227,12 @@ const netmap = (() => {
       segment: () => shape("rect", { class: "body", transform: "rotate(45)" }),
       subnet: () => shape("rect", { class: "body" }),
     }[data.kind];
+    group.append(shape("circle", { class: "halo" }), shape("circle", { class: "ripple" }), shape("circle", { class: "ripple late" }));
     group.append(body ? body() : shape("circle", { class: "body" }));
     if (data.kind === "device" && data.role) group.append(shape("text", { class: "glyph", dy: "0.35em" }, data.role[0].toUpperCase()));
-    group.append(shape("text", { class: "label" }, data.label), shape("text", { class: "note" }), shape("circle", { class: "pin", r: 4 }));
+    const hop = shape("g", { class: "hop" });
+    hop.append(shape("circle", { r: 8 }), shape("text", { dy: "0.35em" }));
+    group.append(shape("text", { class: "label" }, data.label), shape("text", { class: "note" }), hop, shape("circle", { class: "pin", r: 4 }));
     nodeLayer.append(group);
     return group;
   }
@@ -219,6 +249,7 @@ const netmap = (() => {
     group.dataset.id = data.id;
     group.append(
       shape("line", { class: "hit" }),
+      shape("line", { class: "marker" }),
       shape("line", { class: "wire" }),
       shape("path", { class: "lane" }),
       shape("path", { class: "lane" }),
@@ -228,6 +259,7 @@ const netmap = (() => {
       shape("text", { class: "rate" }),
       shape("text", { class: "rate" }),
       shape("text", { class: "note" }),
+      shape("title"),
     );
     linkLayer.append(group);
     return group;
@@ -258,17 +290,29 @@ const netmap = (() => {
     return { x: (column - (row.length - 1) / 2) * 150 + Math.random() - 0.5, y: (tier.get(data.id) - middle) * TIER_GAP };
   }
 
-  function show(view) {
+  function hops(view) {
+    // Where each node is on the view's path, counting from the source.
+    const numbers = new Map();
+    for (const [index, hop] of (view.path?.hops || []).entries()) if (!numbers.has(hop.node)) numbers.set(hop.node, index + 1);
+    return numbers;
+  }
+
+  function show(view, origin = "") {
+    // Draw a view. origin says whose it is, for the plaque: the model's, or the viewer's.
+    netregistry.learn(view);
     current = view;
     selected = null;
+    stage.hidden = false;
     document.body.classList.add("map-open");
-    panel.hidden = false;
+    source.textContent = [origin, LAYER_NAMES[view.layer]].filter(Boolean).join(" · ");
     const planes = { data: "", management: " · management plane", all: " · all planes" }[view.plane];
-    heading.textContent = `${view.title}${planes}${LAYER_NAMES[view.layer] ?? ""}`;
+    heading.textContent = `${view.title}${planes}`;
+    stage.dataset.layer = view.layer;
 
     const tier = tiers(view);
     const lit = new Set(view.highlight);
     const trouble = new Set(view.trouble);
+    const numbered = hops(view);
     const focus = view.nodes.filter((node) => view.emphasis[node.id] === "focus");
     const middle = focus.reduce((sum, node) => sum + tier.get(node.id), 0) / (focus.length || 1);
     const core = 60 + 50 * Math.sqrt(focus.length);
@@ -283,6 +327,7 @@ const netmap = (() => {
         lit: lit.has(data.id),
         trouble: trouble.has(data.id),
         note: view.notes[data.id] || "",
+        hop: numbered.get(data.id) || 0,
         tierY: (tier.get(data.id) - middle) * TIER_GAP,
       });
       node.radius = RADIUS[data.kind][node.emphasis];
@@ -339,9 +384,38 @@ const netmap = (() => {
     inspect(null);
   }
 
+  function focusOn(ids, title = null) {
+    // The viewer's own focus, on the view already drawn: the nodes in the middle, what is
+    // linked to them near, the rest aside, and the links between them marked. The view's own
+    // choices come back with its card.
+    const wanted = new Set((Array.isArray(ids) ? ids : [ids]).filter((id) => nodes.has(id)));
+    if (!current || !wanted.size) return false;
+    const near = new Set();
+    const emphasis = {};
+    const lit = [...wanted];
+    for (const link of current.links) {
+      const [a, b] = [link.a.node, link.b.node];
+      const between = wanted.has(a) && wanted.has(b);
+      const touches = wanted.has(a) || wanted.has(b);
+      emphasis[link.id] = touches ? "focus" : "context";
+      if (between && wanted.size > 1) lit.push(link.id);
+      if (touches) near.add(a).add(b);
+    }
+    for (const node of current.nodes) emphasis[node.id] = wanted.has(node.id) ? "focus" : near.has(node.id) ? "near" : "context";
+    const named = title || `Around ${netregistry.label([...wanted][0])}`;
+    const view = { ...current, title: named, emphasis, highlight: lit, notes: {}, path: null, trouble: [] };
+    show(view, "Your focus");
+    if (wanted.size === 1) inspect([...wanted][0]);
+    return true;
+  }
+
+  const crowded = () => nodes.size > CROWDED;
+  // Whether a node's name is drawn: always on a small map; on a crowded one, a device's, or what stands out.
+  const named = (node) => !crowded() || node.data.kind === "device" || node.lit || node.emphasis !== "focus" || node.id === selected;
+
   function textWidth(node) {
     const note = node.emphasis === "context" ? 0 : node.note.length;
-    return Math.max(node.data.label.length, note) * CHAR_WIDTH;
+    return Math.max(named(node) ? node.data.label.length : 0, note) * CHAR_WIDTH;
   }
 
   function labelRoom(alpha) {
@@ -374,6 +448,16 @@ const netmap = (() => {
   }
 
   function restyle() {
+    // What is linked to something the conversation points at stays half lit: its relationships.
+    // On a crowded map, what is linked to the node under the pointer is named too.
+    const beside = new Set();
+    const lights = new Set(spotted);
+    if (hovered && nodes.has(hovered) && crowded()) lights.add(hovered);
+    for (const link of links) {
+      const [a, b] = [link.data.a.node, link.data.b.node];
+      if (lights.has(a)) beside.add(b);
+      if (lights.has(b)) beside.add(a);
+    }
     for (const node of nodes.values()) {
       const { element, data } = node;
       element.setAttribute(
@@ -381,6 +465,7 @@ const netmap = (() => {
         [
           "node",
           `kind-${data.kind}`,
+          `tone-${netregistry.tone(data.id)}`,
           node.emphasis,
           node.lit && "lit",
           node.trouble && "trouble",
@@ -388,6 +473,12 @@ const netmap = (() => {
           data.kind === "subnet" && areaClass(data.areas),
           isPinned(node) && "pinned",
           selected === node.id && "selected",
+          node.hop && "on-path",
+          hovered === node.id && "hovered",
+          spotted.has(node.id) && "spot",
+          !spotted.has(node.id) && beside.has(node.id) && "beside",
+          read.has(node.id) && "reading",
+          mentioned.has(node.id) && "mentioned",
         ]
           .filter(Boolean)
           .join(" "),
@@ -403,6 +494,7 @@ const netmap = (() => {
       if (data.kind === "segment") box(node.radius * 1.5, node.radius * 1.5);
       else if (data.kind === "subnet") box(reach(node) * 2, node.radius * 1.5, node.radius * 0.75);
       else body.setAttribute("r", node.radius);
+      for (const ring of element.querySelectorAll(".halo, .ripple")) ring.setAttribute("r", reach(node) + 5);
       // Labels go to the right: in a tiered drawing, links mostly leave a node up or down.
       const label = element.querySelector(".label");
       label.setAttribute("x", reach(node) + 7);
@@ -411,8 +503,12 @@ const netmap = (() => {
       note.setAttribute("x", reach(node) + 7);
       note.setAttribute("y", 17);
       note.textContent = node.emphasis === "context" ? "" : node.note;
+      const hop = element.querySelector(".hop");
+      hop.setAttribute("transform", `translate(${(-reach(node) - 4).toFixed(1)},${(-node.radius - 4).toFixed(1)})`);
+      hop.querySelector("text").textContent = node.hop ? String(node.hop) : "";
     }
     for (const link of links) {
+      const ends = [link.data.a.node, link.data.b.node];
       link.element.setAttribute(
         "class",
         [
@@ -424,12 +520,19 @@ const netmap = (() => {
           areaClass([...new Set([link.data.a.area, link.data.b.area].filter(Boolean))]),
           link.data.plane === "management" && "management",
           selected === link.id && "selected",
+          hovered === link.id && "hovered",
+          (spotted.has(link.id) || (spotted.size && ends.every((end) => spotted.has(end)))) && "spot",
+          ends.some((end) => spotted.has(end)) && "beside",
         ]
           .filter(Boolean)
           .join(" "),
       );
-      link.element.querySelector(".note").textContent = link.emphasis === "context" ? "" : link.note;
+      link.element.querySelector("title").textContent = link.note;
     }
+    svg.classList.toggle("spotlit", spotted.size > 0);
+    svg.classList.toggle("crowded", crowded());
+    // With nothing singled out, ports are named only where the viewer looks; the rates stay.
+    svg.classList.toggle("overview", [...nodes.values()].every((node) => node.emphasis === "focus") && !links.some((link) => link.lit));
   }
 
   function draw() {
@@ -452,7 +555,12 @@ const netmap = (() => {
       nearA.setAttribute("y", ay.toFixed(1));
       nearB.setAttribute("x", bx.toFixed(1));
       nearB.setAttribute("y", by.toFixed(1));
+      // A note longer than its link would cover its neighbors' names: it folds to a mark, and the
+      // inspector and the link's tooltip have it whole.
       const note = element.querySelector(".note");
+      const told = link.emphasis === "context" ? "" : link.note;
+      const shown = told && told.length * CHAR_WIDTH * 0.9 > length * 0.85 ? "✎" : told;
+      if (note.textContent !== shown) note.textContent = shown;
       note.setAttribute("x", ((a.x + b.x) / 2).toFixed(1));
       note.setAttribute("y", ((a.y + b.y) / 2 - 8).toFixed(1));
       // A network's prefix sits beside its link, off the line and clear of the ends' addresses.
@@ -488,15 +596,38 @@ const netmap = (() => {
       top = Math.min(top, node.y - node.radius - 25);
       bottom = Math.max(bottom, node.y + node.radius + 30);
     }
-    const width = Math.max(right - left, 420);
-    const height = Math.max(bottom - top, 300);
-    const target = { x: (left + right - width) / 2, y: (top + bottom - height) / 2, width, height };
+    // The drawing goes in the part of the table nothing covers: under the title, above the
+    // legend, and beside the inspector's card. A small network isn't blown up past its own
+    // size, so text stays the size it was set in.
+    const box = svg.getBoundingClientRect();
+    const [screenWidth, screenHeight] = [box.width || 800, box.height || 600];
+    const above = Math.max(0, mapHead.getBoundingClientRect().bottom - box.top + 8);
+    const below = inspector.hidden && hint.childElementCount ? Math.max(16, box.bottom - hint.getBoundingClientRect().top + 8) : 16;
+    const beside = inspector.hidden || narrowScreen.matches ? 0 : inspector.offsetWidth + 36;
+    const [roomWidth, roomHeight] = [Math.max(screenWidth - beside, screenWidth * 0.45), Math.max(screenHeight - above - below, 160)];
+    const scale = Math.min(roomWidth / (right - left), roomHeight / (bottom - top), MAX_ZOOM);
+    const [width, height] = [screenWidth / scale, screenHeight / scale];
+    const x = (left + right) / 2 - roomWidth / 2 / scale;
+    const y = (top + bottom) / 2 - (above + roomHeight / 2) / scale;
+    const target = { x, y, width, height };
     if (immediately || !camera) {
       camera = target;
     } else {
       for (const key of Object.keys(camera)) camera[key] += (target[key] - camera[key]) * 0.12;
     }
     svg.setAttribute("viewBox", `${camera.x.toFixed(1)} ${camera.y.toFixed(1)} ${camera.width.toFixed(1)} ${camera.height.toFixed(1)}`);
+  }
+
+  let aiming = null;
+  function reaim() {
+    // Ease the camera to a new frame when the room for the drawing changes and nothing is moving.
+    let frames = 40;
+    cancelAnimationFrame(aiming);
+    const step = () => {
+      aim(still.matches);
+      if (!still.matches && (frames -= 1) > 0) aiming = requestAnimationFrame(step);
+    };
+    step();
   }
 
   function edge(node, ux, uy) {
@@ -589,6 +720,62 @@ const netmap = (() => {
     }
   }
 
+  // ---- What the conversation asks of the map
+
+  function onScreen(x, y) {
+    const matrix = svg.getScreenCTM();
+    if (!matrix || stage.hidden || !svg.getClientRects().length) return null;
+    const point = new DOMPoint(x, y).matrixTransform(matrix);
+    return { x: point.x, y: point.y, scale: matrix.a };
+  }
+
+  function anchor(target) {
+    // Where on the screen a thing the conversation names is drawn: a node's middle, a
+    // port's name at its end of the link, or a link's middle. Null if it isn't on the map.
+    if (!target || !current) return null;
+    if (target.kind === "link") {
+      const link = links.find((candidate) => candidate.id === target.id);
+      if (!link) return null;
+      const point = onScreen((link.source.x + link.target.x) / 2, (link.source.y + link.target.y) / 2);
+      return point && { ...point, radius: 6 };
+    }
+    const node = nodes.get(target.id);
+    if (!node || node.x === undefined) return null;
+    if (target.kind === "port") {
+      for (const link of links) {
+        for (const [index, end] of [link.data.a, link.data.b].entries()) {
+          if (end.node !== target.id || !end.interface || !netregistry.samePort(target.port, end.interface)) continue;
+          const label = link.element.querySelectorAll(".port")[index];
+          const point = onScreen(Number(label.getAttribute("x")), Number(label.getAttribute("y")));
+          return point && { ...point, radius: 7, link: link.id };
+        }
+      }
+    }
+    const point = onScreen(node.x, node.y);
+    return point && { ...point, radius: reach(node) * point.scale };
+  }
+
+  function spotlight(ids) {
+    // Light what the conversation points at, and let the rest of the map step back.
+    spotted = new Set(ids || []);
+    restyle();
+  }
+
+  function reading(ids) {
+    // Ripple the devices a tool call is reading, until it answers.
+    read = new Set(ids || []);
+    restyle();
+  }
+
+  function mention(ids) {
+    // Ring what the latest answer names.
+    mentioned = new Set(ids || []);
+    restyle();
+  }
+
+  const shows = (id) => nodes.has(id) || links.some((link) => link.id === id);
+  const on = (event, listener) => listeners[event].push(listener);
+
   // ---- Traffic
 
   const portOf = (name) => name.replace(/\.\d+$/, ""); // a subinterface's traffic is its port's
@@ -653,6 +840,7 @@ const netmap = (() => {
         // NetGPT isn't polling: there is no traffic to show, now or later.
         polling = false;
         trafficButton.hidden = true;
+        if (current) inspect(selected);
         return;
       }
       if (!response.ok) return;
@@ -794,7 +982,7 @@ const netmap = (() => {
     if (!trafficShown || !ports.length) return false;
     const names = ports.slice(0, CHART_PORTS).map((port) => `${port.device}:${port.interface}`);
     const chart = { title: `Last ${CHART_MINUTES} minutes`, metric: "traffic", unit: "Mbit/s", minutes: CHART_MINUTES, interval: pollEvery };
-    netchart.add(inspector, { ...chart, ports: names, lines: [] }, { height: 150 });
+    netchart.add(inspector, { ...chart, ports: names, lines: [] }, { height: 140, toneOf: netregistry.farTone });
     return true;
   }
 
@@ -809,7 +997,7 @@ const netmap = (() => {
   });
 
   setInterval(() => {
-    if (current && polling && trafficShown && !panel.hidden && Date.now() - trafficAsked >= pollEvery * 1000) refreshTraffic();
+    if (current && polling && trafficShown && !stage.hidden && Date.now() - trafficAsked >= pollEvery * 1000) refreshTraffic();
   }, 5000);
 
   // ---- Pinning
@@ -873,17 +1061,24 @@ const netmap = (() => {
     const node = id && nodes.get(id);
     const link = id && links.find((candidate) => candidate.id === id);
     let charted = false;
+    inspector.className = "card";
     if (node) {
       const data = node.data;
+      inspector.classList.add(`tone-${netregistry.tone(id)}`);
       const head = html("div", "head");
       const toggle = html("button", "", isPinned(node) ? "Unpin" : "Pin here");
       toggle.type = "button";
       toggle.addEventListener("click", () => togglePin(node));
-      head.append(html("h3", "", data.label), toggle);
+      const close = html("button", "close", "×");
+      close.type = "button";
+      close.setAttribute("aria-label", "Close");
+      close.addEventListener("click", () => inspect(null));
+      head.append(html("h3", "", data.label), toggle, close);
       inspector.append(head);
       const kind = data.kind === "device" ? [data.role, data.platform].filter(Boolean).join(" · ") || "device" : data.kind;
       inspector.append(html("p", "kind", kind));
       if (data.addresses.length) inspector.append(html("p", "addresses", data.addresses.join(", ")));
+      if (data.macs && data.macs.length) inspector.append(html("p", "addresses", `MAC ${data.macs.join(", ")}`));
       if (data.router_id) inspector.append(html("p", "kind", `OSPF router ID ${data.router_id}`));
       const areas = data.areas || [];
       if (areas.length > 1) inspector.append(html("p", "kind", `Area border router: areas ${areas.join(", ")}`));
@@ -892,13 +1087,22 @@ const netmap = (() => {
       const hop = current.path && current.path.hops.find((candidate) => candidate.node === id);
       if (hop && hop.route) inspector.append(html("p", node.trouble ? "failed" : "remark", forwarding(hop)));
       else if (node.note) inspector.append(html("p", node.trouble ? "failed" : "remark", node.note));
+      emit("inspect", id, inspector);
       inspector.append(trafficLines(id));
       charted = chartOf(devicePorts(id));
       evidence(data.evidence);
     } else if (link) {
       const data = link.data;
+      const tones = new Set([netregistry.tone(data.a.node), netregistry.tone(data.b.node)]);
+      if (tones.size === 1) inspector.classList.add(`tone-${[...tones][0]}`);
       const end = (side) => [side.node, side.interface, side.address].filter(Boolean).join(" ");
-      inspector.append(html("h3", "", `${end(data.a)} ↔ ${end(data.b)}`));
+      const head = html("div", "head");
+      const close = html("button", "close", "×");
+      close.type = "button";
+      close.setAttribute("aria-label", "Close");
+      close.addEventListener("click", () => inspect(null));
+      head.append(html("h3", "", `${end(data.a)} ↔ ${end(data.b)}`), close);
+      inspector.append(head);
       inspector.append(html("p", "kind", [`${data.plane} plane`, data.subnet].filter(Boolean).join(" · ")));
       const bridging = [data.a, data.b].filter((side) => side.bridges && side.bridges.length);
       if (bridging.length) {
@@ -907,27 +1111,33 @@ const netmap = (() => {
       if (data.one_sided) inspector.append(html("p", "failed", "Only one end reports this link, though both were asked."));
       if (current.layer === "ospf") inspector.append(ospfLines(data));
       if (link.note) inspector.append(html("p", "remark", link.note));
+      emit("inspect", id, inspector);
       inspector.append(trafficLines(id));
       // One port tells both directions; the far end's would only say the same again.
       charted = chartOf([measured(data.a) || measured(data.b)].filter(Boolean));
       evidence(data.evidence);
-    } else if (current) {
-      if (current.path) inspector.append(html("p", current.path.outcome === "delivered" ? "remark" : "failed", current.path.detail));
-      for (const error of current.errors) inspector.append(html("p", "failed", `${error.device}: ${error.error}`));
-      if (current.layer === "ospf") inspector.append(areaLegend());
-      inspector.append(html("p", "hint", "Select a node or link for the evidence. Drag a node to pin it; double-click to pin or let go."));
+    }
+    const opened = inspector.hidden !== (!node && !link);
+    inspector.hidden = !node && !link;
+    inspector.classList.toggle("charted", charted);
+    if (opened) reaim();
+    hint.replaceChildren();
+    if (!node && !link && current) {
+      if (current.path) hint.append(html("span", current.path.outcome === "delivered" ? "remark" : "failed", current.path.detail));
+      for (const error of current.errors) hint.append(html("span", "failed", `${error.device}: ${error.error}`));
+      if (current.layer === "ospf") hint.append(areaLegend());
       const count = [...nodes.values()].filter(isPinned).length;
       if (count) {
-        const pinned = html("p", "hint", `${count} pinned. `);
+        const pinned = html("span", "hint", `${count} pinned. `);
         const release = html("button", "", "Unpin all");
         release.type = "button";
         release.addEventListener("click", unpinAll);
         pinned.append(release);
-        inspector.append(pinned);
+        hint.append(pinned);
       }
-      inspector.append(trafficLines(null));
+      hint.append(trafficLines(null));
     }
-    inspector.classList.toggle("charted", charted);
+    emit("select", node || link ? id : null);
   }
 
   function forwarding(hop) {
@@ -942,9 +1152,13 @@ const netmap = (() => {
 
   function evidence(lines) {
     if (!lines.length) return;
-    const list = html("ul", "evidence");
+    const details = html("details", "evidence");
+    details.append(html("summary", "", `Evidence (${lines.length})`));
+    const list = html("ul");
     for (const line of lines) list.append(html("li", "", line));
-    inspector.append(list);
+    details.append(list);
+    details.open = lines.length <= 4;
+    inspector.append(details);
   }
 
   function point(event) {
@@ -1002,6 +1216,18 @@ const netmap = (() => {
   nodeLayer.addEventListener("pointerup", release);
   nodeLayer.addEventListener("pointercancel", release);
 
+  function hoverOn(id) {
+    if (id === hovered || dragging) return;
+    hovered = id;
+    if (crowded()) restyle(); // a crowded map names what the pointer is on
+    emit("hover", id);
+  }
+  svg.addEventListener("pointerover", (event) => {
+    const element = event.target.closest(".node, .link");
+    hoverOn(element ? element.dataset.id : null);
+  });
+  svg.addEventListener("pointerleave", () => hoverOn(null));
+
   linkLayer.addEventListener("click", (event) => {
     const element = event.target.closest(".link");
     if (element) inspect(element.dataset.id);
@@ -1010,6 +1236,48 @@ const netmap = (() => {
   svg.addEventListener("click", (event) => {
     if (event.target === svg) inspect(null);
   });
+
+  // ---- A view in miniature, for the conversation's view cards
+
+  function thumbnail(view, width = 92, height = 64) {
+    // The view's focus and what is near it, laid out on its own in a few steps and drawn
+    // small: not the map's layout, but a mark of the view's shape, in its tones.
+    const kept = view.nodes.filter((data) => view.emphasis[data.id] !== "context");
+    const shown = kept.length > 1 ? kept : view.nodes;
+    const ids = new Set(shown.map((data) => data.id));
+    const placed = shown.map((data, index) => {
+      const drawn = nodes.get(data.id);
+      const angle = (index / shown.length) * 2 * Math.PI;
+      return { id: data.id, data, x: drawn?.x ?? Math.cos(angle) * 60, y: drawn?.y ?? Math.sin(angle) * 60 };
+    });
+    const joined = view.links.filter((link) => ids.has(link.a.node) && ids.has(link.b.node)).map((link) => ({ source: link.a.node, target: link.b.node, data: link }));
+    const tiny = d3
+      .forceSimulation(placed)
+      .force("link", d3.forceLink(joined).id((node) => node.id).distance(40))
+      .force("charge", d3.forceManyBody().strength(-90))
+      .force("center", d3.forceCenter(0, 0))
+      .stop();
+    for (let tick = 0; tick < 120; tick += 1) tiny.tick();
+    const xs = placed.map((node) => node.x);
+    const ys = placed.map((node) => node.y);
+    const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const scale = Math.min((width - 16) / (right - left || 1), (height - 16) / (bottom - top || 1), 1.2);
+    const fit = (x, y) => [((x - (left + right) / 2) * scale + width / 2).toFixed(1), ((y - (top + bottom) / 2) * scale + height / 2).toFixed(1)];
+    const lit = new Set(view.highlight);
+    const drawing = shape("svg", { class: "thumbnail", viewBox: `0 0 ${width} ${height}`, width, height, "aria-hidden": "true" });
+    for (const link of joined) {
+      const [x1, y1] = fit(link.source.x, link.source.y);
+      const [x2, y2] = fit(link.target.x, link.target.y);
+      drawing.append(shape("line", { x1, y1, x2, y2, class: lit.has(link.data.id) ? "lit" : "" }));
+    }
+    for (const node of placed) {
+      const [cx, cy] = fit(node.x, node.y);
+      const size = { device: 5, neighbor: 4, subnet: 4, segment: 3, host: 2.5 }[node.data.kind] || 3;
+      const classes = [`tone-${netregistry.tone(node.id)}`, `kind-${node.data.kind}`, lit.has(node.id) && "lit"].filter(Boolean).join(" ");
+      drawing.append(shape("circle", { cx, cy, r: size, class: classes }));
+    }
+    return drawing;
+  }
 
   function clear() {
     simulation.stop();
@@ -1022,10 +1290,17 @@ const netmap = (() => {
     links = [];
     current = null;
     camera = null;
+    spotted = new Set();
+    read = new Set();
+    mentioned = new Set();
     inspector.replaceChildren();
-    panel.hidden = true;
+    inspector.hidden = true;
+    hint.replaceChildren();
+    stage.hidden = true;
     document.body.classList.remove("map-open");
   }
 
-  return { show, clear };
+  const view = () => current;
+
+  return { show, clear, focusOn, anchor, spotlight, reading, mention, shows, on, select: inspect, thumbnail, view };
 })();

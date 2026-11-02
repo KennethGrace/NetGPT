@@ -12,6 +12,9 @@ one request at a time anyway. A question's progress (thinking, text, tool calls)
 streams to the page as newline-delimited JSON events. The answer keeps going if
 the page goes away, and a reload replays the conversation from its history.
 
+A tool call streams twice: as it starts ("calling", so the page can show which
+devices the model is asking while it waits), and with its result ("tool").
+
 The engine's API (netgpt.api) is mounted at /api/v1, and takes the page's cookie,
 so the page reads the network from it like any other frontend. Before the model
 draws anything, the map shows the whole network from /api/v1/view. When the model
@@ -28,8 +31,11 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from importlib.resources import files
+from importlib.resources.abc import Traversable
+from pathlib import PurePosixPath
 from typing import Any
 
 import uvicorn
@@ -38,26 +44,25 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 
+from netgpt import REPOSITORY, __version__
 from netgpt.api import COOKIE, build_api
 from netgpt.chat import Chat, ChatError, ChatObserver
 from netgpt.engine import Engine
 
 DISPLAY_TOOL = "display"
 CHART_TOOL = "chart"
-ASSETS = {
-    "index.html": "text/html",
-    "app.js": "text/javascript",
-    "map.js": "text/javascript",
-    "chart.js": "text/javascript",
-    "d3-force.js": "text/javascript",
-    "app.css": "text/css",
+# What each of the page's files is served as, by its extension. Every file under static/ with one of them is served.
+MEDIA_TYPES = {
+    ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".txt": "text/plain",
 }
+# The fonts never change while the server runs, so a browser may keep them; everything else is no-store.
+CACHED = {".woff2": "private, max-age=86400"}
 COOKIE_MAX_AGE = 30 * 24 * 3600
 MAX_QUESTION_CHARS = 8000
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+        "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; "
         "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
@@ -85,6 +90,9 @@ class StreamObserver(ChatObserver):
 
     def content(self, text: str) -> None:
         self._events.put_nowait({"type": "content", "text": text})
+
+    def tool_started(self, name: str, arguments: dict[str, Any]) -> None:
+        self._events.put_nowait({"type": "calling", "name": name, "arguments": arguments})
 
     def tool_call(
         self, name: str, arguments: dict[str, Any], result: str, is_error: bool, structured: dict[str, Any] | None = None
@@ -130,13 +138,23 @@ def conversation_events(messages: list[dict[str, Any]]) -> list[Event]:
     return events
 
 
+def read_assets(folder: Traversable, prefix: str = "") -> dict[str, tuple[bytes, str]]:
+    """The page's files under a folder, by the path the page asks for them at, with what each is served as."""
+    found: dict[str, tuple[bytes, str]] = {}
+    for entry in folder.iterdir():
+        if entry.is_dir():
+            found |= read_assets(entry, f"{prefix}{entry.name}/")
+        elif (media := MEDIA_TYPES.get(PurePosixPath(entry.name).suffix)) is not None:
+            found[f"{prefix}{entry.name}"] = (entry.read_bytes(), media)
+    return found
+
+
 def build_app(chat: Chat, token: str, engine: Engine) -> Starlette:
     """
     Build the web app serving one conversation, for browsers holding the token, with
     the engine's API beside it at /api/v1, which the page reads the network from.
     """
-    static = files("netgpt") / "static"
-    assets = {name: (static / name).read_text(encoding="utf-8") for name in ASSETS}
+    assets = read_assets(files("netgpt") / "static")
     expected = token.encode()
     busy = asyncio.Lock()
     running: set[asyncio.Task[None]] = set()
@@ -153,8 +171,13 @@ def build_app(chat: Chat, token: str, engine: Engine) -> Starlette:
         return guarded
 
     def asset(name: str) -> Endpoint:
+        body, media = assets[name]
+        headers = {**SECURITY_HEADERS}
+        if (cache := CACHED.get(PurePosixPath(name).suffix)) is not None:
+            headers["Cache-Control"] = cache
+
         async def serve_asset(request: Request) -> Response:
-            return Response(assets[name], media_type=ASSETS[name], headers=SECURITY_HEADERS)
+            return Response(body, media_type=media, headers=headers)
 
         return serve_asset
 
@@ -167,11 +190,26 @@ def build_app(chat: Chat, token: str, engine: Engine) -> Starlette:
             return response
         if not signed_in(request):
             return HTMLResponse(SIGN_IN_PAGE, status_code=401, headers=SECURITY_HEADERS)
-        return HTMLResponse(assets["index.html"], headers=SECURITY_HEADERS)
+        return HTMLResponse(assets["index.html"][0].decode("utf-8"), headers=SECURITY_HEADERS)
+
+    # What the page's (i) card says about this NetGPT, and what a bug report would want.
+    about = {
+        "version": __version__,
+        "repository": REPOSITORY,
+        "context": chat.context,
+        "replies": chat.replies,
+        "platforms": dict(Counter(device.platform for device in engine.inventory.devices)),
+    }
 
     async def conversation(request: Request) -> Response:
         return JSONResponse(
-            {"model": chat.model, "think": chat.think, "busy": busy.locked(), "events": conversation_events(chat.messages)},
+            {
+                "model": chat.model,
+                "think": chat.think,
+                "busy": busy.locked(),
+                "about": about,
+                "events": conversation_events(chat.messages),
+            },
             headers=SECURITY_HEADERS,
         )
 
@@ -219,7 +257,7 @@ def build_app(chat: Chat, token: str, engine: Engine) -> Starlette:
     return Starlette(
         routes=[
             Route("/", index),
-            *(Route(f"/{name}", requires_sign_in(asset(name))) for name in ASSETS if name != "index.html"),
+            *(Route(f"/{name}", requires_sign_in(asset(name))) for name in assets if name != "index.html"),
             Route("/api/conversation", requires_sign_in(conversation)),
             Route("/api/ask", requires_sign_in(ask), methods=["POST"]),
             Route("/api/reset", requires_sign_in(reset), methods=["POST"]),
